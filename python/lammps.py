@@ -126,6 +126,10 @@ class lammps(object):
     self.lib.lammps_scatter_atoms_subset.argtypes = \
       [c_void_p,c_char_p,c_int,c_int,c_int,POINTER(c_int),c_void_p]
     self.lib.lammps_scatter_atoms_subset.restype = None
+    
+    self.lib.lammps_gather_bonds.argtypes = \
+      [c_void_p,c_void_p]
+    self.lib.lammps_gather_bonds.restype = None
 
     # if no ptr provided, create an instance of LAMMPS
     #   don't know how to pass an MPI communicator from PyPar
@@ -455,6 +459,11 @@ class lammps(object):
 
   def get_natoms(self):
     return self.lib.lammps_get_natoms(self.lmp)
+    
+  # return total number of bonds in system
+
+  def get_nbonds(self):
+    return self.lib.lammps_get_nbonds(self.lmp)
 
   # set variable value
   # value is converted to string
@@ -560,6 +569,17 @@ class lammps(object):
     type_lmp[:] = type
     self.lib.lammps_create_atoms(self.lmp,n,id_lmp,type_lmp,x,v,image_lmp,
                                  shrinkexceed)
+  
+  # return vector of bonds gathered across procs
+  # returned data is a 1d vector - doc how it is ordered?
+  # NOTE: need to insure are converting to/from correct Python type
+  #   e.g. for Python list or NumPy or ctypes
+  
+  def gather_bonds(self):
+    nbonds = self.lib.lammps_get_nbonds(self.lmp)
+    data = ((3*nbonds)*c_int)()
+    self.lib.lammps_gather_bonds(self.lmp,data)
+    return data
 
   @property
   def uses_exceptions(self):
