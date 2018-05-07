@@ -45,6 +45,7 @@ void *lammps_extract_variable(void *, char *, char *);
 
 double lammps_get_thermo(void *, char *);
 int lammps_get_natoms(void *);
+int lammps_get_nbonds(void *);
 
 int lammps_set_variable(void *, char *, char *);
 void lammps_reset_box(void *, double *, double *, double, double, double);
@@ -66,6 +67,8 @@ void lammps_create_atoms(void *, int, int64_t *, int *,
 void lammps_create_atoms(void *, int, int *, int *,
                          double *, double *, int *, int);
 #endif
+
+void lammps_gather_bonds(void *, void *);
 
 #ifdef LAMMPS_EXCEPTIONS
 int lammps_has_error(void *);
