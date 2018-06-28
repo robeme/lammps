@@ -321,24 +321,33 @@ void FixTopo::restrain_dihedral(int m)
 
 double FixTopo::topo_eval(double **f)
 {
-  if (triclinic) domain->x2lamda(atom->nlocal);
+  if (domain->triclinic) domain->x2lamda(atom->nlocal);
   domain->pbc();
   comm->exchange();
   atom->nghost = 0;
   comm->borders();
-  if (triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+  if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
   if (modify->n_pre_neighbor) modify->pre_neighbor();
   neighbor->build(1);
   int eflag = 1;
   int vflag = 0;
 
-  // clear forces so they don't accumulate over multiple
-  // calls within fix gcmc timestep, e.g. for fix shake
+  // store old forces to restore them afterwards
+
+  double **f_old;
+  memory->create(f_old,atom->natoms,3,"topo:f_old");
+  for (i = 0; i < nlocal; i++) {
+    f_old[i][0] = atom->f[i][0];
+    f_old[i][1] = atom->f[i][1];
+    f_old[i][2] = atom->f[i][2];
+  }
+
+  // clear forces so we have a fresh array to calculate the forces
 
   size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
   if (nbytes) memset(&atom->f[0][0],0,3*nbytes);
 
-  if (modify->n_pre_force) modify->pre_force(vflag);
+  // if (modify->n_pre_force) modify->pre_force(vflag);
 
   if (force->pair) force->pair->compute(eflag,vflag);
 
@@ -351,27 +360,34 @@ double FixTopo::topo_eval(double **f)
 
   if (force->kspace) force->kspace->compute(eflag,vflag);
 
+  // perform a reverse_comm() of forces
+
+  if (force->newton) comm->reverse_comm();
+
   // store forces on atoms from new topology and restore initial forces
-  for (i = 0; i < nlocal; i++) {
+
+  for (int i = 0; i < atom->nlocal; i++) {
     f[i][0] = atom->f[i][0];
     f[i][1] = atom->f[i][1];
     f[i][2] = atom->f[i][2];
   }
 
-  // unlike Verlet, not performing a reverse_comm() or forces here
-  // b/c GCMC does not care about forces
-  // don't think it will mess up energy due to any post_force() fixes
+  // if (modify->n_post_force) modify->post_force(vflag);
+  // if (modify->n_end_of_step) modify->end_of_step();
 
-  if (modify->n_post_force) modify->post_force(vflag);
-  if (modify->n_end_of_step) modify->end_of_step();
+  // restore forces to initial values
 
-  // NOTE: all fixes with THERMO_ENERGY mask set and which
-  //   operate at pre_force() or post_force() or end_of_step()
-  //   and which user has enable via fix_modify thermo yes,
-  //   will contribute to total MC energy via pe->compute_scalar()
+  for (int i = 0; i < atom->nlocal; i++) {
+    atom->f[i][0] = f_old[i][0];
+    atom->f[i][1] = f_old[i][1];
+    atom->f[i][2] = f_old[i][2];
+  }
 
   update->eflag_global = update->ntimestep;
   double total_energy = c_pe->compute_scalar();
+
+  // cleanup
+  memory->destroy(f_old);
 
   return total_energy;
 }
