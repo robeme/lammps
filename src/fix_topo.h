@@ -48,6 +48,7 @@ class FixTopo : public Fix {
   void restrain_bond(int);
   void restrain_angle(int);
   void restrain_dihedral(int);
+  double topo_eval(double **);
 
   class Compute *c_pe;
 };

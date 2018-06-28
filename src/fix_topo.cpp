@@ -136,7 +136,9 @@ int FixTopo::setmask()
 
 void FixTopo::init()
 {
-
+  char *id_pe = (char *) "thermo_pe";
+  int ipe = modify->find_compute(id_pe);
+  c_pe = modify->compute[ipe];
 }
 
 /* ---------------------------------------------------------------------- */
@@ -155,6 +157,7 @@ void FixTopo::pre_force(int vflag)
   int i1,i2,i3,i4;
   int itmp;
   int eflag = 0;
+  vflag = 1;
   double dtmp;
 
   int nlocal = atom->nlocal;
@@ -229,40 +232,42 @@ void FixTopo::pre_force(int vflag)
   }
   memory->destroy(f_old);
 
-  // reverse restraints
-  for (int m = 0; m < nrestrain; m++) {
-    i1 = atom->map(ids[m][0]);
-    if (i1 == -1) return;
-    if (rstyle[m] == BOND) printf("  ... bonds are not implemented yet!\n");
-    else if (rstyle[m] == ANGLE) printf("  ... angles are not implemented yet!\n");
-    else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
-    else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
-    else if (rstyle[m] == VDW) {
-      itmp = atom->type[i1];
-      atom->type[i1] = type[m];
-      type[m] = itmp;
-    } else if (rstyle[m] == COUL) {
-      dtmp = atom->q[i1];
-      atom->q[i1] = q[m];
-      q[m] = dtmp;
+  // reverse restraints so long we've not reached end of sim, keep them afterwards
+  if (update->ntimestep != update->endstep) {
+    for (int m = 0; m < nrestrain; m++) {
+      i1 = atom->map(ids[m][0]);
+      if (i1 == -1) return;
+      if (rstyle[m] == BOND) printf("  ... bonds are not implemented yet!\n");
+      else if (rstyle[m] == ANGLE) printf("  ... angles are not implemented yet!\n");
+      else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
+      else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
+      else if (rstyle[m] == VDW) {
+        itmp = atom->type[i1];
+        atom->type[i1] = type[m];
+        type[m] = itmp;
+      } else if (rstyle[m] == COUL) {
+        dtmp = atom->q[i1];
+        atom->q[i1] = q[m];
+        q[m] = dtmp;
+      }
     }
-  }
 
-  // reinitialize interactions and neighborlist after restraints have been reversed
-  if (anyvdwl) force->pair->reinit();
-  if (anybond) force->bond->reinit();
-  if (anyangle) force->angle->init_style();
-  if (anydihed) force->dihedral->init_style();
-  if (anyimpro) force->improper->init_style();
-  if (anyq && force->kspace) force->kspace->qsum_qsq();
-  if (domain->triclinic) domain->x2lamda(atom->nlocal);
-  domain->pbc();
-  comm->exchange();
-  atom->nghost = 0;
-  comm->borders();
-  if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
-  if (modify->n_pre_neighbor) modify->pre_neighbor();
-  neighbor->build(1);
+    // reinitialize interactions and neighborlist after restraints have been reversed
+    if (anyvdwl) force->pair->reinit();
+    if (anybond) force->bond->reinit();
+    if (anyangle) force->angle->init_style();
+    if (anydihed) force->dihedral->init_style();
+    if (anyimpro) force->improper->init_style();
+    if (anyq && force->kspace) force->kspace->qsum_qsq();
+    if (domain->triclinic) domain->x2lamda(atom->nlocal);
+    domain->pbc();
+    comm->exchange();
+    atom->nghost = 0;
+    comm->borders();
+    if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+    if (modify->n_pre_neighbor) modify->pre_neighbor();
+    neighbor->build(1);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -276,15 +281,10 @@ void FixTopo::post_force(int vflag)
   double f_new[3];
 
   for (int i = 0; i < atom->nlocal; i++) {
-    f_new[0] = f[i][0] * delta + atom->f[i][0] * (1.0 - delta);
-    f_new[1] = f[i][1] * delta + atom->f[i][1] * (1.0 - delta);
-    f_new[2] = f[i][2] * delta + atom->f[i][2] * (1.0 - delta);
-    printf("forces on atoms %d\n", atom->tag[i]);
-    printf("  fx: %f %f %f\n",f[i][0],atom->f[i][0],f_new[0]);
-    printf("  fy: %f %f %f\n",f[i][1],atom->f[i][1],f_new[1]);
-    printf("  fz: %f %f %f\n",f[i][2],atom->f[i][2],f_new[2]);
+    atom->f[i][0] = f[i][0] * delta + atom->f[i][0] * (1.0 - delta);
+    atom->f[i][1] = f[i][1] * delta + atom->f[i][1] * (1.0 - delta);
+    atom->f[i][2] = f[i][2] * delta + atom->f[i][2] * (1.0 - delta);
   }
-  printf("\n");
 }
 
 /* ----------------------------------------------------------------------
@@ -313,4 +313,65 @@ void FixTopo::restrain_angle(int m)
 void FixTopo::restrain_dihedral(int m)
 {
 
+}
+
+/* ----------------------------------------------------------------------
+   calculate difference of forces and energies of both topologies
+---------------------------------------------------------------------- */
+
+double FixTopo::topo_eval(double **f)
+{
+  if (triclinic) domain->x2lamda(atom->nlocal);
+  domain->pbc();
+  comm->exchange();
+  atom->nghost = 0;
+  comm->borders();
+  if (triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+  if (modify->n_pre_neighbor) modify->pre_neighbor();
+  neighbor->build(1);
+  int eflag = 1;
+  int vflag = 0;
+
+  // clear forces so they don't accumulate over multiple
+  // calls within fix gcmc timestep, e.g. for fix shake
+
+  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
+  if (nbytes) memset(&atom->f[0][0],0,3*nbytes);
+
+  if (modify->n_pre_force) modify->pre_force(vflag);
+
+  if (force->pair) force->pair->compute(eflag,vflag);
+
+  if (atom->molecular) {
+    if (force->bond) force->bond->compute(eflag,vflag);
+    if (force->angle) force->angle->compute(eflag,vflag);
+    if (force->dihedral) force->dihedral->compute(eflag,vflag);
+    if (force->improper) force->improper->compute(eflag,vflag);
+  }
+
+  if (force->kspace) force->kspace->compute(eflag,vflag);
+
+  // store forces on atoms from new topology and restore initial forces
+  for (i = 0; i < nlocal; i++) {
+    f[i][0] = atom->f[i][0];
+    f[i][1] = atom->f[i][1];
+    f[i][2] = atom->f[i][2];
+  }
+
+  // unlike Verlet, not performing a reverse_comm() or forces here
+  // b/c GCMC does not care about forces
+  // don't think it will mess up energy due to any post_force() fixes
+
+  if (modify->n_post_force) modify->post_force(vflag);
+  if (modify->n_end_of_step) modify->end_of_step();
+
+  // NOTE: all fixes with THERMO_ENERGY mask set and which
+  //   operate at pre_force() or post_force() or end_of_step()
+  //   and which user has enable via fix_modify thermo yes,
+  //   will contribute to total MC energy via pe->compute_scalar()
+
+  update->eflag_global = update->ntimestep;
+  double total_energy = c_pe->compute_scalar();
+
+  return total_energy;
 }
