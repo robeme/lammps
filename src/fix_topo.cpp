@@ -28,6 +28,7 @@
 #include "improper.h"
 #include "modify.h"
 #include "pair.h"
+#include "comm.h"
 #include "kspace.h"
 #include "update.h"
 #include "group.h"
@@ -45,7 +46,7 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 using namespace MathConst;
 
-enum{BOND,ANGLE,DIHEDRAL,VDW,COUL};
+enum{BOND,ANGLE,DIHEDRAL,IMPROPER,VDW,COUL};
 
 #define TOLERANCE 0.05
 #define SMALL 0.001
@@ -158,8 +159,8 @@ void FixTopo::pre_force(int vflag)
 
   int nlocal = atom->nlocal;
   int natoms = atom->natoms;
-  int **nspecial = atom->nspecial;
-  tagint **special = atom->special;
+
+  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
 
   // apply restraints
   for (int m = 0; m < nrestrain; m++) {
@@ -169,6 +170,7 @@ void FixTopo::pre_force(int vflag)
     if (rstyle[m] == BOND) printf("  ... bonds are not implemented yet!\n");
     else if (rstyle[m] == ANGLE) printf("  ... angles are not implemented yet!\n");
     else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
+    else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
     else if (rstyle[m] == VDW) {
       itmp = atom->type[i1];
       atom->type[i1] = type[m];
@@ -180,15 +182,34 @@ void FixTopo::pre_force(int vflag)
     }
   }
 
-  // reinitialize things need to be reinitialized when restrains are applied
+  // reinitialize interactions and neighborlist after restraints have been applied
   if (anyvdwl) force->pair->reinit();
   if (anybond) force->bond->reinit();
   if (anyangle) force->angle->init_style();
   if (anydihed) force->dihedral->init_style();
   if (anyimpro) force->improper->init_style();
   if (anyq && force->kspace) force->kspace->qsum_qsq();
+  if (domain->triclinic) domain->x2lamda(atom->nlocal);
+  domain->pbc();
+  comm->exchange();
+  atom->nghost = 0;
+  comm->borders();
+  if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+  if (modify->n_pre_neighbor) modify->pre_neighbor();
+  neighbor->build(1);
 
-  // recalculate pair interactions with new info
+  // recalculate interactions with new topology
+  // first: store old forces to restore them afterwards
+  double **f_old;
+  memory->create(f_old,atom->natoms,3,"topo:f_old");
+  for (i = 0; i < nlocal; i++) {
+    f_old[i][0] = atom->f[i][0];
+    f_old[i][1] = atom->f[i][1];
+    f_old[i][2] = atom->f[i][2];
+  }
+  // second: set all forces on atoms to zero
+  if (nbytes) memset(&atom->f[0][0],0,3*nbytes);
+  // third: calculate forces with new topology
   if (force->pair) force->pair->compute(eflag,vflag);
   if (atom->molecular) {
     if (force->bond) force->bond->compute(eflag,vflag);
@@ -197,13 +218,16 @@ void FixTopo::pre_force(int vflag)
     if (force->improper) force->improper->compute(eflag,vflag);
   }
   if (force->kspace) force->kspace->compute(eflag,vflag);
-
-  // store forces on atoms from new topology
+  // store forces on atoms from new topology and restore initial forces
   for (i = 0; i < nlocal; i++) {
     f[i][0] = atom->f[i][0];
     f[i][1] = atom->f[i][1];
     f[i][2] = atom->f[i][2];
+    atom->f[i][0] = f_old[i][0];
+    atom->f[i][1] = f_old[i][1];
+    atom->f[i][2] = f_old[i][2];
   }
+  memory->destroy(f_old);
 
   // reverse restraints
   for (int m = 0; m < nrestrain; m++) {
@@ -212,6 +236,7 @@ void FixTopo::pre_force(int vflag)
     if (rstyle[m] == BOND) printf("  ... bonds are not implemented yet!\n");
     else if (rstyle[m] == ANGLE) printf("  ... angles are not implemented yet!\n");
     else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
+    else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
     else if (rstyle[m] == VDW) {
       itmp = atom->type[i1];
       atom->type[i1] = type[m];
@@ -223,13 +248,21 @@ void FixTopo::pre_force(int vflag)
     }
   }
 
-  // reinitialize things need to be reinitialized when restrains are applied
-  if (anyvdwl) force->pair->init_style();
-  if (anybond) force->bond->init_style();
+  // reinitialize interactions and neighborlist after restraints have been reversed
+  if (anyvdwl) force->pair->reinit();
+  if (anybond) force->bond->reinit();
   if (anyangle) force->angle->init_style();
   if (anydihed) force->dihedral->init_style();
   if (anyimpro) force->improper->init_style();
   if (anyq && force->kspace) force->kspace->qsum_qsq();
+  if (domain->triclinic) domain->x2lamda(atom->nlocal);
+  domain->pbc();
+  comm->exchange();
+  atom->nghost = 0;
+  comm->borders();
+  if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+  if (modify->n_pre_neighbor) modify->pre_neighbor();
+  neighbor->build(1);
 }
 
 /* ---------------------------------------------------------------------- */
