@@ -31,32 +31,25 @@ class FixTopo : public Fix {
   int setmask();
   void init();
   void setup(int);
-  void min_setup(int);
+  void pre_force(int);
   void post_force(int);
-  void post_force_respa(int, int, int);
-  void min_post_force(int);
-  double compute_scalar();
-  double compute_vector(int);
+  double nonbonded(int, int, double,  int **,
+    tagint **, double *);
 
  private:
-  int ilevel_respa;
   int nrestrain,maxrestrain;
+  int anyvdwl,anyq,anybond,anyangle,anyimpro,anydihed;
   int *rstyle;
-  int *mult;
   int **ids;
-  int **special;
-  double *kstart,*kstop,*target;
-  double *cos_target,*sin_target;
-  double energy,energy_all;
-  double ebond,ebond_all;
-  double eangle,eangle_all;
-  double edihed,edihed_all;
-  double especial,especial_all;
+  int *type;
+  double *q;
+  double **f;
 
   void restrain_bond(int);
   void restrain_angle(int);
   void restrain_dihedral(int);
-  void restrain_special(int);
+
+  class Compute *c_pe;
 };
 
 }
