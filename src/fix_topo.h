@@ -31,10 +31,7 @@ class FixTopo : public Fix {
   int setmask();
   void init();
   void setup(int);
-  void pre_force(int);
   void post_force(int);
-  double nonbonded(int, int, double,  int **,
-    tagint **, double *);
 
  private:
   int nrestrain,maxrestrain;
@@ -48,7 +45,7 @@ class FixTopo : public Fix {
   void restrain_bond(int);
   void restrain_angle(int);
   void restrain_dihedral(int);
-  double topo_eval(double **);
+  double topo_eval();
 
   class Compute *c_pe;
 };
