@@ -32,6 +32,8 @@ class FixTopo : public Fix {
   void init();
   void setup(int);
   void post_force(int);
+  double compute_scalar();
+  double compute_vector(int);
 
  private:
   int nrestrain,maxrestrain;
@@ -41,6 +43,7 @@ class FixTopo : public Fix {
   int *type;
   double *q;
   double **f;
+  double energy, energy_old, energy_new;
 
   void restrain_bond(int);
   void restrain_angle(int);

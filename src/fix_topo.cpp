@@ -60,7 +60,12 @@ FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
 {
   if (narg < 4) error->all(FLERR,"Illegal fix topo command");
 
+  scalar_flag = 1;
   global_freq = 1;
+  extscalar = 1;
+  vector_flag = 1;
+  size_vector = 2;
+  extvector = 1;
 
   // parse args
 
@@ -127,6 +132,7 @@ int FixTopo::setmask()
 {
   int mask = 0;
   mask |= POST_FORCE;
+  mask |= THERMO_ENERGY;
   return mask;
 }
 
@@ -152,10 +158,34 @@ void FixTopo::setup(int vflag)
 void FixTopo::post_force(int vflag)
 {
   int i1,i2,i3,i4,itmp;
-  double dtmp, energy_before, energy_after;
-  double **f_tmp;
+  double dtmp;
+  double **f_new;
+  double **f_old;
 
-  // apply restraints
+  // create temporary array to store forces on atoms
+  memory->create(f_new,atom->natoms,3,"topo:f_new");
+  memory->create(f_old,atom->natoms,3,"topo:f_old");
+
+  if (update->ntimestep == update->endstep) {
+    // if we reach the end of the sim, we need to do the energy calculation in
+    // advance, b/c we want to keep the new topology instead of the old one.
+    //
+    // due to several fixes which possibly could have modifyied forces on atoms
+    // we need to do a new force and energy evaluation with the old topology
+    //
+    // TODO: 1.) could be made more efficient in the future
+    //       2.) avoid additional energy calculation, but I've yet no idea to
+    //           store them temporary.
+    energy_old = topo_eval();
+    for (int i = 0; i < atom->nlocal; i++) {
+      f_old[i][0] = f[i][0];
+      f_old[i][1] = f[i][1];
+      f_old[i][2] = f[i][2];
+    }
+  }
+
+
+  // apply restraints and store old values via triangular exchange
   for (int m = 0; m < nrestrain; m++) {
     i1 = atom->map(ids[m][0]);
     if (i1 == -1) return;
@@ -183,7 +213,13 @@ void FixTopo::post_force(int vflag)
   if (anyimpro) force->improper->init_style();
   if (anyq && force->kspace) force->kspace->qsum_qsq();
 
-  energy_after = topo_eval();
+  // evaluate forces and energies of new topology
+  energy_new = topo_eval();
+  for (int i = 0; i < atom->nlocal; i++) {
+    f_new[i][0] = f[i][0];
+    f_new[i][1] = f[i][1];
+    f_new[i][2] = f[i][2];
+  }
 
   // reverse restraints so long we've not reached end of sim, keep them afterwards
   if (update->ntimestep != update->endstep) {
@@ -213,39 +249,29 @@ void FixTopo::post_force(int vflag)
     if (anyimpro) force->improper->init_style();
     if (anyq && force->kspace) force->kspace->qsum_qsq();
 
-    // create temporary array to store forces on atoms
-    memory->create(f_tmp,atom->natoms,3,"topo:f_tmp");
-    // due to several fixes which possibly could have modifyied forces on atoms
-    // we need to do a new force and energy evaluation with the old topology
-    // TODO: could be made more efficient in the future
-    // Also because energies have to be recalculated, I've yet no idea to store
-    // them temporary.
-    energy_before = topo_eval();
+    energy_old = topo_eval();
     for (int i = 0; i < atom->nlocal; i++) {
-      f_tmp[i][0] = atom->f[i][0];
-      f_tmp[i][1] = atom->f[i][1];
-      f_tmp[i][2] = atom->f[i][2];
+      f_old[i][0] = atom->f[i][0];
+      f_old[i][1] = atom->f[i][1];
+      f_old[i][2] = atom->f[i][2];
     }
-    memory->destroy(f_tmp);
   }
 
+  // mix old and new forces with delta to smoothly turn on/off interactions
+  double delta = update->ntimestep - update->beginstep;
+  if (delta != 0.0) delta /= update->endstep - update->beginstep;
 
+  energy = (delta * energy_new + (1.0 - delta) * energy_old) - energy_old;
 
-  printf("\n");
-  printf("energy old topology: %f\n", energy_before);
-  printf("energy new topology: %f\n", energy_after);
-  printf("==============================\n");
-  printf("energy diff:         %f\n\n", energy_after-energy_before);
+  for (int i = 0; i < atom->nlocal; i++) {
+    atom->f[i][0] += (delta * f_new[i][0] + (1.0 - delta) * f_old[i][0]) - f_old[i][0];
+    atom->f[i][1] += (delta * f_new[i][1] + (1.0 - delta) * f_old[i][1]) - f_old[i][1];
+    atom->f[i][2] += (delta * f_new[i][2] + (1.0 - delta) * f_old[i][2]) - f_old[i][2];
+  }
 
-  // // mix old and new forces
-  // double delta = update->ntimestep - update->beginstep;
-  // if (delta != 0.0) delta /= update->endstep - update->beginstep;
-  //
-  // for (int i = 0; i < atom->nlocal; i++) {
-  //   atom->f[i][0] = f[i][0] * delta + atom->f[i][0] * (1.0 - delta);
-  //   atom->f[i][1] = f[i][1] * delta + atom->f[i][1] * (1.0 - delta);
-  //   atom->f[i][2] = f[i][2] * delta + atom->f[i][2] * (1.0 - delta);
-  // }
+  // cleanup
+  memory->destroy(f_new);
+  memory->destroy(f_old);
 }
 
 /* ----------------------------------------------------------------------
@@ -278,6 +304,9 @@ void FixTopo::restrain_dihedral(int m)
 
 /* ----------------------------------------------------------------------
    calculate difference of forces and energies of both topologies
+     forces are stored in global array f
+     forces are temporary stored and resetted to not mess up additional
+        forces from other fixes
 ---------------------------------------------------------------------- */
 
 double FixTopo::topo_eval()
@@ -297,7 +326,7 @@ double FixTopo::topo_eval()
 
   double **f_tmp;
   memory->create(f_tmp,atom->natoms,3,"topo:f_tmp");
-  for (int i = 0; i < atom->nlocal; i++) { 
+  for (int i = 0; i < atom->nlocal; i++) {
     f_tmp[i][0] = atom->f[i][0];
     f_tmp[i][1] = atom->f[i][1];
     f_tmp[i][2] = atom->f[i][2];
@@ -323,7 +352,7 @@ double FixTopo::topo_eval()
 
   if (force->newton) comm->reverse_comm();
 
-  // store forces on atoms from new topology
+  // store forces on atoms from actual topology
 
   for (int i = 0; i < atom->nlocal; i++) {
     f[i][0] = atom->f[i][0];
@@ -346,4 +375,28 @@ double FixTopo::topo_eval()
   memory->destroy(f_tmp);
 
   return total_energy;
+}
+
+/* ----------------------------------------------------------------------
+   potential energy of added force
+------------------------------------------------------------------------- */
+
+double FixTopo::compute_scalar()
+{
+  return energy;
+}
+
+/* ----------------------------------------------------------------------
+  return energies of old an new topologies
+------------------------------------------------------------------------- */
+
+double FixTopo::compute_vector(int n)
+{
+  if (n == 0) {
+    return energy_old;
+  } else if (n == 1) {
+    return energy_new;
+  } else {
+    return 0.0;
+  }
 }
