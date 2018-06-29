@@ -297,7 +297,7 @@ double FixTopo::topo_eval()
 
   double **f_tmp;
   memory->create(f_tmp,atom->natoms,3,"topo:f_tmp");
-  for (int i = 0; i < atom->nlocal; i++) {
+  for (int i = 0; i < atom->nlocal; i++) { 
     f_tmp[i][0] = atom->f[i][0];
     f_tmp[i][1] = atom->f[i][1];
     f_tmp[i][2] = atom->f[i][2];
