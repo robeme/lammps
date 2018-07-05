@@ -32,12 +32,16 @@ class FixTopo : public Fix {
   void init();
   void setup(int);
   void post_force(int);
+  void post_run();
   double compute_scalar();
   double compute_vector(int);
+
+  int pack_forward_comm(int, int *, double *, int, int *);
 
  private:
   int nrestrain,maxrestrain;
   int anyvdwl,anyq,anybond,anyangle,anyimpro,anydihed;
+  int resetflag;
   int *rstyle;
   int **ids;
   int *type;
@@ -45,10 +49,18 @@ class FixTopo : public Fix {
   double **f;
   double energy, energy_old, energy_new;
 
-  void restrain_bond(int);
-  void restrain_angle(int);
+  void create_bond(int);
+  void break_bond(int);
+  void create_angle(int);
+  void break_angle(int);
   void restrain_dihedral(int);
   double topo_eval();
+  void topo_create();
+  void update_topology();
+  void rebuild_special_one(int);
+  int dedup(int, int, tagint *);
+
+  tagint *copy;
 
   class Compute *c_pe;
 };

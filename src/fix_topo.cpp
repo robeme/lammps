@@ -46,7 +46,7 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 using namespace MathConst;
 
-enum{BOND,ANGLE,DIHEDRAL,IMPROPER,VDW,COUL};
+enum{BOND,ANGLE,DIHEDRAL,IMPROPER,VDWL,COUL};
 
 #define TOLERANCE 0.05
 #define SMALL 0.001
@@ -56,7 +56,7 @@ enum{BOND,ANGLE,DIHEDRAL,IMPROPER,VDW,COUL};
 
 FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
-  rstyle(NULL), ids(NULL), type(NULL), q(NULL), f(NULL)
+  rstyle(NULL), ids(NULL), type(NULL), q(NULL), f(NULL),  copy(NULL)
 {
   if (narg < 4) error->all(FLERR,"Illegal fix topo command");
 
@@ -66,6 +66,8 @@ FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
   vector_flag = 1;
   size_vector = 2;
   extvector = 1;
+
+  resetflag = 0;
 
   // parse args
 
@@ -84,25 +86,35 @@ FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
     if (strcmp(arg[iarg],"bond") == 0) {
       if (iarg+4 > narg) error->all(FLERR,"Illegal fix topo command");
       rstyle[nrestrain] = BOND;
-      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+1]);
-      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+2]);
-      type[nrestrain] = force->inumeric(FLERR,arg[iarg+3]);
+      type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
+      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
+      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
       anybond = 1;
       iarg += 4;
-    } else if (strcmp(arg[iarg],"vdw") == 0) {
-      if (iarg+3 > narg) error->all(FLERR,"Illegal fix topo command");
-      rstyle[nrestrain] = VDW;
-      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+1]);
-      type[nrestrain] = force->inumeric(FLERR,arg[iarg+2]);
-      anyvdwl = 1;
-      iarg += 3;
-    } else if (strcmp(arg[iarg],"coul") == 0) {
-      if (iarg+3 > narg) error->all(FLERR,"Illegal fix topo command");
-      rstyle[nrestrain] = COUL;
-      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+1]);
-      q[nrestrain] = force->numeric(FLERR,arg[iarg+2]);
-      anyq = 1;
-      iarg += 3;
+    } else if (strcmp(arg[iarg],"angle") == 0) {
+      if (iarg+5 > narg) error->all(FLERR,"Illegal fix topo command");
+      rstyle[nrestrain] = ANGLE;
+      type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
+      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
+      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
+      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+4]);
+      anyangle = 1;
+      iarg += 5;
+    } else if (strcmp(arg[iarg],"atom") == 0) {
+      if (iarg+4 > narg) error->all(FLERR,"Illegal fix topo command");
+      if (strcmp(arg[iarg+1],"type") == 0) {
+        rstyle[nrestrain] = VDWL;
+        ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
+        type[nrestrain] = force->inumeric(FLERR,arg[iarg+3]);
+        anyvdwl = 1;
+        iarg += 4;
+      } else if (strcmp(arg[iarg+1],"charge") == 0) {
+        rstyle[nrestrain] = COUL;
+        ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
+        q[nrestrain] = force->numeric(FLERR,arg[iarg+3]);
+        anyq = 1;
+        iarg += 4;
+      } else error->all(FLERR,"Illegal fix topo command");
     } else error->all(FLERR,"Illegal fix topo command");
 
     nrestrain++;
@@ -113,6 +125,15 @@ FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR,"fix topo requires an atom map, see atom_modify");
 
   memory->create(f,atom->natoms,3,"topo:f");
+
+  // copy = special list for one atom
+  // size = ms^2 + ms is sufficient
+  // b/c in rebuild_special_one() neighs of all 1-2s are added,
+  //   then a dedup(), then neighs of all 1-3s are added, then final dedup()
+  // this means intermediate size cannot exceed ms^2 + ms
+
+  int maxspecial = atom->maxspecial;
+  copy = new tagint[maxspecial*maxspecial + maxspecial];
 }
 
 /* ---------------------------------------------------------------------- */
@@ -132,7 +153,8 @@ int FixTopo::setmask()
 {
   int mask = 0;
   mask |= POST_FORCE;
-  mask |= THERMO_ENERGY;
+  mask |= POST_RUN;
+  // mask |= THERMO_ENERGY; // NOTE: deactivated since I don't know how to exclude this fix from pe calculation
   return mask;
 }
 
@@ -166,54 +188,8 @@ void FixTopo::post_force(int vflag)
   memory->create(f_new,atom->natoms,3,"topo:f_new");
   memory->create(f_old,atom->natoms,3,"topo:f_old");
 
-  if (update->ntimestep == update->endstep) {
-    // if we reach the end of the sim, we need to do the energy calculation in
-    // advance, b/c we want to keep the new topology instead of the old one.
-    //
-    // due to several fixes which possibly could have modifyied forces on atoms
-    // we need to do a new force and energy evaluation with the old topology
-    //
-    // TODO: 1.) could be made more efficient in the future
-    //       2.) avoid additional energy calculation, but I've yet no idea to
-    //           store them temporary.
-    energy_old = topo_eval();
-    for (int i = 0; i < atom->nlocal; i++) {
-      f_old[i][0] = f[i][0];
-      f_old[i][1] = f[i][1];
-      f_old[i][2] = f[i][2];
-    }
-  }
-
-
   // apply restraints and store old values via triangular exchange
-  for (int m = 0; m < nrestrain; m++) {
-    i1 = atom->map(ids[m][0]);
-    if (i1 == -1) return;
-
-    if (rstyle[m] == BOND) printf("  ... bonds are not implemented yet!\n");
-    else if (rstyle[m] == ANGLE) printf("  ... angles are not implemented yet!\n");
-    else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
-    else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
-    else if (rstyle[m] == VDW) {
-      itmp = atom->type[i1];
-      atom->type[i1] = type[m];
-      type[m] = itmp;
-    } else if (rstyle[m] == COUL) {
-      dtmp = atom->q[i1];
-      atom->q[i1] = q[m];
-      q[m] = dtmp;
-    }
-  }
-
-  // reinitialize interactions and neighborlist after restraints have been applied
-  if (anyvdwl) force->pair->init_style();
-  if (anybond) force->bond->init_style();
-  if (anyangle) force->angle->init_style();
-  if (anydihed) force->dihedral->init_style();
-  if (anyimpro) force->improper->init_style();
-  if (anyq && force->kspace) force->kspace->qsum_qsq();
-
-  // evaluate forces and energies of new topology
+  topo_create();
   energy_new = topo_eval();
   for (int i = 0; i < atom->nlocal; i++) {
     f_new[i][0] = f[i][0];
@@ -222,51 +198,24 @@ void FixTopo::post_force(int vflag)
   }
 
   // reverse restraints so long we've not reached end of sim, keep them afterwards
-  if (update->ntimestep != update->endstep) {
-    for (int m = 0; m < nrestrain; m++) {
-      i1 = atom->map(ids[m][0]);
-      if (i1 == -1) return;
-      if (rstyle[m] == BOND) printf("  ... bonds are not implemented yet!\n");
-      else if (rstyle[m] == ANGLE) printf("  ... angles are not implemented yet!\n");
-      else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
-      else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
-      else if (rstyle[m] == VDW) {
-        itmp = atom->type[i1];
-        atom->type[i1] = type[m];
-        type[m] = itmp;
-      } else if (rstyle[m] == COUL) {
-        dtmp = atom->q[i1];
-        atom->q[i1] = q[m];
-        q[m] = dtmp;
-      }
-    }
-
-    // reinitialize interactions and neighborlist after restraints have been reversed
-    if (anyvdwl) force->pair->reinit();
-    if (anybond) force->bond->reinit();
-    if (anyangle) force->angle->init_style();
-    if (anydihed) force->dihedral->init_style();
-    if (anyimpro) force->improper->init_style();
-    if (anyq && force->kspace) force->kspace->qsum_qsq();
-
-    energy_old = topo_eval();
-    for (int i = 0; i < atom->nlocal; i++) {
-      f_old[i][0] = atom->f[i][0];
-      f_old[i][1] = atom->f[i][1];
-      f_old[i][2] = atom->f[i][2];
-    }
+  topo_create();
+  energy_old = topo_eval();
+  for (int i = 0; i < atom->nlocal; i++) {
+    f_old[i][0] = atom->f[i][0];
+    f_old[i][1] = atom->f[i][1];
+    f_old[i][2] = atom->f[i][2];
   }
 
   // mix old and new forces with delta to smoothly turn on/off interactions
   double delta = update->ntimestep - update->beginstep;
   if (delta != 0.0) delta /= update->endstep - update->beginstep;
 
-  energy = (delta * energy_new + (1.0 - delta) * energy_old) - energy_old;
+  energy = delta * (energy_new - energy_old);
 
   for (int i = 0; i < atom->nlocal; i++) {
-    atom->f[i][0] += (delta * f_new[i][0] + (1.0 - delta) * f_old[i][0]) - f_old[i][0];
-    atom->f[i][1] += (delta * f_new[i][1] + (1.0 - delta) * f_old[i][1]) - f_old[i][1];
-    atom->f[i][2] += (delta * f_new[i][2] + (1.0 - delta) * f_old[i][2]) - f_old[i][2];
+    atom->f[i][0] += delta * (f_new[i][0] - f_old[i][0]);
+    atom->f[i][1] += delta * (f_new[i][1] - f_old[i][1]);
+    atom->f[i][2] += delta * (f_new[i][2] - f_old[i][2]);
   }
 
   // cleanup
@@ -274,20 +223,298 @@ void FixTopo::post_force(int vflag)
   memory->destroy(f_old);
 }
 
+/* ---------------------------------------------------------------------- */
+
+void FixTopo::post_run()
+{
+  if (!resetflag) topo_create();
+}
+
 /* ----------------------------------------------------------------------
-   apply harmonic bond restraints
+   apply or remove new topology
 ---------------------------------------------------------------------- */
 
-void FixTopo::restrain_bond(int m)
+void FixTopo::topo_create()
 {
+  int i,ival;
+  double dval;
 
+  // apply restraints and store old values via triangular exchange for nonboned
+  // interactions and by inverting the sign of the type for bonded interactions
+  // so the next call of topo_create() will restore the topology
+
+  for (int m = 0; m < nrestrain; m++) {
+    i = atom->map(ids[m][0]);
+
+    if (rstyle[m] == BOND) {
+      if (type[m] > 0) {
+        create_bond(m);
+        type[m] = -type[m];
+      } else if (type[m] < 0) {
+        break_bond(m);
+        type[m] = -type[m];
+      }
+    } else if (rstyle[m] == ANGLE) {
+      if (type[m] > 0) {
+        create_angle(m);
+        type[m] = -type[m];
+      } else if (type[m] < 0) {
+        break_angle(m);
+        type[m] = -type[m];
+      }
+    }
+    else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
+    else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
+    else if (rstyle[m] == VDWL) {
+      // if atom is not owned py proc skip
+      if (i < 0) continue;
+      ival = atom->type[i];
+      atom->type[i] = type[m];
+      type[m] = ival;
+    } else if (rstyle[m] == COUL) {
+      // if atom is not owned py proc skip
+      if (i < 0) continue;
+      dval = atom->q[i];
+      atom->q[i] = q[m];
+      q[m] = dval;
+    }
+  }
+
+  // update topology AFTER all bonds have been applied
+  if (anybond) update_topology();
+
+  // NOTE: do we need to communicate the changes in topology to other procs?
+
+  // re-initialize pair styles if any PAIR settings were changed
+  // ditto for bond styles if any BOND setitings were changes
+  // this resets other coeffs that may depend on changed values,
+  //   and also offset and tail corrections
+
+  if (anyvdwl) force->pair->reinit();
+  if (anybond) force->bond->reinit();
+  if (anyangle) force->angle->init_style();
+  if (anydihed) force->dihedral->init_style();
+  if (anyimpro) force->improper->init_style();
+  if (anyq && force->kspace) force->kspace->qsum_qsq();
+
+  // no matter what, rebuild neighbor list
+  neighbor->build(1);
+
+}
+
+/* ----------------------------------------------------------------------
+   create bond
+---------------------------------------------------------------------- */
+
+void FixTopo::create_bond(int nrestrain)
+{
+  int i,j,k,m,n,n1,n2,n3;
+  tagint *slist;
+  tagint *partner;
+
+  memory->create(partner,atom->nmax,"topo:partner");
+
+  tagint *tag = atom->tag;
+  int nlocal = atom->nlocal;
+
+  for (i = 0; i < nlocal; i++)
+    partner[i] = 0;
+  partner[atom->map(ids[nrestrain][0])] = ids[nrestrain][1];
+  partner[atom->map(ids[nrestrain][1])] = ids[nrestrain][0];
+
+  tagint **bond_atom = atom->bond_atom;
+  int *num_bond = atom->num_bond;
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+
+  // create bonds for atoms I own
+  // only if both atoms list each other as winning bond partner
+  //   and probability constraint is satisfied
+  // if other atom is owned by another proc, it should do same thing
+
+  int **bond_type = atom->bond_type;
+  int newton_bond = force->newton_bond;
+
+  for (i = 0; i < nlocal; i++) {
+    if (partner[i] == 0) continue;
+    j = atom->map(partner[i]);
+    if (partner[j] != tag[i]) continue;
+
+    // if newton_bond is set, only store with I or J
+    // if not newton_bond, store bond with both I and J
+    // atom J will also do this consistently, whatever proc it is on
+
+    if (!newton_bond || tag[i] < tag[j]) {
+      if (num_bond[i] == atom->bond_per_atom)
+        error->one(FLERR,"New bond exceeded bonds per atom in fix topo");
+      bond_type[i][num_bond[i]] = abs(type[nrestrain]);
+      bond_atom[i][num_bond[i]] = tag[j];
+      num_bond[i]++;
+    }
+
+    // add a 1-2 neighbor to special bond list for atom I
+    // atom J will also do this, whatever proc it is on
+    // need to first remove tag[j] from later in list if it appears
+    // prevents list from overflowing, will be rebuilt in rebuild_special_one()
+
+    slist = special[i];
+    n1 = nspecial[i][0];
+    n2 = nspecial[i][1];
+    n3 = nspecial[i][2];
+    for (m = n1; m < n3; m++)
+      if (slist[m] == tag[j]) break;
+    if (m < n3) {
+      for (n = m; n < n3-1; n++) slist[n] = slist[n+1];
+      n3--;
+      if (m < n2) n2--;
+    }
+    if (n3 == atom->maxspecial)
+      error->one(FLERR,
+                 "New bond exceeded special list size in fix bond/create");
+    for (m = n3; m > n1; m--) slist[m] = slist[m-1];
+    slist[n1] = tag[j];
+    nspecial[i][0] = n1+1;
+    nspecial[i][1] = n2+1;
+    nspecial[i][2] = n3+1;
+
+    if (tag[i] < tag[j]) atom->nbonds++;
+  }
+
+  memory->destroy(partner);
+}
+
+/* ----------------------------------------------------------------------
+   remove bond
+---------------------------------------------------------------------- */
+
+void FixTopo::break_bond(int nrestrain)
+{
+  int i,j,k,m,n,n1,n3;
+  tagint *slist;
+  tagint *partner;
+
+  memory->create(partner,atom->nmax,"topo:partner");
+
+  tagint *tag = atom->tag;
+  int nlocal = atom->nlocal;
+
+  for (i = 0; i < nlocal; i++)
+    partner[i] = 0;
+  partner[atom->map(ids[nrestrain][0])] = ids[nrestrain][1];
+  partner[atom->map(ids[nrestrain][1])] = ids[nrestrain][0];
+
+  int **bond_type = atom->bond_type;
+  tagint **bond_atom = atom->bond_atom;
+  int *num_bond = atom->num_bond;
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+
+  int nbreak = 0;
+  for (i = 0; i < nlocal; i++) {
+    if (partner[i] == 0) continue;
+    j = atom->map(partner[i]);
+    if (partner[j] != tag[i]) continue;
+
+    // delete bond from atom I if I stores it
+    // atom J will also do this
+
+    for (m = 0; m < num_bond[i]; m++) {
+      if (bond_atom[i][m] == partner[i] &&
+          bond_type[i][m] == abs(type[nrestrain])) {
+        for (k = m; k < num_bond[i]-1; k++) {
+          bond_atom[i][k] = bond_atom[i][k+1];
+          bond_type[i][k] = bond_type[i][k+1];
+        }
+        num_bond[i]--;
+        nbreak++;
+        break;
+      }
+    }
+
+    // remove J from special bond list for atom I
+    // atom J will also do this, whatever proc it is on
+
+    slist = special[i];
+    n1 = nspecial[i][0];
+    for (m = 0; m < n1; m++)
+      if (slist[m] == partner[i]) break;
+    n3 = nspecial[i][2];
+    for (; m < n3-1; m++) slist[m] = slist[m+1];
+    nspecial[i][0]--;
+    nspecial[i][1]--;
+    nspecial[i][2]--;
+
+    // store final broken bond partners and count the broken bond once
+    if (tag[i] < tag[j]) atom->nbonds--;
+  }
+
+  if (nbreak < 1) error->all(FLERR,"bond has not been previously defined in fix topo");
+
+  memory->destroy(partner);
+}
+
+/* ----------------------------------------------------------------------
+   double loop over my atoms and topo bonds
+   influenced = 1 if atom's topology is affected by topo bond
+     yes if is one of 2 atoms in bond
+     yes if both atom IDs appear in atom's special list
+     else no
+   if influenced:
+     check for angles/dihedrals/impropers to break due to specific broken bonds
+     rebuild the atom's special list of 1-2,1-3,1-4 neighs
+------------------------------------------------------------------------- */
+
+void FixTopo::update_topology()
+{
+  int i,j,k,n,influence,influenced,found;
+  tagint id1,id2;
+  tagint *slist;
+
+  tagint *tag = atom->tag;
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+  int nlocal = atom->nlocal;
+
+  for (i = 0; i < nlocal; i++) {
+    influenced = 0;
+    slist = special[i];
+
+    for (j = 0; j < nrestrain; j++) {
+      if (rstyle[j] != BOND) continue;
+      id1 = ids[j][0];
+      id2 = ids[j][1];
+
+      influence = 0;
+      if (tag[i] == id1 || tag[i] == id2) influence = 1;
+      else {
+        n = nspecial[i][2];
+        found = 0;
+        for (k = 0; k < n; k++)
+          if (slist[k] == id1 || slist[k] == id2) found++;
+        if (found == 2) influence = 1;
+      }
+      if (!influence) continue;
+      influenced = 1;
+    }
+
+    if (influenced) rebuild_special_one(i);
+  }
 }
 
 /* ----------------------------------------------------------------------
    apply harmonic angle restraints
 ---------------------------------------------------------------------- */
 
-void FixTopo::restrain_angle(int m)
+void FixTopo::create_angle(int m)
+{
+
+}
+
+/* ----------------------------------------------------------------------
+   remove harmonic angle restraints
+---------------------------------------------------------------------- */
+
+void FixTopo::break_angle(int m)
 {
 
 }
@@ -322,10 +549,14 @@ double FixTopo::topo_eval()
   int eflag = 1;
   int vflag = 0;
 
-  // store old forces to restore them afterwards
+  // store old forces and energies to restore them afterwards
 
   double **f_tmp;
   memory->create(f_tmp,atom->natoms,3,"topo:f_tmp");
+
+  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
+
+  // store forces on atoms
   for (int i = 0; i < atom->nlocal; i++) {
     f_tmp[i][0] = atom->f[i][0];
     f_tmp[i][1] = atom->f[i][1];
@@ -333,9 +564,9 @@ double FixTopo::topo_eval()
   }
 
   // clear forces so we have a fresh array to calculate the forces
-
-  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
   if (nbytes) memset(&atom->f[0][0],0,3*nbytes);
+
+  // forces and energies of new topology
 
   if (force->pair) force->pair->compute(eflag,vflag);
 
@@ -360,7 +591,7 @@ double FixTopo::topo_eval()
     f[i][2] = atom->f[i][2];
   }
 
-  // restore forces to initial values
+  // restore forces
 
   for (int i = 0; i < atom->nlocal; i++) {
     atom->f[i][0] = f_tmp[i][0];
@@ -375,6 +606,99 @@ double FixTopo::topo_eval()
   memory->destroy(f_tmp);
 
   return total_energy;
+}
+
+/* ----------------------------------------------------------------------
+   re-build special list of atom M
+   does not affect 1-2 neighs (already include effects of new bond)
+   affects 1-3 and 1-4 neighs due to other atom's augmented 1-2 neighs
+------------------------------------------------------------------------- */
+
+void FixTopo::rebuild_special_one(int m)
+{
+  int i,j,n,n1,cn1,cn2,cn3;
+  tagint *slist;
+
+  tagint *tag = atom->tag;
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+
+  // existing 1-2 neighs of atom M
+
+  slist = special[m];
+  n1 = nspecial[m][0];
+  cn1 = 0;
+  for (i = 0; i < n1; i++)
+    copy[cn1++] = slist[i];
+
+  // new 1-3 neighs of atom M, based on 1-2 neighs of 1-2 neighs
+  // exclude self
+  // remove duplicates after adding all possible 1-3 neighs
+
+  cn2 = cn1;
+  for (i = 0; i < cn1; i++) {
+    n = atom->map(copy[i]);
+    if (n < 0)
+      error->one(FLERR,"Fix topo needs ghost atoms from further away");
+    slist = special[n];
+    n1 = nspecial[n][0];
+    for (j = 0; j < n1; j++)
+      if (slist[j] != tag[m]) copy[cn2++] = slist[j];
+  }
+
+  cn2 = dedup(cn1,cn2,copy);
+  if (cn2 > atom->maxspecial)
+    error->one(FLERR,"Special list size exceeded in fix bond/create");
+
+  // new 1-4 neighs of atom M, based on 1-2 neighs of 1-3 neighs
+  // exclude self
+  // remove duplicates after adding all possible 1-4 neighs
+
+  cn3 = cn2;
+  for (i = cn1; i < cn2; i++) {
+    n = atom->map(copy[i]);
+    if (n < 0)
+      error->one(FLERR,"Fix topo needs ghost atoms from further away");
+    slist = special[n];
+    n1 = nspecial[n][0];
+    for (j = 0; j < n1; j++)
+      if (slist[j] != tag[m]) copy[cn3++] = slist[j];
+  }
+
+  cn3 = dedup(cn2,cn3,copy);
+  if (cn3 > atom->maxspecial)
+    error->one(FLERR,"Special list size exceeded in fix bond/create");
+
+  // store new special list with atom M
+
+  nspecial[m][0] = cn1;
+  nspecial[m][1] = cn2;
+  nspecial[m][2] = cn3;
+  memcpy(special[m],copy,cn3*sizeof(int));
+}
+
+/* ----------------------------------------------------------------------
+   remove all ID duplicates in copy from Nstart:Nstop-1
+   compare to all previous values in copy
+   return N decremented by any discarded duplicates
+------------------------------------------------------------------------- */
+
+int FixTopo::dedup(int nstart, int nstop, tagint *copy)
+{
+  int i;
+
+  int m = nstart;
+  while (m < nstop) {
+    for (i = 0; i < m; i++)
+      if (copy[i] == copy[m]) {
+        copy[m] = copy[nstop-1];
+        nstop--;
+        break;
+      }
+    if (i == m) m++;
+  }
+
+  return nstop;
 }
 
 /* ----------------------------------------------------------------------
@@ -399,4 +723,23 @@ double FixTopo::compute_vector(int n)
   } else {
     return 0.0;
   }
+}
+
+int FixTopo::pack_forward_comm(int n, int *list, double *buf,
+                                     int pbc_flag, int *pbc)
+{
+  int i,j,k,m,ns;
+
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+
+  m = 0;
+  for (i = 0; i < n; i++) {
+    j = list[i];
+    ns = nspecial[j][0];
+    buf[m++] = ubuf(ns).d;
+    for (k = 0; k < ns; k++)
+      buf[m++] = ubuf(special[j][k]).d;
+  }
+  return m;
 }
