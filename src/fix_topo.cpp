@@ -195,6 +195,8 @@ void FixTopo::setup(int vflag)
 {
   if (strcmp(update->integrate_style,"verlet") == 0)
     post_force(vflag);
+
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -212,6 +214,7 @@ void FixTopo::post_force(int vflag)
 
   // apply restraints and store old values via triangular exchange
   topo_create();
+  dtmp = energy_new;
   energy_new = topo_eval();
   for (int i = 0; i < atom->nlocal; i++) {
     f_new[i][0] = f[i][0];
@@ -231,6 +234,8 @@ void FixTopo::post_force(int vflag)
   // mix old and new forces with delta to smoothly turn on/off interactions
   double delta = update->ntimestep - update->beginstep;
   if (delta != 0.0) delta /= update->endstep - update->beginstep;
+
+  delta = exp(-pow(update->ntimestep-update->endstep,2)/(0.01*pow(update->endstep,2)));
 
   energy = delta * (energy_new - energy_old);
 
@@ -312,9 +317,7 @@ void FixTopo::topo_create()
   if (anyimpro) force->improper->init_style();
   if (anyq && force->kspace) force->kspace->qsum_qsq();
 
-  // no matter what, rebuild neighbor list
-  neighbor->build(1);
-
+  // new neighbor list is created in topo_eval()
 }
 
 /* ----------------------------------------------------------------------
@@ -1103,14 +1106,9 @@ void FixTopo::break_improper(int restrain)
 
 double FixTopo::topo_eval()
 {
-  if (domain->triclinic) domain->x2lamda(atom->nlocal);
-  domain->pbc();
-  comm->exchange();
-  atom->nghost = 0;
-  comm->borders();
-  if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
-  if (modify->n_pre_neighbor) modify->pre_neighbor();
+  // no matter what, rebuild neighbor list
   neighbor->build(1);
+
   int eflag = 1;
   int vflag = 0;
 
