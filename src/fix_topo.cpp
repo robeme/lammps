@@ -385,7 +385,7 @@ void FixTopo::create_bond(int nrestrain)
     }
     if (n3 == atom->maxspecial)
       error->one(FLERR,
-                 "New bond exceeded special list size in fix bond/create");
+                 "New bond exceeded special list size in fix topo");
     for (m = n3; m > n1; m--) slist[m] = slist[m-1];
     slist[n1] = tag[j];
     nspecial[i][0] = n1+1;
@@ -1213,7 +1213,7 @@ void FixTopo::rebuild_special_one(int m)
 
   cn2 = dedup(cn1,cn2,copy);
   if (cn2 > atom->maxspecial)
-    error->one(FLERR,"Special list size exceeded in fix bond/create");
+    error->one(FLERR,"Special list size exceeded in fix topo");
 
   // new 1-4 neighs of atom M, based on 1-2 neighs of 1-3 neighs
   // exclude self
@@ -1232,7 +1232,7 @@ void FixTopo::rebuild_special_one(int m)
 
   cn3 = dedup(cn2,cn3,copy);
   if (cn3 > atom->maxspecial)
-    error->one(FLERR,"Special list size exceeded in fix bond/create");
+    error->one(FLERR,"Special list size exceeded in fix topo");
 
   // store new special list with atom M
 
