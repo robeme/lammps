@@ -305,8 +305,8 @@ void FixTopo::topo_create()
   // this resets other coeffs that may depend on changed values,
   //   and also offset and tail corrections
 
-  if (anyvdwl) force->pair->reinit();
-  if (anybond) force->bond->reinit();
+  if (anyvdwl) force->pair->init_style();
+  if (anybond) force->bond->init_style();
   if (anyangle) force->angle->init_style();
   if (anydihed) force->dihedral->init_style();
   if (anyimpro) force->improper->init_style();
