@@ -235,7 +235,7 @@ void FixTopo::post_force(int vflag)
   double delta = update->ntimestep - update->beginstep;
   if (delta != 0.0) delta /= update->endstep - update->beginstep;
 
-  delta = exp(-pow(update->ntimestep-update->endstep,2)/(0.01*pow(update->endstep,2)));
+  // delta = exp(-pow(update->ntimestep-update->endstep,2)/(0.01*pow(update->endstep,2)));
 
   energy = delta * (energy_new - energy_old);
 
