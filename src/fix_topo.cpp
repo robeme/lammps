@@ -75,49 +75,68 @@ FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
   anyvdwl = anyq = anybond = anyangle = anydihed = anyimpro = 0;
 
   int iarg = 3;
-  while (iarg < narg) {
-    if (nrestrain == maxrestrain) {
-      maxrestrain += DELTA;
-      memory->grow(rstyle,maxrestrain,"topo:rstyle");
-      memory->grow(ids,maxrestrain,4,"topo:ids");
-      memory->grow(type,maxrestrain,"topo:type");
-      memory->grow(q,maxrestrain,"topo:q");
-    }
-    if (strcmp(arg[iarg],"bond") == 0) {
-      if (iarg+4 > narg) error->all(FLERR,"Illegal fix topo command");
-      rstyle[nrestrain] = BOND;
-      type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
-      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
-      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
-      anybond = 1;
-      iarg += 4;
-    } else if (strcmp(arg[iarg],"angle") == 0) {
-      if (iarg+5 > narg) error->all(FLERR,"Illegal fix topo command");
-      rstyle[nrestrain] = ANGLE;
-      type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
-      ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
-      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
-      ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+4]);
-      anyangle = 1;
-      iarg += 5;
-    } else if (strcmp(arg[iarg],"atom") == 0) {
-      if (iarg+4 > narg) error->all(FLERR,"Illegal fix topo command");
-      if (strcmp(arg[iarg+1],"type") == 0) {
-        rstyle[nrestrain] = VDWL;
+    while (iarg < narg) {
+      if (nrestrain == maxrestrain) {
+        maxrestrain += DELTA;
+        memory->grow(rstyle,maxrestrain,"topo:rstyle");
+        memory->grow(ids,maxrestrain,4,"topo:ids");
+        memory->grow(type,maxrestrain,"topo:type");
+        memory->grow(q,maxrestrain,"topo:q");
+      }
+      if (strcmp(arg[iarg],"bond") == 0) {
+        if (iarg+4 > narg) error->all(FLERR,"Illegal fix topo command");
+        rstyle[nrestrain] = BOND;
+        type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
         ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
-        type[nrestrain] = force->inumeric(FLERR,arg[iarg+3]);
-        anyvdwl = 1;
+        ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
+        anybond = 1;
         iarg += 4;
-      } else if (strcmp(arg[iarg+1],"charge") == 0) {
-        rstyle[nrestrain] = COUL;
+      } else if (strcmp(arg[iarg],"angle") == 0) {
+        if (iarg+5 > narg) error->all(FLERR,"Illegal fix topo command");
+        rstyle[nrestrain] = ANGLE;
+        type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
         ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
-        q[nrestrain] = force->numeric(FLERR,arg[iarg+3]);
-        anyq = 1;
-        iarg += 4;
+        ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
+        ids[nrestrain][2] = force->inumeric(FLERR,arg[iarg+4]);
+        anyangle = 1;
+        iarg += 5;
+      } else if (strcmp(arg[iarg],"dihedral") == 0) {
+        if (iarg+6 > narg) error->all(FLERR,"Illegal fix topo command");
+        rstyle[nrestrain] = DIHEDRAL;
+        type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
+        ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
+        ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
+        ids[nrestrain][2] = force->inumeric(FLERR,arg[iarg+4]);
+        ids[nrestrain][3] = force->inumeric(FLERR,arg[iarg+5]);
+        anydihed = 1;
+        iarg += 6;
+      } else if (strcmp(arg[iarg],"improper") == 0) {
+        if (iarg+6 > narg) error->all(FLERR,"Illegal fix topo command");
+        rstyle[nrestrain] = IMPROPER;
+        type[nrestrain] = force->inumeric(FLERR,arg[iarg+1]);
+        ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+2]);
+        ids[nrestrain][1] = force->inumeric(FLERR,arg[iarg+3]);
+        ids[nrestrain][2] = force->inumeric(FLERR,arg[iarg+4]);
+        ids[nrestrain][3] = force->inumeric(FLERR,arg[iarg+5]);
+        anyimpro = 1;
+        iarg += 6;
+      } else if (strcmp(arg[iarg],"atom") == 0) {
+        if (iarg+4 > narg) error->all(FLERR,"Illegal fix topo command");
+        ids[nrestrain][0] = force->inumeric(FLERR,arg[iarg+1]);
+        if (strcmp(arg[iarg+2],"type") == 0) {
+          rstyle[nrestrain] = VDWL;
+          type[nrestrain] = force->inumeric(FLERR,arg[iarg+3]);
+          anyvdwl = 1;
+          iarg += 4;
+        } else if (strcmp(arg[iarg+2],"charge") == 0) {
+          rstyle[nrestrain] = COUL;
+          q[nrestrain] = force->numeric(FLERR,arg[iarg+3]);
+          anyq = 1;
+          iarg += 4;
+        } else error->all(FLERR,"Illegal fix topo command");
       } else error->all(FLERR,"Illegal fix topo command");
-    } else error->all(FLERR,"Illegal fix topo command");
 
-    nrestrain++;
+      nrestrain++;
   }
 
   // require atom map to lookup atom IDs
@@ -154,7 +173,10 @@ int FixTopo::setmask()
   int mask = 0;
   mask |= POST_FORCE;
   mask |= POST_RUN;
-  // mask |= THERMO_ENERGY; // NOTE: deactivated since I don't know how to exclude this fix from pe calculation
+  mask |= THERMO_ENERGY;
+  // NOTE: I don't know how to exclude this fix from pe calculation, thus if
+  //       this is set to yes relative energies are OK, but energies of
+  //       individual topologies are not correct
   return mask;
 }
 
@@ -247,25 +269,18 @@ void FixTopo::topo_create()
     i = atom->map(ids[m][0]);
 
     if (rstyle[m] == BOND) {
-      if (type[m] > 0) {
-        create_bond(m);
-        type[m] = -type[m];
-      } else if (type[m] < 0) {
-        break_bond(m);
-        type[m] = -type[m];
-      }
+      if (type[m] > 0)      { create_bond(m); type[m] = -type[m];}
+      else if (type[m] < 0) { break_bond(m);  type[m] = -type[m];}
     } else if (rstyle[m] == ANGLE) {
-      if (type[m] > 0) {
-        create_angle(m);
-        type[m] = -type[m];
-      } else if (type[m] < 0) {
-        break_angle(m);
-        type[m] = -type[m];
-      }
-    }
-    else if (rstyle[m] == DIHEDRAL) printf("  ... dihedrals are not implemented yet!\n");
-    else if (rstyle[m] == IMPROPER) printf("  ... impropers are not implemented yet!\n");
-    else if (rstyle[m] == VDWL) {
+      if (type[m] > 0)      { create_angle(m); type[m] = -type[m];}
+      else if (type[m] < 0) { break_angle(m);  type[m] = -type[m];}
+    } else if (rstyle[m] == DIHEDRAL) {
+      if (type[m] > 0)      { create_dihedral(m); type[m] = -type[m];}
+      else if (type[m] < 0) { break_dihedral(m);  type[m] = -type[m];}
+    } else if (rstyle[m] == IMPROPER) {
+      if (type[m] > 0)      { create_improper(m); type[m] = -type[m];}
+      else if (type[m] < 0) { break_improper(m);  type[m] = -type[m];}
+    } else if (rstyle[m] == VDWL) {
       // if atom is not owned py proc skip
       if (i < 0) continue;
       ival = atom->type[i];
@@ -281,7 +296,7 @@ void FixTopo::topo_create()
   }
 
   // update topology AFTER all bonds have been applied
-  if (anybond) update_topology();
+  if (anybond) topo_update();
 
   // NOTE: do we need to communicate the changes in topology to other procs?
 
@@ -464,7 +479,7 @@ void FixTopo::break_bond(int nrestrain)
      rebuild the atom's special list of 1-2,1-3,1-4 neighs
 ------------------------------------------------------------------------- */
 
-void FixTopo::update_topology()
+void FixTopo::topo_update()
 {
   int i,j,k,n,influence,influenced,found;
   tagint id1,id2;
@@ -505,28 +520,578 @@ void FixTopo::update_topology()
    apply harmonic angle restraints
 ---------------------------------------------------------------------- */
 
-void FixTopo::create_angle(int m)
+void FixTopo::create_angle(int restrain)
 {
+  int m;
 
+  // check that 3 atoms exist
+
+  const int nlocal = atom->nlocal;
+  const int idx1 = atom->map(ids[restrain][0]);
+  const int idx2 = atom->map(ids[restrain][1]);
+  const int idx3 = atom->map(ids[restrain][2]);
+
+  int count = 0;
+  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
+  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
+  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
+
+  int allcount;
+  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (allcount != 3)
+    error->all(FLERR,"Angle atoms do not exist in fix topo");
+
+  // create angle once or 3x if newton_bond set
+
+  int *num_angle = atom->num_angle;
+  int **angle_type = atom->angle_type;
+  tagint **angle_atom1 = atom->angle_atom1;
+  tagint **angle_atom2 = atom->angle_atom2;
+  tagint **angle_atom3 = atom->angle_atom3;
+
+  if ((m = idx2) >= 0) {
+    if (num_angle[m] == atom->angle_per_atom)
+      error->one(FLERR,"New angle exceeded angles per atom in create_bonds");
+    angle_type[m][num_angle[m]] = type[restrain];
+    angle_atom1[m][num_angle[m]] = ids[restrain][0];
+    angle_atom2[m][num_angle[m]] = ids[restrain][1];
+    angle_atom3[m][num_angle[m]] = ids[restrain][2];
+    num_angle[m]++;
+  }
+  atom->nangles++;
+
+  if (force->newton_bond) return;
+
+  if ((m = idx1) >= 0) {
+    if (num_angle[m] == atom->angle_per_atom)
+      error->one(FLERR,"New angle exceeded angles per atom in create_bonds");
+    angle_type[m][num_angle[m]] = type[restrain];
+    angle_atom1[m][num_angle[m]] = ids[restrain][0];
+    angle_atom2[m][num_angle[m]] = ids[restrain][1];
+    angle_atom3[m][num_angle[m]] = ids[restrain][2];
+    num_angle[m]++;
+  }
+
+  if ((m = idx3) >= 0) {
+    if (num_angle[m] == atom->angle_per_atom)
+      error->one(FLERR,"New angle exceeded angles per atom in create_bonds");
+    angle_type[m][num_angle[m]] = type[restrain];
+    angle_atom1[m][num_angle[m]] = ids[restrain][0];
+    angle_atom2[m][num_angle[m]] = ids[restrain][1];
+    angle_atom3[m][num_angle[m]] = ids[restrain][2];
+    num_angle[m]++;
+  }
 }
 
 /* ----------------------------------------------------------------------
    remove harmonic angle restraints
 ---------------------------------------------------------------------- */
 
-void FixTopo::break_angle(int m)
+void FixTopo::break_angle(int restrain)
 {
+  int j,m,n;
 
+  // check that 3 atoms exist
+
+  const int nlocal = atom->nlocal;
+  const int idx1 = atom->map(ids[restrain][0]);
+  const int idx2 = atom->map(ids[restrain][1]);
+  const int idx3 = atom->map(ids[restrain][2]);
+
+  int count = 0;
+  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
+  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
+  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
+
+  int allcount;
+  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (allcount != 3)
+    error->all(FLERR,"Angle atoms do not exist in fix topo");
+
+  // create angle once or 3x if newton_bond set
+
+  int *num_angle = atom->num_angle;
+  int **angle_type = atom->angle_type;
+  tagint **angle_atom1 = atom->angle_atom1;
+  tagint **angle_atom2 = atom->angle_atom2;
+  tagint **angle_atom3 = atom->angle_atom3;
+
+  int nbreak = 0;
+  if ((m = idx2) >= 0) {
+    j = 0;
+    while (j < atom->num_angle[m])
+      if ((angle_atom1[m][j] == ids[restrain][0]) &&
+          (angle_atom2[m][j] == ids[restrain][1]) &&
+          (angle_atom3[m][j] == ids[restrain][2]) &&
+          (angle_type[m][j] == abs(type[restrain]))) {
+        n = num_angle[m];
+        angle_type[m][j] = angle_type[m][n-1];
+        angle_atom1[m][j] = angle_atom1[m][n-1];
+        angle_atom2[m][j] = angle_atom2[m][n-1];
+        angle_atom3[m][j] = angle_atom3[m][n-1];
+        num_angle[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+  if (nbreak < 1)
+    error->one(FLERR,"Angle has not been previously defined in fix topo");
+
+  atom->nangles--;
+
+  if (force->newton_bond) return;
+
+  if ((m = idx1) >= 0) {
+    j = 0;
+    while (j < atom->num_angle[m])
+      if ((angle_atom1[m][j] == ids[restrain][0]) &&
+          (angle_atom2[m][j] == ids[restrain][1]) &&
+          (angle_atom3[m][j] == ids[restrain][2]) &&
+          (angle_type[m][j] == abs(type[restrain]))) {
+        n = num_angle[m];
+        angle_type[m][j] = angle_type[m][n-1];
+        angle_atom1[m][j] = angle_atom1[m][n-1];
+        angle_atom2[m][j] = angle_atom2[m][n-1];
+        angle_atom3[m][j] = angle_atom3[m][n-1];
+        num_angle[m]--;
+      } else j++;
+  }
+
+  if ((m = idx3) >= 0) {
+    j = 0;
+    while (j < atom->num_angle[m])
+      if ((angle_atom1[m][j] == ids[restrain][0]) &&
+          (angle_atom2[m][j] == ids[restrain][1]) &&
+          (angle_atom3[m][j] == ids[restrain][2]) &&
+          (angle_type[m][j] == abs(type[restrain]))) {
+        n = num_angle[m];
+        angle_type[m][j] = angle_type[m][n-1];
+        angle_atom1[m][j] = angle_atom1[m][n-1];
+        angle_atom2[m][j] = angle_atom2[m][n-1];
+        angle_atom3[m][j] = angle_atom3[m][n-1];
+        num_angle[m]--;
+      } else j++;
+  }
 }
 
 /* ----------------------------------------------------------------------
    apply dihedral restraints
-   adopted from dihedral_charmm
 ---------------------------------------------------------------------- */
 
-void FixTopo::restrain_dihedral(int m)
+void FixTopo::create_dihedral(int restrain)
 {
+  int m;
 
+  // check that 4 atoms exist
+
+  const int nlocal = atom->nlocal;
+  const int idx1 = atom->map(ids[restrain][0]);
+  const int idx2 = atom->map(ids[restrain][1]);
+  const int idx3 = atom->map(ids[restrain][2]);
+  const int idx4 = atom->map(ids[restrain][3]);
+
+  int count = 0;
+  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
+  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
+  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
+  if ((idx4 >= 0) && (idx4 < nlocal)) count++;
+
+  int allcount;
+  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (allcount != 4)
+    error->all(FLERR,"Dihedral atoms do not exist in fix topo");
+
+  // create dihedral once or 4x if newton_bond set
+
+  int *num_dihedral = atom->num_dihedral;
+  int **dihedral_type = atom->dihedral_type;
+  tagint **dihedral_atom1 = atom->dihedral_atom1;
+  tagint **dihedral_atom2 = atom->dihedral_atom2;
+  tagint **dihedral_atom3 = atom->dihedral_atom3;
+  tagint **dihedral_atom4 = atom->dihedral_atom4;
+
+  if ((m = idx2) >= 0) {
+    if (num_dihedral[m] == atom->dihedral_per_atom)
+      error->one(FLERR,
+                 "New dihedral exceeded dihedrals per atom in fix topo");
+    dihedral_type[m][num_dihedral[m]] = type[restrain];
+    dihedral_atom1[m][num_dihedral[m]] = ids[restrain][0];
+    dihedral_atom2[m][num_dihedral[m]] = ids[restrain][1];
+    dihedral_atom3[m][num_dihedral[m]] = ids[restrain][2];
+    dihedral_atom4[m][num_dihedral[m]] = ids[restrain][3];
+    num_dihedral[m]++;
+  }
+  atom->ndihedrals++;
+
+  if (force->newton_bond) return;
+
+  if ((m = idx1) >= 0) {
+    if (num_dihedral[m] == atom->dihedral_per_atom)
+      error->one(FLERR,
+                 "New dihedral exceeded dihedrals per atom in fix topo");
+    dihedral_type[m][num_dihedral[m]] = type[restrain];
+    dihedral_atom1[m][num_dihedral[m]] = ids[restrain][0];
+    dihedral_atom2[m][num_dihedral[m]] = ids[restrain][1];
+    dihedral_atom3[m][num_dihedral[m]] = ids[restrain][2];
+    dihedral_atom4[m][num_dihedral[m]] = ids[restrain][3];
+    num_dihedral[m]++;
+  }
+
+  if ((m = idx3) >= 0) {
+    if (num_dihedral[m] == atom->dihedral_per_atom)
+      error->one(FLERR,
+                 "New dihedral exceeded dihedrals per atom in fix topo");
+    dihedral_type[m][num_dihedral[m]] = type[restrain];
+    dihedral_atom1[m][num_dihedral[m]] = ids[restrain][0];
+    dihedral_atom2[m][num_dihedral[m]] = ids[restrain][1];
+    dihedral_atom3[m][num_dihedral[m]] = ids[restrain][2];
+    dihedral_atom4[m][num_dihedral[m]] = ids[restrain][3];
+    num_dihedral[m]++;
+  }
+
+  if ((m = idx4) >= 0) {
+    if (num_dihedral[m] == atom->dihedral_per_atom)
+      error->one(FLERR,
+                 "New dihedral exceeded dihedrals per atom in fix topo");
+    dihedral_type[m][num_dihedral[m]] = type[restrain];
+    dihedral_atom1[m][num_dihedral[m]] = ids[restrain][0];
+    dihedral_atom2[m][num_dihedral[m]] = ids[restrain][1];
+    dihedral_atom3[m][num_dihedral[m]] = ids[restrain][2];
+    dihedral_atom4[m][num_dihedral[m]] = ids[restrain][3];
+    num_dihedral[m]++;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   remove dihedral restraints
+---------------------------------------------------------------------- */
+
+void FixTopo::break_dihedral(int restrain)
+{
+  int j,m,n;
+
+  // check that 3 atoms exist
+
+  const int nlocal = atom->nlocal;
+  const int idx1 = atom->map(ids[restrain][0]);
+  const int idx2 = atom->map(ids[restrain][1]);
+  const int idx3 = atom->map(ids[restrain][2]);
+  const int idx4 = atom->map(ids[restrain][3]);
+
+  int count = 0;
+  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
+  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
+  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
+  if ((idx4 >= 0) && (idx4 < nlocal)) count++;
+
+  int allcount;
+  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (allcount != 4)
+    error->all(FLERR,"Dihedral atoms do not exist in fix topo");
+
+  // create angle once or 3x if newton_bond set
+
+  int *num_dihedral = atom->num_dihedral;
+  int **dihedral_type = atom->dihedral_type;
+  tagint **dihedral_atom1 = atom->dihedral_atom1;
+  tagint **dihedral_atom2 = atom->dihedral_atom2;
+  tagint **dihedral_atom3 = atom->dihedral_atom3;
+  tagint **dihedral_atom4 = atom->dihedral_atom4;
+
+  int nbreak = 0;
+  if ((m = idx2) >= 0) {
+    j = 0;
+    while (j < atom->num_dihedral[m])
+      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
+          (dihedral_atom2[m][j] == ids[restrain][1]) &&
+          (dihedral_atom3[m][j] == ids[restrain][2]) &&
+          (dihedral_atom4[m][j] == ids[restrain][3]) &&
+          (dihedral_type[m][j] == abs(type[restrain]))) {
+        n = num_dihedral[m];
+        dihedral_type[m][j] = dihedral_type[m][n-1];
+        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
+        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
+        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
+        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
+        num_dihedral[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+  if (nbreak < 1)
+    error->one(FLERR,"Dihedral has not been previously defined in fix topo");
+
+  atom->ndihedrals--;
+
+  if (force->newton_bond) return;
+
+  if ((m = idx1) >= 0) {
+    j = 0;
+    while (j < atom->num_dihedral[m])
+      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
+          (dihedral_atom2[m][j] == ids[restrain][1]) &&
+          (dihedral_atom3[m][j] == ids[restrain][2]) &&
+          (dihedral_atom4[m][j] == ids[restrain][3]) &&
+          (dihedral_type[m][j] == abs(type[restrain]))) {
+        n = num_dihedral[m];
+        dihedral_type[m][j] = dihedral_type[m][n-1];
+        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
+        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
+        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
+        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
+        num_dihedral[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+  if ((m = idx3) >= 0) {
+    j = 0;
+    while (j < atom->num_dihedral[m])
+      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
+          (dihedral_atom2[m][j] == ids[restrain][1]) &&
+          (dihedral_atom3[m][j] == ids[restrain][2]) &&
+          (dihedral_atom4[m][j] == ids[restrain][3]) &&
+          (dihedral_type[m][j] == abs(type[restrain]))) {
+        n = num_dihedral[m];
+        dihedral_type[m][j] = dihedral_type[m][n-1];
+        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
+        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
+        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
+        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
+        num_dihedral[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+
+  if ((m = idx4) >= 0) {
+    j = 0;
+    while (j < atom->num_dihedral[m])
+      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
+          (dihedral_atom2[m][j] == ids[restrain][1]) &&
+          (dihedral_atom3[m][j] == ids[restrain][2]) &&
+          (dihedral_atom4[m][j] == ids[restrain][3]) &&
+          (dihedral_type[m][j] == abs(type[restrain]))) {
+        n = num_dihedral[m];
+        dihedral_type[m][j] = dihedral_type[m][n-1];
+        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
+        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
+        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
+        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
+        num_dihedral[m]--;
+        nbreak++;
+      } else j++;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   apply improper restraints
+---------------------------------------------------------------------- */
+
+void FixTopo::create_improper(int restrain)
+{
+  int m;
+
+  // check that 4 atoms exist
+
+  const int nlocal = atom->nlocal;
+  const int idx1 = atom->map(ids[restrain][0]);
+  const int idx2 = atom->map(ids[restrain][1]);
+  const int idx3 = atom->map(ids[restrain][2]);
+  const int idx4 = atom->map(ids[restrain][3]);
+
+  int count = 0;
+  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
+  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
+  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
+  if ((idx4 >= 0) && (idx4 < nlocal)) count++;
+
+  int allcount;
+  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (allcount != 4)
+    error->all(FLERR,"Dihedral atoms do not exist in fix topo");
+
+  // create improper once or 4x if newton_bond set
+
+  int *num_improper = atom->num_improper;
+  int **improper_type = atom->improper_type;
+  tagint **improper_atom1 = atom->improper_atom1;
+  tagint **improper_atom2 = atom->improper_atom2;
+  tagint **improper_atom3 = atom->improper_atom3;
+  tagint **improper_atom4 = atom->improper_atom4;
+
+  if ((m = idx2) >= 0) {
+    if (num_improper[m] == atom->improper_per_atom)
+      error->one(FLERR,
+                 "New improper exceeded impropers per atom in fix topo");
+    improper_type[m][num_improper[m]] = type[restrain];
+    improper_atom1[m][num_improper[m]] = ids[restrain][0];
+    improper_atom2[m][num_improper[m]] = ids[restrain][1];
+    improper_atom3[m][num_improper[m]] = ids[restrain][2];
+    improper_atom4[m][num_improper[m]] = ids[restrain][3];
+    num_improper[m]++;
+  }
+  atom->nimpropers++;
+
+  if (force->newton_bond) return;
+
+  if ((m = idx1) >= 0) {
+    if (num_improper[m] == atom->improper_per_atom)
+      error->one(FLERR,
+                 "New improper exceeded impropers per atom in fix topo");
+    improper_type[m][num_improper[m]] = type[restrain];
+    improper_atom1[m][num_improper[m]] = ids[restrain][0];
+    improper_atom2[m][num_improper[m]] = ids[restrain][1];
+    improper_atom3[m][num_improper[m]] = ids[restrain][2];
+    improper_atom4[m][num_improper[m]] = ids[restrain][3];
+    num_improper[m]++;
+  }
+
+  if ((m = idx3) >= 0) {
+    if (num_improper[m] == atom->improper_per_atom)
+      error->one(FLERR,
+                 "New improper exceeded impropers per atom in fix topo");
+    improper_type[m][num_improper[m]] = type[restrain];
+    improper_atom1[m][num_improper[m]] = ids[restrain][0];
+    improper_atom2[m][num_improper[m]] = ids[restrain][1];
+    improper_atom3[m][num_improper[m]] = ids[restrain][2];
+    improper_atom4[m][num_improper[m]] = ids[restrain][3];
+    num_improper[m]++;
+  }
+
+  if ((m = idx4) >= 0) {
+    if (num_improper[m] == atom->improper_per_atom)
+      error->one(FLERR,
+                 "New improper exceeded impropers per atom in fix topo");
+    improper_type[m][num_improper[m]] = type[restrain];
+    improper_atom1[m][num_improper[m]] = ids[restrain][0];
+    improper_atom2[m][num_improper[m]] = ids[restrain][1];
+    improper_atom3[m][num_improper[m]] = ids[restrain][2];
+    improper_atom4[m][num_improper[m]] = ids[restrain][3];
+    num_improper[m]++;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   remove improper restraints
+---------------------------------------------------------------------- */
+
+void FixTopo::break_improper(int restrain)
+{
+  int j,m,n;
+
+  // check that 3 atoms exist
+
+  const int nlocal = atom->nlocal;
+  const int idx1 = atom->map(ids[restrain][0]);
+  const int idx2 = atom->map(ids[restrain][1]);
+  const int idx3 = atom->map(ids[restrain][2]);
+  const int idx4 = atom->map(ids[restrain][3]);
+
+  int count = 0;
+  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
+  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
+  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
+  if ((idx4 >= 0) && (idx4 < nlocal)) count++;
+
+  int allcount;
+  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (allcount != 4)
+    error->all(FLERR,"Dihedral atoms do not exist in fix topo");
+
+  // create angle once or 3x if newton_bond set
+
+  int *num_improper = atom->num_improper;
+  int **improper_type = atom->improper_type;
+  tagint **improper_atom1 = atom->improper_atom1;
+  tagint **improper_atom2 = atom->improper_atom2;
+  tagint **improper_atom3 = atom->improper_atom3;
+  tagint **improper_atom4 = atom->improper_atom4;
+
+  int nbreak = 0;
+  if ((m = idx2) >= 0) {
+    j = 0;
+    while (j < atom->num_improper[m])
+      if ((improper_atom1[m][j] == ids[restrain][0]) &&
+          (improper_atom2[m][j] == ids[restrain][1]) &&
+          (improper_atom3[m][j] == ids[restrain][2]) &&
+          (improper_atom4[m][j] == ids[restrain][3]) &&
+          (improper_type[m][j] == abs(type[restrain]))) {
+        n = num_improper[m];
+        improper_type[m][j] = improper_type[m][n-1];
+        improper_atom1[m][j] = improper_atom1[m][n-1];
+        improper_atom2[m][j] = improper_atom2[m][n-1];
+        improper_atom3[m][j] = improper_atom3[m][n-1];
+        improper_atom4[m][j] = improper_atom4[m][n-1];
+        num_improper[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+  if (nbreak < 1)
+    error->one(FLERR,"Dihedral has not been previously defined in fix topo");
+
+  atom->nimpropers--;
+
+  if (force->newton_bond) return;
+
+  if ((m = idx1) >= 0) {
+    j = 0;
+    while (j < atom->num_improper[m])
+      if ((improper_atom1[m][j] == ids[restrain][0]) &&
+          (improper_atom2[m][j] == ids[restrain][1]) &&
+          (improper_atom3[m][j] == ids[restrain][2]) &&
+          (improper_atom4[m][j] == ids[restrain][3]) &&
+          (improper_type[m][j] == abs(type[restrain]))) {
+        n = num_improper[m];
+        improper_type[m][j] = improper_type[m][n-1];
+        improper_atom1[m][j] = improper_atom1[m][n-1];
+        improper_atom2[m][j] = improper_atom2[m][n-1];
+        improper_atom3[m][j] = improper_atom3[m][n-1];
+        improper_atom4[m][j] = improper_atom4[m][n-1];
+        num_improper[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+  if ((m = idx3) >= 0) {
+    j = 0;
+    while (j < atom->num_improper[m])
+      if ((improper_atom1[m][j] == ids[restrain][0]) &&
+          (improper_atom2[m][j] == ids[restrain][1]) &&
+          (improper_atom3[m][j] == ids[restrain][2]) &&
+          (improper_atom4[m][j] == ids[restrain][3]) &&
+          (improper_type[m][j] == abs(type[restrain]))) {
+        n = num_improper[m];
+        improper_type[m][j] = improper_type[m][n-1];
+        improper_atom1[m][j] = improper_atom1[m][n-1];
+        improper_atom2[m][j] = improper_atom2[m][n-1];
+        improper_atom3[m][j] = improper_atom3[m][n-1];
+        improper_atom4[m][j] = improper_atom4[m][n-1];
+        num_improper[m]--;
+        nbreak++;
+      } else j++;
+  }
+
+
+  if ((m = idx4) >= 0) {
+    j = 0;
+    while (j < atom->num_improper[m])
+      if ((improper_atom1[m][j] == ids[restrain][0]) &&
+          (improper_atom2[m][j] == ids[restrain][1]) &&
+          (improper_atom3[m][j] == ids[restrain][2]) &&
+          (improper_atom4[m][j] == ids[restrain][3]) &&
+          (improper_type[m][j] == abs(type[restrain]))) {
+        n = num_improper[m];
+        improper_type[m][j] = improper_type[m][n-1];
+        improper_atom1[m][j] = improper_atom1[m][n-1];
+        improper_atom2[m][j] = improper_atom2[m][n-1];
+        improper_atom3[m][j] = improper_atom3[m][n-1];
+        improper_atom4[m][j] = improper_atom4[m][n-1];
+        num_improper[m]--;
+        nbreak++;
+      } else j++;
+  }
 }
 
 /* ----------------------------------------------------------------------

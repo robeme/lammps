@@ -49,14 +49,17 @@ class FixTopo : public Fix {
   double **f;
   double energy, energy_old, energy_new;
 
+  void topo_create();
+  double topo_eval();
+  void topo_update();
   void create_bond(int);
   void break_bond(int);
   void create_angle(int);
   void break_angle(int);
-  void restrain_dihedral(int);
-  double topo_eval();
-  void topo_create();
-  void update_topology();
+  void create_dihedral(int);
+  void break_dihedral(int);
+  void create_improper(int);
+  void break_improper(int);
   void rebuild_special_one(int);
   int dedup(int, int, tagint *);
 
