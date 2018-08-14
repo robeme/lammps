@@ -595,7 +595,7 @@ void FixTopo::create_angle(int restrain)
 
 void FixTopo::break_angle(int restrain)
 {
-  int j,m,n;
+  int j,m,n,found;
 
   // check that 3 atoms exist
 
@@ -625,11 +625,14 @@ void FixTopo::break_angle(int restrain)
   int nbreak = 0;
   if ((m = idx2) >= 0) {
     j = 0;
-    while (j < atom->num_angle[m])
-      if ((angle_atom1[m][j] == ids[restrain][0]) &&
-          (angle_atom2[m][j] == ids[restrain][1]) &&
-          (angle_atom3[m][j] == ids[restrain][2]) &&
-          (angle_type[m][j] == abs(type[restrain]))) {
+    while (j < atom->num_angle[m]) {
+      found = 0;
+      for (int i = 0; i < 3; i++) {
+        if ((angle_atom1[m][j] == ids[restrain][i]) ||
+            (angle_atom2[m][j] == ids[restrain][i]) ||
+            (angle_atom3[m][j] == ids[restrain][i])) found++;
+      }
+      if ( (found == 3) && (angle_type[m][j] == abs(type[restrain]))) {
         n = num_angle[m];
         angle_type[m][j] = angle_type[m][n-1];
         angle_atom1[m][j] = angle_atom1[m][n-1];
@@ -638,6 +641,7 @@ void FixTopo::break_angle(int restrain)
         num_angle[m]--;
         nbreak++;
       } else j++;
+    }
   }
 
   if (nbreak < 1)
@@ -649,11 +653,14 @@ void FixTopo::break_angle(int restrain)
 
   if ((m = idx1) >= 0) {
     j = 0;
-    while (j < atom->num_angle[m])
-      if ((angle_atom1[m][j] == ids[restrain][0]) &&
-          (angle_atom2[m][j] == ids[restrain][1]) &&
-          (angle_atom3[m][j] == ids[restrain][2]) &&
-          (angle_type[m][j] == abs(type[restrain]))) {
+    while (j < atom->num_angle[m]) {
+      found = 0;
+      for (int i = 0; i < 3; i++) {
+        if ((angle_atom1[m][j] == ids[restrain][i]) ||
+            (angle_atom2[m][j] == ids[restrain][i]) ||
+            (angle_atom3[m][j] == ids[restrain][i])) found++;
+      }
+      if ( (found == 3) && (angle_type[m][j] == abs(type[restrain]))) {
         n = num_angle[m];
         angle_type[m][j] = angle_type[m][n-1];
         angle_atom1[m][j] = angle_atom1[m][n-1];
@@ -661,15 +668,19 @@ void FixTopo::break_angle(int restrain)
         angle_atom3[m][j] = angle_atom3[m][n-1];
         num_angle[m]--;
       } else j++;
+    }
   }
 
   if ((m = idx3) >= 0) {
     j = 0;
-    while (j < atom->num_angle[m])
-      if ((angle_atom1[m][j] == ids[restrain][0]) &&
-          (angle_atom2[m][j] == ids[restrain][1]) &&
-          (angle_atom3[m][j] == ids[restrain][2]) &&
-          (angle_type[m][j] == abs(type[restrain]))) {
+    while (j < atom->num_angle[m]) {
+      found = 0;
+      for (int i = 0; i < 3; i++) {
+        if ((angle_atom1[m][j] == ids[restrain][i]) ||
+            (angle_atom2[m][j] == ids[restrain][i]) ||
+            (angle_atom3[m][j] == ids[restrain][i])) found++;
+      }
+      if ( (found == 3) && (angle_type[m][j] == abs(type[restrain]))) {
         n = num_angle[m];
         angle_type[m][j] = angle_type[m][n-1];
         angle_atom1[m][j] = angle_atom1[m][n-1];
@@ -677,6 +688,7 @@ void FixTopo::break_angle(int restrain)
         angle_atom3[m][j] = angle_atom3[m][n-1];
         num_angle[m]--;
       } else j++;
+    }
   }
 }
 
@@ -774,26 +786,7 @@ void FixTopo::create_dihedral(int restrain)
 
 void FixTopo::break_dihedral(int restrain)
 {
-  int j,m,n;
-
-  // check that 3 atoms exist
-
-  const int nlocal = atom->nlocal;
-  const int idx1 = atom->map(ids[restrain][0]);
-  const int idx2 = atom->map(ids[restrain][1]);
-  const int idx3 = atom->map(ids[restrain][2]);
-  const int idx4 = atom->map(ids[restrain][3]);
-
-  int count = 0;
-  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
-  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
-  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
-  if ((idx4 >= 0) && (idx4 < nlocal)) count++;
-
-  int allcount;
-  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
-  if (allcount != 4)
-    error->all(FLERR,"Dihedral atoms do not exist in fix topo");
+  int j,m,n,found;
 
   // create angle once or 3x if newton_bond set
 
@@ -805,89 +798,38 @@ void FixTopo::break_dihedral(int restrain)
   tagint **dihedral_atom4 = atom->dihedral_atom4;
 
   int nbreak = 0;
-  if ((m = idx2) >= 0) {
-    j = 0;
-    while (j < atom->num_dihedral[m])
-      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
-          (dihedral_atom2[m][j] == ids[restrain][1]) &&
-          (dihedral_atom3[m][j] == ids[restrain][2]) &&
-          (dihedral_atom4[m][j] == ids[restrain][3]) &&
-          (dihedral_type[m][j] == abs(type[restrain]))) {
-        n = num_dihedral[m];
-        dihedral_type[m][j] = dihedral_type[m][n-1];
-        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
-        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
-        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
-        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
-        num_dihedral[m]--;
-        nbreak++;
-      } else j++;
+  for (int k = 0; k < 4; k++){
+    if ((m = atom->map(ids[restrain][k])) >= 0) {
+      j = 0;
+      while (j < atom->num_dihedral[m]) {
+        found = 0;
+        for (int i = 0; i < 4; i++)
+          if ((dihedral_atom1[m][j] == ids[restrain][i]) ||
+              (dihedral_atom2[m][j] == ids[restrain][i]) ||
+              (dihedral_atom3[m][j] == ids[restrain][i]) ||
+              (dihedral_atom4[m][j] == ids[restrain][i])) found++;
+        if ( (found == 4) && (dihedral_type[m][j] == abs(type[restrain])) ) {
+          n = num_dihedral[m];
+          dihedral_type[m][j] = dihedral_type[m][n-1];
+          dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
+          dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
+          dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
+          dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
+          num_dihedral[m]--;
+          nbreak++;
+        } else j++;
+      }
+    }
   }
 
-  if (nbreak < 1)
+  int allcount;
+  MPI_Allreduce(&nbreak,&allcount,1,MPI_INT,MPI_SUM,world);
+  if (force->newton_bond && (allcount < 1))
     error->one(FLERR,"Dihedral has not been previously defined in fix topo");
+  if (!force->newton_bond && (allcount < 4))
+      error->one(FLERR,"Dihedral has not been previously defined in fix topo");
 
   atom->ndihedrals--;
-
-  if (force->newton_bond) return;
-
-  if ((m = idx1) >= 0) {
-    j = 0;
-    while (j < atom->num_dihedral[m])
-      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
-          (dihedral_atom2[m][j] == ids[restrain][1]) &&
-          (dihedral_atom3[m][j] == ids[restrain][2]) &&
-          (dihedral_atom4[m][j] == ids[restrain][3]) &&
-          (dihedral_type[m][j] == abs(type[restrain]))) {
-        n = num_dihedral[m];
-        dihedral_type[m][j] = dihedral_type[m][n-1];
-        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
-        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
-        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
-        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
-        num_dihedral[m]--;
-        nbreak++;
-      } else j++;
-  }
-
-  if ((m = idx3) >= 0) {
-    j = 0;
-    while (j < atom->num_dihedral[m])
-      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
-          (dihedral_atom2[m][j] == ids[restrain][1]) &&
-          (dihedral_atom3[m][j] == ids[restrain][2]) &&
-          (dihedral_atom4[m][j] == ids[restrain][3]) &&
-          (dihedral_type[m][j] == abs(type[restrain]))) {
-        n = num_dihedral[m];
-        dihedral_type[m][j] = dihedral_type[m][n-1];
-        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
-        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
-        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
-        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
-        num_dihedral[m]--;
-        nbreak++;
-      } else j++;
-  }
-
-
-  if ((m = idx4) >= 0) {
-    j = 0;
-    while (j < atom->num_dihedral[m])
-      if ((dihedral_atom1[m][j] == ids[restrain][0]) &&
-          (dihedral_atom2[m][j] == ids[restrain][1]) &&
-          (dihedral_atom3[m][j] == ids[restrain][2]) &&
-          (dihedral_atom4[m][j] == ids[restrain][3]) &&
-          (dihedral_type[m][j] == abs(type[restrain]))) {
-        n = num_dihedral[m];
-        dihedral_type[m][j] = dihedral_type[m][n-1];
-        dihedral_atom1[m][j] = dihedral_atom1[m][n-1];
-        dihedral_atom2[m][j] = dihedral_atom2[m][n-1];
-        dihedral_atom3[m][j] = dihedral_atom3[m][n-1];
-        dihedral_atom4[m][j] = dihedral_atom4[m][n-1];
-        num_dihedral[m]--;
-        nbreak++;
-      } else j++;
-  }
 }
 
 /* ----------------------------------------------------------------------
