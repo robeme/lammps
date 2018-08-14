@@ -66,7 +66,8 @@ FixTopo::FixTopo(LAMMPS *lmp, int narg, char **arg) :
   vector_flag = 1;
   size_vector = 2;
   extvector = 1;
-
+  force_reneighbor = 1;
+  next_reneighbor = -1;
   resetflag = 0;
 
   // parse args
@@ -164,6 +165,7 @@ FixTopo::~FixTopo()
   memory->destroy(type);
   memory->destroy(q);
   memory->destroy(f);
+  delete [] copy;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -597,25 +599,6 @@ void FixTopo::break_angle(int restrain)
 {
   int j,m,n,found;
 
-  // check that 3 atoms exist
-
-  const int nlocal = atom->nlocal;
-  const int idx1 = atom->map(ids[restrain][0]);
-  const int idx2 = atom->map(ids[restrain][1]);
-  const int idx3 = atom->map(ids[restrain][2]);
-
-  int count = 0;
-  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
-  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
-  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
-
-  int allcount;
-  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
-  if (allcount != 3)
-    error->all(FLERR,"Angle atoms do not exist in fix topo");
-
-  // create angle once or 3x if newton_bond set
-
   int *num_angle = atom->num_angle;
   int **angle_type = atom->angle_type;
   tagint **angle_atom1 = atom->angle_atom1;
@@ -623,73 +606,41 @@ void FixTopo::break_angle(int restrain)
   tagint **angle_atom3 = atom->angle_atom3;
 
   int nbreak = 0;
-  if ((m = idx2) >= 0) {
-    j = 0;
-    while (j < atom->num_angle[m]) {
-      found = 0;
-      for (int i = 0; i < 3; i++) {
-        if ((angle_atom1[m][j] == ids[restrain][i]) ||
-            (angle_atom2[m][j] == ids[restrain][i]) ||
-            (angle_atom3[m][j] == ids[restrain][i])) found++;
+  for (int k = 0; k < 3; k++){
+    if ((m = atom->map(ids[restrain][k])) >= 0) {
+      j = 0;
+      while (j < num_angle[m]) {
+        found = 0;
+        for (int i = 0; i < 3; i++) {
+          if ((angle_atom1[m][j] == ids[restrain][i]) ||
+              (angle_atom2[m][j] == ids[restrain][i]) ||
+              (angle_atom3[m][j] == ids[restrain][i])) found++;
+        }
+        if ( (found == 3) && (angle_type[m][j] == abs(type[restrain])) ) {
+          n = num_angle[m];
+          angle_type[m][j] = angle_type[m][n-1];
+          angle_atom1[m][j] = angle_atom1[m][n-1];
+          angle_atom2[m][j] = angle_atom2[m][n-1];
+          angle_atom3[m][j] = angle_atom3[m][n-1];
+          num_angle[m]--;
+          nbreak++;
+        } else j++;
       }
-      if ( (found == 3) && (angle_type[m][j] == abs(type[restrain]))) {
-        n = num_angle[m];
-        angle_type[m][j] = angle_type[m][n-1];
-        angle_atom1[m][j] = angle_atom1[m][n-1];
-        angle_atom2[m][j] = angle_atom2[m][n-1];
-        angle_atom3[m][j] = angle_atom3[m][n-1];
-        num_angle[m]--;
-        nbreak++;
-      } else j++;
     }
   }
 
-  if (nbreak < 1)
-    error->one(FLERR,"Angle has not been previously defined in fix topo");
+  int allcount;
+  MPI_Allreduce(&nbreak,&allcount,1,MPI_INT,MPI_SUM,world);
+  // epoxy ring makes problems here ...
+  // if (force->newton_bond && (allcount < 1))
+  //   error->one(FLERR,"Angle has not been defined previously in fix topo");
+  // if (!force->newton_bond && (allcount < 3))
+  //   error->one(FLERR,"Angle has not been defined previously in fix topo");
 
-  atom->nangles--;
-
-  if (force->newton_bond) return;
-
-  if ((m = idx1) >= 0) {
-    j = 0;
-    while (j < atom->num_angle[m]) {
-      found = 0;
-      for (int i = 0; i < 3; i++) {
-        if ((angle_atom1[m][j] == ids[restrain][i]) ||
-            (angle_atom2[m][j] == ids[restrain][i]) ||
-            (angle_atom3[m][j] == ids[restrain][i])) found++;
-      }
-      if ( (found == 3) && (angle_type[m][j] == abs(type[restrain]))) {
-        n = num_angle[m];
-        angle_type[m][j] = angle_type[m][n-1];
-        angle_atom1[m][j] = angle_atom1[m][n-1];
-        angle_atom2[m][j] = angle_atom2[m][n-1];
-        angle_atom3[m][j] = angle_atom3[m][n-1];
-        num_angle[m]--;
-      } else j++;
-    }
-  }
-
-  if ((m = idx3) >= 0) {
-    j = 0;
-    while (j < atom->num_angle[m]) {
-      found = 0;
-      for (int i = 0; i < 3; i++) {
-        if ((angle_atom1[m][j] == ids[restrain][i]) ||
-            (angle_atom2[m][j] == ids[restrain][i]) ||
-            (angle_atom3[m][j] == ids[restrain][i])) found++;
-      }
-      if ( (found == 3) && (angle_type[m][j] == abs(type[restrain]))) {
-        n = num_angle[m];
-        angle_type[m][j] = angle_type[m][n-1];
-        angle_atom1[m][j] = angle_atom1[m][n-1];
-        angle_atom2[m][j] = angle_atom2[m][n-1];
-        angle_atom3[m][j] = angle_atom3[m][n-1];
-        num_angle[m]--;
-      } else j++;
-    }
-  }
+  if (force->newton_bond)
+    atom->nangles -= allcount;
+  else
+    atom->nangles -= allcount/3;
 }
 
 /* ----------------------------------------------------------------------
@@ -801,7 +752,7 @@ void FixTopo::break_dihedral(int restrain)
   for (int k = 0; k < 4; k++){
     if ((m = atom->map(ids[restrain][k])) >= 0) {
       j = 0;
-      while (j < atom->num_dihedral[m]) {
+      while (j < num_dihedral[m]) {
         found = 0;
         for (int i = 0; i < 4; i++)
           if ((dihedral_atom1[m][j] == ids[restrain][i]) ||
@@ -824,12 +775,16 @@ void FixTopo::break_dihedral(int restrain)
 
   int allcount;
   MPI_Allreduce(&nbreak,&allcount,1,MPI_INT,MPI_SUM,world);
-  if (force->newton_bond && (allcount < 1))
-    error->one(FLERR,"Dihedral has not been previously defined in fix topo");
-  if (!force->newton_bond && (allcount < 4))
-      error->one(FLERR,"Dihedral has not been previously defined in fix topo");
+  // epoxy ring makes problems here ...
+  // if (force->newton_bond && (allcount < 1))
+  //   error->one(FLERR,"Dihedral has not been defined previously in fix topo");
+  // if (!force->newton_bond && (allcount < 4))
+  //   error->one(FLERR,"Dihedral has not been defined previously in fix topo");
 
-  atom->ndihedrals--;
+  if (force->newton_bond)
+    atom->ndihedrals -= allcount;
+  else
+    atom->ndihedrals -= allcount/4;
 }
 
 /* ----------------------------------------------------------------------
