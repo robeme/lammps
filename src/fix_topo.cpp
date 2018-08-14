@@ -212,7 +212,7 @@ void FixTopo::post_force(int vflag)
   memory->create(f_new,atom->natoms,3,"topo:f_new");
   memory->create(f_old,atom->natoms,3,"topo:f_old");
 
-  // apply restraints and store old values via triangular exchange
+  // apply restraints and store old values via triangular exchange in topo_create()
   topo_create();
   dtmp = energy_new;
   energy_new = topo_eval();
@@ -232,8 +232,17 @@ void FixTopo::post_force(int vflag)
   }
 
   // mix old and new forces with delta to smoothly turn on/off interactions
-  double delta = update->ntimestep - update->beginstep;
-  if (delta != 0.0) delta /= update->endstep - update->beginstep;
+  //double delta = update->ntimestep - update->beginstep;
+  //if (delta != 0.0) delta /= update->endstep - update->beginstep;
+  double tf2 = update->endstep*update->endstep;
+  double ti2 = update->beginstep*update->beginstep;
+  double t2 = update->ntimestep*update->ntimestep;
+  double tf2t2 = tf2-t2;
+  double tf2ti2 = tf2-ti2;
+
+  double delta = 1.0 - tf2t2*tf2t2*(tf2+2.0*t2+3.0*ti2) / (tf2ti2*tf2ti2*tf2ti2);
+
+  //printf("timestep: %d, delta: %f\n",update->ntimestep,delta);
 
   // delta = exp(-pow(update->ntimestep-update->endstep,2)/(0.01*pow(update->endstep,2)));
 
