@@ -204,7 +204,6 @@ void FixTopo::setup(int vflag)
 void FixTopo::post_force(int vflag)
 {
   int i1,i2,i3,i4,itmp;
-  double dtmp;
   double **f_new;
   double **f_old;
 
@@ -214,7 +213,6 @@ void FixTopo::post_force(int vflag)
 
   // apply restraints and store old values via triangular exchange in topo_create()
   topo_create();
-  dtmp = energy_new;
   energy_new = topo_eval();
   for (int i = 0; i < atom->nlocal; i++) {
     f_new[i][0] = f[i][0];
@@ -222,36 +220,33 @@ void FixTopo::post_force(int vflag)
     f_new[i][2] = f[i][2];
   }
 
-  // reverse restraints so long we've not reached end of sim, keep them afterwards
+  // reverse restraints and recalculate topology via triangular exchange in topo_create()
   topo_create();
   energy_old = topo_eval();
   for (int i = 0; i < atom->nlocal; i++) {
-    f_old[i][0] = atom->f[i][0];
-    f_old[i][1] = atom->f[i][1];
-    f_old[i][2] = atom->f[i][2];
+    f_old[i][0] = f[i][0];
+    f_old[i][1] = f[i][1];
+    f_old[i][2] = f[i][2];
   }
 
   // mix old and new forces with delta to smoothly turn on/off interactions
-  //double delta = update->ntimestep - update->beginstep;
-  //if (delta != 0.0) delta /= update->endstep - update->beginstep;
+  // double delta = update->ntimestep - update->beginstep;
+  // if (delta != 0.0) delta /= update->endstep - update->beginstep;
+
   double tf2 = update->endstep*update->endstep;
   double ti2 = update->beginstep*update->beginstep;
   double t2 = update->ntimestep*update->ntimestep;
   double tf2t2 = tf2-t2;
   double tf2ti2 = tf2-ti2;
+  double S = 1.0 - tf2t2*tf2t2*(tf2+2.0*t2-3.0*ti2) / (tf2ti2*tf2ti2*tf2ti2);
+  //printf("timestep: %d %d %d, S: %f\n",update->beginstep,update->endstep,update->ntimestep,S);
 
-  double delta = 1.0 - tf2t2*tf2t2*(tf2+2.0*t2-3.0*ti2) / (tf2ti2*tf2ti2*tf2ti2);
-
-  //printf("timestep: %d %d %d, delta: %f\n",update->beginstep,update->endstep,update->ntimestep,delta);
-
-  // delta = exp(-pow(update->ntimestep-update->endstep,2)/(0.01*pow(update->endstep,2)));
-
-  energy = delta * (energy_new - energy_old);
+  energy = S * (energy_new - energy_old);
 
   for (int i = 0; i < atom->nlocal; i++) {
-    atom->f[i][0] += delta * (f_new[i][0] - f_old[i][0]);
-    atom->f[i][1] += delta * (f_new[i][1] - f_old[i][1]);
-    atom->f[i][2] += delta * (f_new[i][2] - f_old[i][2]);
+    atom->f[i][0] += S * ( f_new[i][0] - f_old[i][0] );
+    atom->f[i][1] += S * ( f_new[i][1] - f_old[i][1] );
+    atom->f[i][2] += S * ( f_new[i][2] - f_old[i][2] );
   }
 
   // cleanup
@@ -326,7 +321,6 @@ void FixTopo::topo_create()
   if (anyimpro) force->improper->init_style();
   if (anyq && force->kspace) force->kspace->qsum_qsq();
 
-  // new neighbor list is created in topo_eval()
 }
 
 /* ----------------------------------------------------------------------
@@ -1116,6 +1110,13 @@ void FixTopo::break_improper(int restrain)
 double FixTopo::topo_eval()
 {
   // no matter what, rebuild neighbor list
+  if (domain->triclinic) domain->x2lamda(atom->nlocal);
+  domain->pbc();
+  comm->exchange();
+  atom->nghost = 0;
+  comm->borders();
+  if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
+  if (modify->n_pre_neighbor) modify->pre_neighbor();
   neighbor->build(1);
 
   int eflag = 1;
