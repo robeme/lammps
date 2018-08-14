@@ -240,9 +240,9 @@ void FixTopo::post_force(int vflag)
   double tf2t2 = tf2-t2;
   double tf2ti2 = tf2-ti2;
 
-  double delta = 1.0 - tf2t2*tf2t2*(tf2+2.0*t2+3.0*ti2) / (tf2ti2*tf2ti2*tf2ti2);
+  double delta = 1.0 - tf2t2*tf2t2*(tf2+2.0*t2-3.0*ti2) / (tf2ti2*tf2ti2*tf2ti2);
 
-  //printf("timestep: %d, delta: %f\n",update->ntimestep,delta);
+  //printf("timestep: %d %d %d, delta: %f\n",update->beginstep,update->endstep,update->ntimestep,delta);
 
   // delta = exp(-pow(update->ntimestep-update->endstep,2)/(0.01*pow(update->endstep,2)));
 
