@@ -215,7 +215,7 @@ void FixTopo::post_force(int vflag)
 
   // apply restraints and store old values via triangular exchange in topo_create()
   topo_create();
-  energy_new = topo_eval();
+  energy_new = topo_eval(vflag);
   for (int i = 0; i < atom->nlocal; i++) {
     f_new[i][0] = f[i][0];
     f_new[i][1] = f[i][1];
@@ -224,7 +224,7 @@ void FixTopo::post_force(int vflag)
 
   // reverse restraints and recalculate topology via triangular exchange in topo_create()
   topo_create();
-  energy_old = topo_eval();
+  energy_old = topo_eval(vflag);
   for (int i = 0; i < atom->nlocal; i++) {
     f_old[i][0] = f[i][0];
     f_old[i][1] = f[i][1];
@@ -316,13 +316,12 @@ void FixTopo::topo_create()
   // this resets other coeffs that may depend on changed values,
   //   and also offset and tail corrections
 
-  if (anyvdwl) force->pair->init_style();
-  if (anybond) force->bond->init_style();
+  if (anyvdwl) force->pair->reinit();
+  if (anybond) force->bond->reinit();
   if (anyangle) force->angle->init_style();
   if (anydihed) force->dihedral->init_style();
   if (anyimpro) force->improper->init_style();
   if (anyq && force->kspace) force->kspace->qsum_qsq();
-
 }
 
 /* ----------------------------------------------------------------------
@@ -471,7 +470,7 @@ void FixTopo::break_bond(int nrestrain)
     if (tag[i] < tag[j]) atom->nbonds--;
   }
 
-  if (nbreak < 1) error->all(FLERR,"bond has not been previously defined in fix topo");
+  //if (nbreak < 1) error->all(FLERR,"bond has not been previously defined in fix topo");
 
   memory->destroy(partner);
 }
@@ -1004,7 +1003,7 @@ void FixTopo::break_improper(int restrain)
         forces from other fixes
 ---------------------------------------------------------------------- */
 
-double FixTopo::topo_eval()
+double FixTopo::topo_eval(int vflag)
 {
   // no matter what, rebuild neighbor list
   if (domain->triclinic) domain->x2lamda(atom->nlocal);
@@ -1015,29 +1014,22 @@ double FixTopo::topo_eval()
   if (domain->triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
   if (modify->n_pre_neighbor) modify->pre_neighbor();
   neighbor->build(1);
-
   int eflag = 1;
-  int vflag = 0;
 
-  // store old forces and energies to restore them afterwards
-
+  // create array to store old forces and energies and to restore them
   double **f_tmp;
   memory->create(f_tmp,atom->natoms,3,"topo:f_tmp");
-
-  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
-
   // store forces on atoms
   for (int i = 0; i < atom->nlocal; i++) {
     f_tmp[i][0] = atom->f[i][0];
     f_tmp[i][1] = atom->f[i][1];
     f_tmp[i][2] = atom->f[i][2];
   }
-
   // clear forces so we have a fresh array to calculate the forces
+  size_t nbytes = sizeof(double) * (atom->nlocal + atom->nghost);
   if (nbytes) memset(&atom->f[0][0],0,3*nbytes);
 
   // forces and energies of new topology
-
   if (force->pair) force->pair->compute(eflag,vflag);
 
   if (atom->molecular) {
@@ -1050,19 +1042,16 @@ double FixTopo::topo_eval()
   if (force->kspace) force->kspace->compute(eflag,vflag);
 
   // perform a reverse_comm() of forces
-
   if (force->newton) comm->reverse_comm();
 
   // store forces on atoms from actual topology
-
   for (int i = 0; i < atom->nlocal; i++) {
     f[i][0] = atom->f[i][0];
     f[i][1] = atom->f[i][1];
     f[i][2] = atom->f[i][2];
   }
 
-  // restore forces
-
+  // restore forces to previous forces
   for (int i = 0; i < atom->nlocal; i++) {
     atom->f[i][0] = f_tmp[i][0];
     atom->f[i][1] = f_tmp[i][1];

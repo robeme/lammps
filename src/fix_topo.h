@@ -50,7 +50,7 @@ class FixTopo : public Fix {
   double energy, energy_old, energy_new;
 
   void topo_create();
-  double topo_eval();
+  double topo_eval(int);
   void topo_update();
   void create_bond(int);
   void break_bond(int);
