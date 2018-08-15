@@ -529,26 +529,8 @@ void FixTopo::topo_update()
 
 void FixTopo::create_angle(int restrain)
 {
+  /* create angle from restrain once or three times if newton is off */
   int m;
-
-  // check that 3 atoms exist
-
-  const int nlocal = atom->nlocal;
-  const int idx1 = atom->map(ids[restrain][0]);
-  const int idx2 = atom->map(ids[restrain][1]);
-  const int idx3 = atom->map(ids[restrain][2]);
-
-  int count = 0;
-  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
-  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
-  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
-
-  int allcount;
-  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
-  if (allcount != 3)
-    error->all(FLERR,"Angle atoms do not exist in fix topo");
-
-  // create angle once or 3x if newton_bond set
 
   int *num_angle = atom->num_angle;
   int **angle_type = atom->angle_type;
@@ -556,7 +538,7 @@ void FixTopo::create_angle(int restrain)
   tagint **angle_atom2 = atom->angle_atom2;
   tagint **angle_atom3 = atom->angle_atom3;
 
-  if ((m = idx2) >= 0) {
+  if ((m = atom->map(ids[restrain][1])) >= 0) {
     if (num_angle[m] == atom->angle_per_atom)
       error->one(FLERR,"New angle exceeded angles per atom in create_bonds");
     angle_type[m][num_angle[m]] = type[restrain];
@@ -569,7 +551,7 @@ void FixTopo::create_angle(int restrain)
 
   if (force->newton_bond) return;
 
-  if ((m = idx1) >= 0) {
+  if ((m = atom->map(ids[restrain][0])) >= 0) {
     if (num_angle[m] == atom->angle_per_atom)
       error->one(FLERR,"New angle exceeded angles per atom in create_bonds");
     angle_type[m][num_angle[m]] = type[restrain];
@@ -579,7 +561,7 @@ void FixTopo::create_angle(int restrain)
     num_angle[m]++;
   }
 
-  if ((m = idx3) >= 0) {
+  if ((m = atom->map(ids[restrain][2])) >= 0) {
     if (num_angle[m] == atom->angle_per_atom)
       error->one(FLERR,"New angle exceeded angles per atom in create_bonds");
     angle_type[m][num_angle[m]] = type[restrain];
@@ -596,6 +578,14 @@ void FixTopo::create_angle(int restrain)
 
 void FixTopo::break_angle(int restrain)
 {
+  /* break an angle from the restrain. this is done by looking for an
+  angle in which all three atoms of the restrain are in an arbitrary order
+  defined and which has the desired restrain type.
+  NOTE: epoxy rings are problematic since O-C1-C2 and O-C2-C1 are both
+  defined, have the same atoms in the angle and have the same angle type.
+  if both angles are defined in the restrain, the method won't find both
+  and would normally produce an error ... (deactived for now) */
+
   int j,m,n,found;
 
   int *num_angle = atom->num_angle;
@@ -628,18 +618,18 @@ void FixTopo::break_angle(int restrain)
     }
   }
 
-  int allcount;
-  MPI_Allreduce(&nbreak,&allcount,1,MPI_INT,MPI_SUM,world);
-  // epoxy ring makes problems here ...
+  int breakcount;
+  MPI_Allreduce(&nbreak,&breakcount,1,MPI_INT,MPI_SUM,world);
+
   // if (force->newton_bond && (allcount < 1))
   //   error->one(FLERR,"Angle has not been defined previously in fix topo");
   // if (!force->newton_bond && (allcount < 3))
   //   error->one(FLERR,"Angle has not been defined previously in fix topo");
 
   if (force->newton_bond)
-    atom->nangles -= allcount;
+    atom->nangles -= breakcount;
   else
-    atom->nangles -= allcount/3;
+    atom->nangles -= breakcount/3;
 }
 
 /* ----------------------------------------------------------------------
@@ -648,28 +638,11 @@ void FixTopo::break_angle(int restrain)
 
 void FixTopo::create_dihedral(int restrain)
 {
+  /* create dihedral from restrain once or four times if newton is off.
+  copied from delete_bonds.cpp and in contrast to delete_bonds atoms must
+  not be necesseraly only on one processor. */
+
   int m;
-
-  // check that 4 atoms exist
-
-  const int nlocal = atom->nlocal;
-  const int idx1 = atom->map(ids[restrain][0]);
-  const int idx2 = atom->map(ids[restrain][1]);
-  const int idx3 = atom->map(ids[restrain][2]);
-  const int idx4 = atom->map(ids[restrain][3]);
-
-  int count = 0;
-  if ((idx1 >= 0) && (idx1 < nlocal)) count++;
-  if ((idx2 >= 0) && (idx2 < nlocal)) count++;
-  if ((idx3 >= 0) && (idx3 < nlocal)) count++;
-  if ((idx4 >= 0) && (idx4 < nlocal)) count++;
-
-  int allcount;
-  MPI_Allreduce(&count,&allcount,1,MPI_INT,MPI_SUM,world);
-  if (allcount != 4)
-    error->all(FLERR,"Dihedral atoms do not exist in fix topo");
-
-  // create dihedral once or 4x if newton_bond set
 
   int *num_dihedral = atom->num_dihedral;
   int **dihedral_type = atom->dihedral_type;
@@ -678,7 +651,7 @@ void FixTopo::create_dihedral(int restrain)
   tagint **dihedral_atom3 = atom->dihedral_atom3;
   tagint **dihedral_atom4 = atom->dihedral_atom4;
 
-  if ((m = idx2) >= 0) {
+  if ((m = atom->map(ids[restrain][1])) >= 0) {
     if (num_dihedral[m] == atom->dihedral_per_atom)
       error->one(FLERR,
                  "New dihedral exceeded dihedrals per atom in fix topo");
@@ -693,7 +666,7 @@ void FixTopo::create_dihedral(int restrain)
 
   if (force->newton_bond) return;
 
-  if ((m = idx1) >= 0) {
+  if ((m = atom->map(ids[restrain][0])) >= 0) {
     if (num_dihedral[m] == atom->dihedral_per_atom)
       error->one(FLERR,
                  "New dihedral exceeded dihedrals per atom in fix topo");
@@ -705,7 +678,7 @@ void FixTopo::create_dihedral(int restrain)
     num_dihedral[m]++;
   }
 
-  if ((m = idx3) >= 0) {
+  if ((m = atom->map(ids[restrain][2])) >= 0) {
     if (num_dihedral[m] == atom->dihedral_per_atom)
       error->one(FLERR,
                  "New dihedral exceeded dihedrals per atom in fix topo");
@@ -717,7 +690,7 @@ void FixTopo::create_dihedral(int restrain)
     num_dihedral[m]++;
   }
 
-  if ((m = idx4) >= 0) {
+  if ((m = atom->map(ids[restrain][3])) >= 0) {
     if (num_dihedral[m] == atom->dihedral_per_atom)
       error->one(FLERR,
                  "New dihedral exceeded dihedrals per atom in fix topo");
@@ -736,6 +709,15 @@ void FixTopo::create_dihedral(int restrain)
 
 void FixTopo::break_dihedral(int restrain)
 {
+  /* break a dihedral from the restrain. this is done by looking for an
+  angle in which all three atoms of the restrain are in an arbitrary order
+  defined and which has the desired restrain type.
+  NOTE: multiple atoms arranged differently with the same dihedral type
+  will be deleted at once. this is accounted for in the counts but not if
+  atoms are ordered differently in another restrain dihedral. normally the
+  code would write an error that the dihedral has not been previously found
+  which is deactived for now b/c is causes trouble in the epoxy crosslinking */
+
   int j,m,n,found;
 
   // create angle once or 3x if newton_bond set
@@ -772,8 +754,8 @@ void FixTopo::break_dihedral(int restrain)
     }
   }
 
-  int allcount;
-  MPI_Allreduce(&nbreak,&allcount,1,MPI_INT,MPI_SUM,world);
+  int breakcount;
+  MPI_Allreduce(&nbreak,&breakcount,1,MPI_INT,MPI_SUM,world);
   // epoxy ring makes problems here ...
   // if (force->newton_bond && (allcount < 1))
   //   error->one(FLERR,"Dihedral has not been defined previously in fix topo");
@@ -781,9 +763,9 @@ void FixTopo::break_dihedral(int restrain)
   //   error->one(FLERR,"Dihedral has not been defined previously in fix topo");
 
   if (force->newton_bond)
-    atom->ndihedrals -= allcount;
+    atom->ndihedrals -= breakcount;
   else
-    atom->ndihedrals -= allcount/4;
+    atom->ndihedrals -= breakcount/4;
 }
 
 /* ----------------------------------------------------------------------
