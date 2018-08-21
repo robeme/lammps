@@ -269,7 +269,7 @@ void FixTopo::post_run()
 
 void FixTopo::topo_create()
 {
-  int i,ival;
+  int idx,ival;
   double dval;
 
   // apply restraints and store old values via triangular exchange for nonboned
@@ -277,7 +277,7 @@ void FixTopo::topo_create()
   // so the next call of topo_create() will restore the topology
 
   for (int m = 0; m < nrestrain; m++) {
-    i = atom->map(ids[m][0]);
+    idx = atom->map(ids[m][0]);
 
     if (rstyle[m] == BOND) {
       if (type[m] > 0)      { create_bond(m); type[m] = -type[m];}
@@ -293,15 +293,15 @@ void FixTopo::topo_create()
       else if (type[m] < 0) { break_improper(m);  type[m] = -type[m];}
     } else if (rstyle[m] == VDWL) {
       // if atom is not owned py proc skip
-      if (i < 0) continue;
-      ival = atom->type[i];
-      atom->type[i] = type[m];
+      if (idx < 0) continue;
+      ival = atom->type[idx];
+      atom->type[idx] = type[m];
       type[m] = ival;
     } else if (rstyle[m] == COUL) {
       // if atom is not owned py proc skip
-      if (i < 0) continue;
-      dval = atom->q[i];
-      atom->q[i] = q[m];
+      if (idx < 0) continue;
+      dval = atom->q[idx];
+      atom->q[idx] = q[m];
       q[m] = dval;
     }
   }
@@ -997,6 +997,7 @@ double FixTopo::topo_eval(int vflag)
   if (modify->n_pre_neighbor) modify->pre_neighbor();
   neighbor->build(1);
   int eflag = 1;
+  vflag = 0; // for now exclude virial calculations
 
   // create array to store old forces and energies and to restore them
   double **f_tmp;
