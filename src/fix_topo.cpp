@@ -272,6 +272,8 @@ void FixTopo::topo_create()
   int idx,ival;
   double dval;
 
+  modify->clearstep_compute();
+
   // apply restraints and store old values via triangular exchange for nonboned
   // interactions and by inverting the sign of the type for bonded interactions
   // so the next call of topo_create() will restore the topology
@@ -293,13 +295,13 @@ void FixTopo::topo_create()
       else if (type[m] < 0) { break_improper(m);  type[m] = -type[m];}
     } else if (rstyle[m] == VDWL) {
       // if atom is not owned py proc skip
-      if (idx < 0) continue;
+      if ((idx < 0) || (idx >= atom->nlocal)) continue;
       ival = atom->type[idx];
       atom->type[idx] = type[m];
       type[m] = ival;
     } else if (rstyle[m] == COUL) {
       // if atom is not owned py proc skip
-      if (idx < 0) continue;
+      if ((idx < 0) || (idx >= atom->nlocal)) continue;
       dval = atom->q[idx];
       atom->q[idx] = q[m];
       q[m] = dval;
@@ -315,6 +317,8 @@ void FixTopo::topo_create()
   // ditto for bond styles if any BOND setitings were changes
   // this resets other coeffs that may depend on changed values,
   //   and also offset and tail corrections
+
+  modify->addstep_compute(update->ntimestep + nevery);
 
   if (anyvdwl) force->pair->reinit();
   if (anybond) force->bond->reinit();
