@@ -92,7 +92,7 @@ void TemperNPTAtomSwap::command(int narg, char **arg)
   seed_boltz = force->inumeric(FLERR,arg[6]);
 
   my_set_temp = universe->iworld;
-  if (narg == 9) my_set_temp = force->inumeric(FLERR,arg[7]);
+  if (narg == 9) my_set_temp = force->inumeric(FLERR,arg[7]); // is arg[7] correct here? shouldn't it be arg[2]? it will be reset anyway later, I think...
 
   // swap frequency must evenly divide total # of timesteps
 
