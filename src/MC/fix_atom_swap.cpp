@@ -747,6 +747,13 @@ double FixAtomSwap::compute_vector(int n)
   return 0.0;
 }
 
+/* ---------------------------------------------------------------------- */
+
+void FixAtomSwap::reset_target(double t_new)
+{
+  beta = 1.0/(force->boltz*t_new);
+}
+
 /* ----------------------------------------------------------------------
    memory usage of local atom-based arrays
 ------------------------------------------------------------------------- */
