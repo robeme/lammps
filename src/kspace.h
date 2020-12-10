@@ -50,7 +50,7 @@ class KSpace : protected Pointers {
                                  // of neighbor lists
   int mixflag;                   // 1 if geometric mixing rules are enforced
                                  // for LJ coefficients
-  int slabflag;
+  int slabflag,wireflag;
   int scalar_pressure_flag;      // 1 if using MSM fast scalar pressure
   double slab_volfactor;
 

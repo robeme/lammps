@@ -532,6 +532,26 @@ void KSpace::modify_params(int narg, char **arg)
                          "cause unphysical behavior");
       }
       iarg += 2;
+    } else if (strcmp(arg[iarg],"wire") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal kspace_modify command");
+      if (strcmp(arg[iarg+1],"noyzforce") == 0) {
+        slabflag = 2;
+        wireflag = 2;
+      } else if (strcmp(arg[iarg+1],"nozforce") == 0) { 
+        slabflag = 2;
+      } else if (strcmp(arg[iarg+1],"noyforce") == 0) { 
+        wireflag = 2;
+      } else {
+        slabflag = 1;
+        wireflag = 1;
+        slab_volfactor = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        if (slab_volfactor <= 1.0)
+          error->all(FLERR,"Bad kspace_modify wire parameter");
+        if (slab_volfactor < 2.0 && comm->me == 0)
+          error->warning(FLERR,"Kspace_modify wire param < 2.0 may "
+                         "cause unphysical behavior");
+      }
+      iarg += 2;
     } else if (strcmp(arg[iarg],"compute") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal kspace_modify command");
       if (strcmp(arg[iarg+1],"yes") == 0) compute_flag = 1;
