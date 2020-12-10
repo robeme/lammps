@@ -161,6 +161,7 @@ class PPPM : public KSpace {
                      const FFT_SCALAR &);
   void compute_rho_coeff();
   virtual void slabcorr();
+  virtual void wirecorr();
 
   // grid communication
 
@@ -184,6 +185,7 @@ class PPPM : public KSpace {
   virtual void make_rho_groups(int, int, int);
   virtual void poisson_groups(int);
   virtual void slabcorr_groups(int,int,int);
+  virtual void wirecorr_groups(int,int,int);
 
 /* ----------------------------------------------------------------------
    denominator for Hockney-Eastwood Green's function
