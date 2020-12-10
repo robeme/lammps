@@ -70,6 +70,7 @@ KSpace::KSpace(LAMMPS *lmp) : Pointers(lmp)
   slabflag = 0;
   differentiation_flag = 0;
   slab_volfactor = 1;
+  wire_volfactor = 1;
   suffix_flag = Suffix::NONE;
   adjust_cutoff_flag = 1;
   scalar_pressure_flag = 0;
@@ -544,7 +545,7 @@ void KSpace::modify_params(int narg, char **arg)
       } else {
         slabflag = 1;
         wireflag = 1;
-        slab_volfactor = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        slab_volfactor = wire_volfactor = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (slab_volfactor <= 1.0)
           error->all(FLERR,"Bad kspace_modify wire parameter");
         if (slab_volfactor < 2.0 && comm->me == 0)
