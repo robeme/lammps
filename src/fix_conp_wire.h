@@ -18,7 +18,7 @@
 
 #ifdef FIX_CLASS
 
-FixStyle(conp,FixConpWire)
+FixStyle(conp/wire,FixConpWire)
 
 #else
 
