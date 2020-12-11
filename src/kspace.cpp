@@ -71,6 +71,7 @@ KSpace::KSpace(LAMMPS *lmp) : Pointers(lmp)
   differentiation_flag = 0;
   slab_volfactor = 1;
   wire_volfactor = 1;
+  wire_fact = 1.0;
   suffix_flag = Suffix::NONE;
   adjust_cutoff_flag = 1;
   scalar_pressure_flag = 0;

@@ -3004,11 +3004,7 @@ void PPPM::slabcorr()
 
   const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
     qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
-  double qscale = qqrd2e * scale;
-  
-  // if wire corrections are enabled, energies and forces need to
-  // be divided by a factor of two (J. Mol. Struct. 704, 101)
-  if (wireflag) qscale *= 0.5;
+  const double qscale = qqrd2e * scale * wire_fact;
 
   if (eflag_global) energy += qscale * e_slabcorr;
 
