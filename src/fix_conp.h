@@ -41,6 +41,7 @@ class FixConp : public Fix {
   void a_cal();
   void a_read();
   void b_cal();
+  void s_cal();
   void equation_solve();
   void update_charge();
   int electrode_check(int);
@@ -78,7 +79,7 @@ class FixConp : public Fix {
   int everynum;
   int elenum,elenum_old,elenum_all;
   double *eleallq;
-  double *aaa_all,*bbb_all;
+  double *aaa_all,*bbb_all, *sss_all;
   int *tag2eleall,*eleall2tag,*curr_tag2eleall,*ele2tag;
 };
 
