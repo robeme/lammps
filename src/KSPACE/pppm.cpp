@@ -3004,7 +3004,11 @@ void PPPM::slabcorr()
 
   const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
     qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
-  const double qscale = qqrd2e * scale;
+  double qscale = qqrd2e * scale;
+  
+  // if wire corrections are enabled, energies and forces need to
+  // be divided by a factor of two (J. Mol. Struct. 704, 101)
+  if (wireflag) qscale *= 0.5;
 
   if (eflag_global) energy += qscale * e_slabcorr;
 
@@ -3028,9 +3032,12 @@ void PPPM::slabcorr()
 /* ----------------------------------------------------------------------
    Wire-geometry correction term to dampen inter-wire interactions between
    periodically repeating wires.  Yields good approximation to 1D Ewald if
-   adequate empty space is left between repeating wires (J. Chem. Phys.
-   111, 3155).  Wires defined here are parellel to the x-axis. Also
-   extended to non-neutral systems (J. Chem. Phys. 131, 094107).
+   adequate empty space is left between repeating wires (J. Mol. Struct.
+   704, 101).  Wires defined here are parellel to the x-axis. As it is  
+   applied on top of the slab correction it is probably also extended to 
+   non-neutral systems (J. Chem. Phys. 131, 094107). TODO: However, I've 
+   not checked this explicitly. Nertheless, non-neutral system contributions 
+   are here zero when there is no net charge.
 ------------------------------------------------------------------------- */
 
 void PPPM::wirecorr()
@@ -3067,7 +3074,7 @@ void PPPM::wirecorr()
 
   // compute corrections
 
-  const double e_wirecorr = MY_2PI*(dipole_all*dipole_all -
+  const double e_wirecorr = MY_PI*(dipole_all*dipole_all -
     qsum*dipole_r2 - qsum*qsum*yprd*yprd/12.0)/volume;
   const double qscale = qqrd2e * scale;
 
@@ -3076,7 +3083,7 @@ void PPPM::wirecorr()
   // per-atom energy
 
   if (eflag_atom) {
-    double efact = qscale * MY_2PI/volume;
+    double efact = qscale * MY_PI/volume;
     for (int i = 0; i < nlocal; i++)
       eatom[i] += efact * q[i]*(x[i][1]*dipole_all - 0.5*(dipole_r2 +
         qsum*x[i][1]*x[i][1]) - qsum*yprd*yprd/12.0);
@@ -3084,7 +3091,7 @@ void PPPM::wirecorr()
 
   // add on force corrections
 
-  double ffact = qscale * (-4.0*MY_PI/volume);
+  double ffact = qscale * (-MY_2PI/volume);
   double **f = atom->f;
 
   for (int i = 0; i < nlocal; i++) f[i][1] += ffact * q[i]*(dipole_all - qsum*x[i][1]);
