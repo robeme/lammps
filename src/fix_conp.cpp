@@ -15,8 +15,9 @@
    Version: Sep/22/2014
    Zhenxing Wang(KU)
 ------------------------------------------------------------------------- */
-
 #include "fix_conp.h"
+
+#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -25,7 +26,6 @@
 #include "error.h"
 #include "force.h"
 #include "input.h"
-#include "iostream"
 #include "kspace.h"
 #include "math.h"
 #include "math_const.h"
@@ -52,6 +52,7 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 using namespace MathConst;
+using namespace std;
 
 enum { CONSTANT, EQUAL, ATOM };
 
@@ -305,7 +306,7 @@ int FixConp::electrode_check(int atomid) {
 
 void FixConp::b_cal() {
   Ktime1 = MPI_Wtime();
-  int i, j, k;
+  int k;
   int nmax = atom->nmax;
   if (atom->nlocal > nmax) {
     memory->destroy3d_offset(cs, -kmax_created);
@@ -323,27 +324,18 @@ void FixConp::b_cal() {
   int kx, ky, kz;
   double cypz, sypz, exprl, expim;
   elenum = 0;
-  for (i = 0; i < nlocal; i++) {
+  for (int i = 0; i < nlocal; i++) {
     if (electrode_check(i)) elenum++;
   }
   double bbb[elenum];
-  j = 0;
-  for (i = 0; i < nlocal; i++) {
-    if (electrode_check(i) == 1) {
-      bbb[j] = vL;
-      j++;
-    }
-    if (electrode_check(i) == -1) {
-      bbb[j] = vR;
-      j++;
-    }
+  for (int i = 0; i < elenum; i++) {
+    bbb[i] = 0;
   }
   for (k = 0; k < kcount; k++) {
     kx = kxvecs[k];
     ky = kyvecs[k];
     kz = kzvecs[k];
-    j = 0;
-    for (i = 0; i < nlocal; i++) {
+    for (int i = 0, j = 0; i < nlocal; i++) {
       if (electrode_check(i)) {
         cypz = cs[ky][1][i] * cs[kz][2][i] - sn[ky][1][i] * sn[kz][2][i];
         sypz = sn[ky][1][i] * cs[kz][2][i] + cs[ky][1][i] * sn[kz][2][i];
@@ -354,6 +346,16 @@ void FixConp::b_cal() {
       }
     }
   }
+  for (int i = 0, j = 0; i < nlocal; i++) {
+    if (electrode_check(i) == 1) {
+       bbb[j] += vL;
+      j++;
+    }
+    if (electrode_check(i) == -1) {
+       bbb[j] += vR;
+      j++;
+    }
+  }
 
   // elenum_list and displs for gathering ele tag list and bbb
   int nprocs = comm->nprocs;
@@ -362,24 +364,12 @@ void FixConp::b_cal() {
   int displs[nprocs];
   displs[0] = 0;
   int displssum = 0;
-  for (i = 1; i < nprocs; ++i) {
+  for (int i = 1; i < nprocs; ++i) {
     displssum += elenum_list[i - 1];
     displs[i] = displssum;
   }
-
-  // slabcorrection and create ele tag list in current timestep
-  double slabcorrtmp = 0.0;
-  double slabcorrtmp_all = 0.0;
-  for (i = 0; i < nlocal; i++) {
-    if (electrode_check(i) == 0) {
-      slabcorrtmp += 4 * q[i] * MY_PI * x[i][2] / volume;
-    }
-  }
-  MPI_Allreduce(&slabcorrtmp, &slabcorrtmp_all, 1, MPI_DOUBLE, MPI_SUM, world);
-  j = 0;
-  for (i = 0; i < nlocal; i++) {
+  for (int i = 0, j = 0; i < nlocal; i++) {
     if (electrode_check(i)) {
-      bbb[j] -= x[i][2] * slabcorrtmp_all;
       ele2tag[j] = tag[i];
       j++;
     }
@@ -387,6 +377,21 @@ void FixConp::b_cal() {
   Ktime2 = MPI_Wtime();
   Ktime += Ktime2 - Ktime1;
 
+  // slabcorrection and create ele tag list in current timestep
+  double slabcorrtmp = 0.0;
+  double slabcorrtmp_all = 0.0;
+  for (int i = 0; i < nlocal; i++) {
+    if (electrode_check(i) == 0) {
+      slabcorrtmp += 4 * q[i] * MY_PI * x[i][2] / volume;
+    }
+  }
+  MPI_Allreduce(&slabcorrtmp, &slabcorrtmp_all, 1, MPI_DOUBLE, MPI_SUM, world);
+  for (int i = 0, j = 0; i < nlocal; i++) {
+    if (electrode_check(i)) {
+      bbb[j] -= x[i][2] * slabcorrtmp_all;
+      j++;
+    }
+  }
   coul_cal(1, bbb, ele2tag);
 
   // gather ele tag list
@@ -394,7 +399,7 @@ void FixConp::b_cal() {
   int tagi;
   MPI_Allgatherv(ele2tag, elenum, MPI_INT, &ele_taglist_all, elenum_list,
                  displs, MPI_INT, world);
-  for (i = 0; i < elenum_all; i++) {
+  for (int i = 0; i < elenum_all; i++) {
     tagi = ele_taglist_all[i];
     curr_tag2eleall[tagi] = i;
   }
@@ -404,7 +409,7 @@ void FixConp::b_cal() {
   MPI_Allgatherv(&bbb, elenum, MPI_DOUBLE, &bbb_buf, elenum_list, displs,
                  MPI_DOUBLE, world);
   int elei;
-  for (i = 0; i < elenum_all; i++) {
+  for (int i = 0; i < elenum_all; i++) {
     tagi = eleall2tag[i];
     elei = curr_tag2eleall[tagi];
     bbb_all[i] = bbb_buf[elei];
@@ -530,8 +535,16 @@ void FixConp::a_cal() {
                  elenum_list2, displs2, MPI_DOUBLE, world);
 
   double *aaa = new double[elenum * elenum_all];
+  double *a_kspace = new double[elenum * elenum_all];
+  double *a_self = new double[elenum * elenum_all];
+  double *a_coul = new double[elenum * elenum_all];
+  double *a_corr = new double[elenum * elenum_all];
   for (i = 0; i < elenum * elenum_all; i++) {
     aaa[i] = 0.0;
+    a_kspace[i] = 0.;
+    a_self[i] = 0.;
+    a_coul[i] = 0.;
+    a_corr[i] = 0.;
   }
   j = 0;
   for (i = 0; i < elenum_all; i++) {
@@ -574,20 +587,47 @@ void FixConp::a_cal() {
           aaa[idx1d] +=
               2.0 * ug[k] *
               (csk[k][elealli] * csk[k][j] + snk[k][elealli] * snk[k][j]);
+          a_kspace[idx1d] +=
+              2.0 * ug[k] *
+              (csk[k][elealli] * csk[k][j] + snk[k][elealli] * snk[k][j]);
         }
         aaa[idx1d] += CON_4PIoverV * zi * eleallx[j][2];
+        a_corr[idx1d] += CON_4PIoverV * zi * eleallx[j][2];
       }
       idx1d = elei * elenum_all + elealli;
       aaa[idx1d] += CON_s2overPIS * eta -
                     CON_2overPIS * g_ewald;  // gaussian self correction
+      a_self[idx1d] += CON_s2overPIS * eta -
+                       CON_2overPIS * g_ewald;  // gaussian self correction
     }
   }
-
   memory->destroy(eleallx);
   memory->destroy(csk);
   memory->destroy(snk);
 
   coul_cal(2, aaa, ele2tag);
+  coul_cal(2, a_coul, ele2tag);
+
+  FILE *f_self = fopen("a_self", "w");
+  FILE *f_corr = fopen("a_corr", "w");
+  FILE *f_kspace = fopen("a_kspace", "w");
+  FILE *f_coul = fopen("a_coul", "w");
+  FILE *files[] = {f_self, f_corr, f_kspace, f_coul};
+  for (i = 0; i < elenum; i++) {
+    for (FILE *f : files) {
+      fprintf(f, "%12d", ele2tag[i]);
+    }
+    for (j = 0; j < elenum_all; j++) {
+      int idx = i * elenum + j;
+      fprintf(f_self, "%20.12f ", a_self[idx]);
+      fprintf(f_kspace, "%20.12f ", a_kspace[idx]);
+      fprintf(f_coul, "%20.12f ", a_coul[idx]);
+      fprintf(f_corr, "%20.12f ", a_corr[idx]);
+    }
+    for (FILE *f : files) {
+      fprintf(f, "\n");
+    }
+  }
 
   int elenum_list3[nprocs];
   int displs3[nprocs];
@@ -598,6 +638,10 @@ void FixConp::a_cal() {
   MPI_Allgatherv(aaa, elenum * elenum_all, MPI_DOUBLE, aaa_all, elenum_list3,
                  displs3, MPI_DOUBLE, world);
   delete[] aaa;
+  delete[] a_kspace;
+  delete[] a_corr;
+  delete[] a_self;
+  delete[] a_coul;
   aaa = NULL;
   for (i = 0; i < elenum_all; ++i) {
     for (j = 0; j < elenum_all; ++j) {
@@ -981,28 +1025,28 @@ void FixConp::inv() {
 }
 /* ---------------------------------------------------------------------- */
 void FixConp::s_cal() {
-    // S matrix to enforce charge neutrality constraint
-    double sum_aaa = 0;
-    for (int i = 0; i < elenum_all * elenum_all; i++) {
-      sum_aaa += aaa_all[i];
-    }
-    for (int i = 0; i < elenum_all; i++) {
-      for (int j = 0; j < elenum_all; j++) {
-        double x = 0;
-        for (int k = 0; k < elenum_all; k++) {
-          for (int l = 0; l < elenum_all; l++) {
-            int idx1 = i * elenum_all + k;
-            int idx2 = l * elenum_all + j;
-            x += aaa_all[idx1] * aaa_all[idx2];
-          }
+  // S matrix to enforce charge neutrality constraint
+  double sum_aaa = 0;
+  for (int i = 0; i < elenum_all * elenum_all; i++) {
+    sum_aaa += aaa_all[i];
+  }
+  for (int i = 0; i < elenum_all; i++) {
+    for (int j = 0; j < elenum_all; j++) {
+      double x = 0;
+      for (int k = 0; k < elenum_all; k++) {
+        for (int l = 0; l < elenum_all; l++) {
+          int idx1 = i * elenum_all + k;
+          int idx2 = l * elenum_all + j;
+          x += aaa_all[idx1] * aaa_all[idx2];
         }
-        int idx = i * elenum_all + j;
-        sss_all[idx] = -x;
       }
+      int idx = i * elenum_all + j;
+      sss_all[idx] = aaa_all[idx] - x / sum_aaa;
     }
-    for (int i = 0; i < elenum_all * elenum_all; i++) {
-      sss_all[i] = aaa_all[i] + sss_all[i]/sum_aaa;
-    }
+  }
+  // for (int i = 0; i < elenum_all * elenum_all; i++) {
+  // sss_all[i] = aaa_all[i] + sss_all[i] / sum_aaa;
+  //}
 }
 /* ---------------------------------------------------------------------- */
 void FixConp::update_charge() {
@@ -1020,9 +1064,14 @@ void FixConp::update_charge() {
         q[i] = eleallq[elealli];
       } else if (minimizer == 1) {
         eleallq_i = 0.0;
+        cout << "pos: " << elealli << ", " << tagi << endl;
         for (j = 0; j < elenum_all; j++) {
           idx1d = elealli * elenum_all + j;
-          eleallq_i += sss_all[idx1d] * bbb_all[j];
+          // eleallq_i += sss_all[idx1d] * bbb_all[j];
+          eleallq_i += aaa_all[idx1d] * bbb_all[j];
+          cout << " j: " << j << endl;
+          cout << "  a, b: " << aaa_all[idx1d] << ", " << bbb_all[j] << endl;
+          cout << "  q_tmp: " << eleallq_i << endl;
         }
         q[i] = eleallq_i;
       }
@@ -1148,7 +1197,7 @@ void FixConp::coul_cal(int coulcalflag, double *m, int *ele2tag) {
                       }
                     }
                   }
-                  if (j < nlocal) {
+                  if (j < (atom->nlocal + atom->nghost)) {
                     if (ele2tag[k] == tag[j]) {
                       elej = k;
                       if (coulcalflag == 1) {
