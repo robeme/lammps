@@ -372,6 +372,8 @@ void FixConpWire::b_cal()
 
   //wire correction and create ele tag list in current timestep
   double ywirecorrtmp = 0.0;
+  double ywirecorrtmp_all = 0.0;
+  double zwirecorrtmp = 0.0;
   double zwirecorrtmp_all = 0.0;
   for (i = 0; i < nlocal; i++) {
     if (electrode_check(i) == 0) {
