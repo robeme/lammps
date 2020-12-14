@@ -371,38 +371,24 @@ void FixConpWire::b_cal()
   }
 
   //wire correction and create ele tag list in current timestep
-  double wirecorrtmp = 0.0;
-  double wirecorrtmp_all = 0.0;
+  double ywirecorrtmp = 0.0;
+  double zwirecorrtmp_all = 0.0;
   for (i = 0; i < nlocal; i++) {
     if (electrode_check(i) == 0) {
-      wirecorrtmp += 2.0*q[i]*MY_PI*x[i][2]/volume;
+      ywirecorrtmp += 2.0*q[i]*MY_PI*x[i][1]/volume;
+      zwirecorrtmp += 2.0*q[i]*MY_PI*x[i][2]/volume;
     }
   }
-  MPI_Allreduce(&wirecorrtmp,&wirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(&ywirecorrtmp,&ywirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(&zwirecorrtmp,&zwirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
   j = 0;
   for (i = 0; i < nlocal; i++) {
     if (electrode_check(i)) {
-      bbb[j] -= x[i][2]*wirecorrtmp_all;
+      bbb[j] -= x[i][1]*ywirecorrtmp_all + x[i][2]*zwirecorrtmp_all;
       ele2tag[j] = tag[i];
       j++;
     }
   }
-  wirecorrtmp = 0.0;
-  wirecorrtmp_all = 0.0;
-  for (i = 0; i < nlocal; i++) {
-    if (electrode_check(i) == 0) {
-      wirecorrtmp += 2.0*q[i]*MY_PI*x[i][1]/volume;
-    }
-  }
-  MPI_Allreduce(&wirecorrtmp,&wirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
-  j = 0;
-  for (i = 0; i < nlocal; i++) {
-    if (electrode_check(i)) {
-      bbb[j] -= x[i][1]*wirecorrtmp_all;
-      ele2tag[j] = tag[i];
-      j++;
-    }
-  }  
   Ktime2 = MPI_Wtime();
   Ktime += Ktime2-Ktime1;
 
@@ -572,11 +558,12 @@ void FixConpWire::a_cal()
   delete [] elexyzlist_all;
 
   int elealli,elei,idx1d;
-  double zi;
-  double CON_4PIoverV = MY_4PI/volume;
+  double yi,zi;
+  double CON_2PIoverV = MY_2PI/volume;
   double CON_s2overPIS = sqrt(2.0)/MY_PIS;
   double CON_2overPIS = 2.0/MY_PIS;
   for (i = 0; i < nlocal; ++i) {
+    yi = x[i][1];
     zi = x[i][2];
     if (electrode_check(i)) {
       elealli = tag2eleall[tag[i]];
@@ -591,7 +578,9 @@ void FixConpWire::a_cal()
         for (k = 0; k < kcount; ++k) {
           aaa[idx1d] += 2.0*ug[k]*(csk[k][elealli]*csk[k][j]+snk[k][elealli]*snk[k][j]);
         }
-        aaa[idx1d] += CON_4PIoverV*zi*eleallx[j][2];
+        // this seems to be the slab-correction for the electrode atoms
+        aaa[idx1d] += CON_2PIoverV*yi*eleallx[j][1];
+        aaa[idx1d] += CON_2PIoverV*zi*eleallx[j][2];
       }
       idx1d = elei*elenum_all+elealli;
       aaa[idx1d] += CON_s2overPIS*eta-CON_2overPIS*g_ewald; //gaussian self correction
