@@ -981,28 +981,28 @@ void FixConp::inv() {
 }
 /* ---------------------------------------------------------------------- */
 void FixConp::s_cal() {
-    // S matrix to enforce charge neutrality constraint
-    double sum_aaa = 0;
-    for (int i = 0; i < elenum_all * elenum_all; i++) {
-      sum_aaa += aaa_all[i];
-    }
-    for (int i = 0; i < elenum_all; i++) {
-      for (int j = 0; j < elenum_all; j++) {
-        double x = 0;
-        for (int k = 0; k < elenum_all; k++) {
-          for (int l = 0; l < elenum_all; l++) {
-            int idx1 = i * elenum_all + k;
-            int idx2 = l * elenum_all + j;
-            x += aaa_all[idx1] * aaa_all[idx2];
-          }
+  // S matrix to enforce charge neutrality constraint
+  double sum_aaa = 0;
+  for (int i = 0; i < elenum_all * elenum_all; i++) {
+    sum_aaa += aaa_all[i];
+  }
+  for (int i = 0; i < elenum_all; i++) {
+    for (int j = 0; j < elenum_all; j++) {
+      double x = 0;
+      for (int k = 0; k < elenum_all; k++) {
+        for (int l = 0; l < elenum_all; l++) {
+          int idx1 = i * elenum_all + k;
+          int idx2 = l * elenum_all + j;
+          x += aaa_all[idx1] * aaa_all[idx2];
         }
-        int idx = i * elenum_all + j;
-        sss_all[idx] = -x;
       }
+      int idx = i * elenum_all + j;
+      sss_all[idx] = aaa_all[idx] - x / sum_aaa;
     }
-    for (int i = 0; i < elenum_all * elenum_all; i++) {
-      sss_all[i] = aaa_all[i] + sss_all[i]/sum_aaa;
-    }
+  }
+  // for (int i = 0; i < elenum_all * elenum_all; i++) {
+  // sss_all[i] = aaa_all[i] + sss_all[i] / sum_aaa;
+  //}
 }
 /* ---------------------------------------------------------------------- */
 void FixConp::update_charge() {
