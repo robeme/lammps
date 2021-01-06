@@ -521,7 +521,9 @@ void KSpace::modify_params(int narg, char **arg)
       iarg += 2;
     } else if (strcmp(arg[iarg],"slab") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal kspace_modify command");
-      if (strcmp(arg[iarg+1],"nozforce") == 0) {
+      if (strcmp(arg[iarg+1],"ew2d") == 0) {
+        slabflag = 1;
+      } else if (strcmp(arg[iarg+1],"nozforce") == 0) {
         slabflag = 2;
       } else {
         slabflag = 1;
