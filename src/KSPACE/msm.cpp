@@ -155,7 +155,7 @@ void MSM::init()
 
   if (!atom->q_flag) error->all(FLERR,"Kspace style requires atom attribute q");
 
-  if ((slabflag == 1) && (me == 0))
+  if (slabflag && (me == 0))
     error->warning(FLERR,"Slab correction not needed for MSM");
 
   if ((order < 4) || (order > 10) || (order%2 != 0))

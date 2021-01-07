@@ -209,7 +209,7 @@ void PPPM::init()
 
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with PPPM");
-  if (slabflag && slab_volfactor == 1.0)
+  if (slabflag == 1 && slab_volfactor == 1.0)
     error->all(FLERR,"Cannot (yet) use PPPM with EW2D");
   if (slabflag) {
     if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
