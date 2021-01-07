@@ -113,8 +113,6 @@ void Ewald::init()
       if (domain->yperiodic != 1) { xlistdim = 1; ndim++; }
       if (domain->zperiodic != 1) { xlistdim = 2; ndim++; }
       if (ndim>1) error->all(FLERR,"Cannot use < 2 periodic boundaries with EW2D");
-      
-      if (comm->me == 0) printf("%d %d\n",ndim,xlistdim);
     } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR,"Incorrect boundaries with slab Ewald");
@@ -1167,8 +1165,6 @@ void Ewald::fetch_x()
   }
   
   // gather q and z positions
-  
-  if (comm->me == 0) printf("*** xlistdim *** %d\n", xlistdim);
   
   double xlist_local[nlocal];
   double qlist_local[nlocal];
