@@ -49,3 +49,5 @@ Thumbs.db
 /Testing
 /cmake_install.cmake
 /lmp
+/examples/ew2d
+/src/MAKE/*.local
