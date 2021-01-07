@@ -43,7 +43,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr)
+  sfacim_B_all(nullptr), zlist(nullptr), qlist(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -54,6 +54,10 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
 
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
+  
+  zlist = nullptr;
+  qlist = nullptr;
+  
   ug = nullptr;
   eg = vg = nullptr;
   sfacrl = sfacim = sfacrl_all = sfacim_all = nullptr;
@@ -213,6 +217,7 @@ void Ewald::setup()
 
   double zprd_slab = zprd*slab_volfactor;
   volume = xprd * yprd * zprd_slab;
+  area = xprd * yprd;
 
   unitk[0] = 2.0*MY_PI/xprd;
   unitk[1] = 2.0*MY_PI/yprd;
@@ -319,6 +324,8 @@ void Ewald::setup()
     memory->create3d_offset(sn,-kmax,kmax,3,nmax,"ewald:sn");
     kmax_created = kmax;
   }
+  
+  if (slabflag && slab_volfactor == 1.0) fetch_z();
 
   // pre-compute Ewald coefficients
 
@@ -354,10 +361,12 @@ void Ewald::compute(int eflag, int vflag)
 
   ev_init(eflag,vflag);
 
-  // if atom count has changed, update qsum and qsqsum
+  // if atom count has changed, update qsum and qsqsum 
+  // and fetch new z positions if necessary
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
+    if (slabflag && slab_volfactor == 1.0) fetch_z(); // number of atoms changes, need to update zlist
     natoms_original = atom->natoms;
   }
 
@@ -1117,6 +1126,53 @@ void Ewald::coeffs_triclinic()
 }
 
 /* ----------------------------------------------------------------------
+   fetch all z-positions of atoms and store them in array
+------------------------------------------------------------------------- */
+
+void Ewald::fetch_z()
+{
+  int nprocs = comm->nprocs;
+  int nlocal = atom->nlocal;
+  int *tag = atom->tag; 
+  double *q = atom->q; 
+  double **x = atom->x;
+
+  if (atom->natoms != natoms_original) {
+    deallocate();
+    allocate();
+  }
+  
+  int i,j;
+  
+  int nlocal_list[nprocs];
+  int disp[nprocs];
+  int dispsum = 0;
+  
+  MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
+  
+  disp[0] = 0;
+  for (i = 1; i < nprocs; ++i) {
+    dispsum += nlocal_list[i-1];
+    disp[i] = dispsum;
+  }
+  
+  // gather q and z positions
+  
+  double zlist_local[nlocal];
+  double qlist_local[nlocal];
+  for (i = 0; i < nlocal; i++) {
+    zlist_local[i] = x[i][2];
+    qlist_local[i] = q[i];
+  }
+  
+  MPI_Allgatherv(zlist_local,nlocal,MPI_DOUBLE,zlist,nlocal_list,disp,MPI_DOUBLE,world);
+  MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,disp,MPI_DOUBLE,world);
+  
+  //if (comm->me == 0) for (i = 0; i < nprocs; i++) printf("DEBUG: %d %d\n",i,disp[i]);
+}
+
+
+/* ----------------------------------------------------------------------
    allocate memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
@@ -1125,6 +1181,11 @@ void Ewald::allocate()
   kxvecs = new int[kmax3d];
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
+  
+  if (slabflag && slab_volfactor == 1.0) {
+    zlist = new double[natoms_original];
+    qlist = new double[natoms_original];
+  }
 
   ug = new double[kmax3d];
   memory->create(eg,kmax3d,3,"ewald:eg");
@@ -1145,6 +1206,11 @@ void Ewald::deallocate()
   delete [] kxvecs;
   delete [] kyvecs;
   delete [] kzvecs;
+  
+  if (slabflag && slab_volfactor == 1.0) {
+    delete [] zlist;
+    delete [] qlist;
+  }
 
   delete [] ug;
   memory->destroy(eg);
@@ -1166,59 +1232,99 @@ void Ewald::deallocate()
 
 void Ewald::slabcorr()
 {
-  // compute local contribution to global dipole moment
-
   double *q = atom->q;
   double **x = atom->x;
-  double zprd = domain->zprd;
   int nlocal = atom->nlocal;
-
-  double dipole = 0.0;
-  for (int i = 0; i < nlocal; i++) dipole += q[i]*x[i][2];
-
-  // sum local contributions to get global dipole moment
-
-  double dipole_all;
-  MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
-
-  // need to make non-neutral systems and/or
-  //  per-atom energy translationally invariant
-
-  double dipole_r2 = 0.0;
-  if (eflag_atom || fabs(qsum) > SMALL) {
-    for (int i = 0; i < nlocal; i++)
-      dipole_r2 += q[i]*x[i][2]*x[i][2];
-
-    // sum local contributions
-
-    double tmp;
-    MPI_Allreduce(&dipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-    dipole_r2 = tmp;
-  }
-
-  // compute corrections
-
-  const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
-    qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
-  const double qscale = qqrd2e * scale;
-
-  if (eflag_global) energy += qscale * e_slabcorr;
-
-  // per-atom energy
-
-  if (eflag_atom) {
-    double efact = qscale * MY_2PI/volume;
-    for (int i = 0; i < nlocal; i++)
-      eatom[i] += efact * q[i]*(x[i][2]*dipole_all - 0.5*(dipole_r2 +
-        qsum*x[i][2]*x[i][2]) - qsum*zprd*zprd/12.0);
-  }
-
-  // add on force corrections
-
-  double ffact = qscale * (-4.0*MY_PI/volume);
   double **f = atom->f;
+  
+  // if volfactor > 1: EW3DC slab correction else EW2D
+  if (slab_volfactor > 1.0) {
+    // compute local contribution to global dipole moment
+    
+    double zprd = domain->zprd;
+    
+    double dipole = 0.0;
+    for (int i = 0; i < nlocal; i++) dipole += q[i]*x[i][2];
 
-  for (int i = 0; i < nlocal; i++) f[i][2] += ffact * q[i]*(dipole_all - qsum*x[i][2]);
+    // sum local contributions to get global dipole moment
+
+    double dipole_all;
+    MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+
+    // need to make non-neutral systems and/or
+    //  per-atom energy translationally invariant
+
+    double dipole_r2 = 0.0;
+    if (eflag_atom || fabs(qsum) > SMALL) {
+      for (int i = 0; i < nlocal; i++)
+        dipole_r2 += q[i]*x[i][2]*x[i][2];
+
+      // sum local contributions
+
+      double tmp;
+      MPI_Allreduce(&dipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+      dipole_r2 = tmp;
+    }
+
+    // compute corrections
+
+    const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
+      qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
+    const double qscale = qqrd2e * scale;
+
+    if (eflag_global) energy += qscale * e_slabcorr;
+
+    // per-atom energy
+
+    if (eflag_atom) {
+      double efact = qscale * MY_2PI/volume;
+      for (int i = 0; i < nlocal; i++)
+        eatom[i] += efact * q[i]*(x[i][2]*dipole_all - 0.5*(dipole_r2 +
+          qsum*x[i][2]*x[i][2]) - qsum*zprd*zprd/12.0);
+    }
+    
+    // (dipole_all*dipole_all - qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)
+    // q[i]*(x[i][2]*dipole_all - 0.5*(dipole_r2 + qsum*x[i][2]*x[i][2]) - qsum*zprd*zprd/12.0)
+
+    // add on force corrections
+
+    double ffact = qscale * (-4.0*MY_PI/volume);
+
+    for (int i = 0; i < nlocal; i++) f[i][2] += ffact * q[i]*(dipole_all - qsum*x[i][2]);
+  } else {
+  
+    int *tag = atom->tag; 
+    
+    double g_ewald_inv = 1.0 / g_ewald;
+    const double qscale = qqrd2e * scale;
+    
+    // 0.5 b/c of double counting
+    double efact = qscale * 0.5*MY_PIS/area;
+    double ffact = qscale * MY_PI/area;
+    
+    // loop over ALL atoms
+    
+    for (int i = 0; i < nlocal; i++) {
+      for (int j = 0; j < natoms_original; j++) {
+        
+        // could also skip self interaction, but since zii = 0 ...
+        
+        double zij = zlist[j] - x[i][2];
+        const double e_slabcorr = efact * q[i] * qlist[j] * 
+          (exp(-zij*zij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*zij*erf(g_ewald*zij));
+
+        if (eflag_global) energy -= qscale * e_slabcorr;
+        
+        // per-atom energy
+
+        if (eflag_atom) for (int i = 0; i < nlocal; i++) eatom[i] += e_slabcorr;
+        
+        // add on force corrections
+        
+        f[i][2] -= ffact * q[i]*qlist[j] * erf(g_ewald*zij);
+      }
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------
