@@ -44,7 +44,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr)
+  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr), amatrix(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -57,8 +57,8 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kxvecs = kyvecs = kzvecs = nullptr;
   
   xlistdim = -1;
-  xlist = nullptr;
-  qlist = nullptr;
+  xlist = qlist = nullptr;
+  amatrix = nullptr;
   
   ug = nullptr;
   eg = vg = nullptr;
@@ -224,7 +224,9 @@ void Ewald::setup()
 
   double zprd_slab = zprd*slab_volfactor;
   volume = xprd * yprd * zprd_slab;
-  area = xprd * yprd;
+  if (xlistdim == 0) area = yprd * zprd;
+  if (xlistdim == 1) area = xprd * zprd;
+  if (xlistdim == 2) area = xprd * yprd;
 
   unitk[0] = 2.0*MY_PI/xprd;
   unitk[1] = 2.0*MY_PI/yprd;
@@ -1185,14 +1187,18 @@ void Ewald::fetch_x()
 
 void Ewald::allocate()
 {
+  int natoms = atom->natoms;
+
   kxvecs = new int[kmax3d];
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
   
   if (slabflag && slab_volfactor == 1.0) {
-    xlist = new double[natoms_original];
-    qlist = new double[natoms_original];
+    xlist = new double[natoms];
+    qlist = new double[natoms];
   }
+  
+  if (matrixflag) memory->create(amatrix,natoms,natoms,"ewald:amatrix");
 
   ug = new double[kmax3d];
   memory->create(eg,kmax3d,3,"ewald:eg");
@@ -1218,6 +1224,8 @@ void Ewald::deallocate()
     delete [] xlist;
     delete [] qlist;
   }
+  
+  if (matrixflag) memory->destroy(amatrix);
 
   delete [] ug;
   memory->destroy(eg);
@@ -1310,25 +1318,29 @@ void Ewald::ew2d()
   double g_ewald_sq = g_ewald*g_ewald;
   
   const double qscale = qqrd2e * scale;
-  double efact = qscale * MY_PIS/area;      
+  double efact = qscale * MY_PIS/area;
   double ffact = qscale * MY_2PI/area;
   
   // loop over ALL atoms
   
   for (int i = 0; i < nlocal; i++) {
-    for (int j = tag[i]+1; j < natoms_original; j++) {
+    for (int j = tag[i]; j < natoms_original; j++) {
       
-      // tag[i]+1 skips self interaction
+      // tag[i] skips self interaction
       
-      double xij = xlist[j] - x[i][2];
+      double xij = xlist[j] - x[i][xlistdim];
       const double e_slabcorr = efact * q[i] * qlist[j] * 
-        (exp(-xij*xij*g_ewald_sq)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
+        (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
 
       if (eflag_global) energy -= e_slabcorr;
       
       // per-atom energy
 
-      if (eflag_atom) for (int i = 0; i < nlocal; i++) eatom[i] -= e_slabcorr;
+      if (eflag_atom) eatom[i] -= e_slabcorr;
+      
+      // A matrix calculation
+      
+      if (matrixflag) amatrix[tag[i]][j] -= e_slabcorr;
       
       // add on force corrections
       
