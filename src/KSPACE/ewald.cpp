@@ -1299,10 +1299,8 @@ void Ewald::slabcorr()
     
     double g_ewald_inv = 1.0 / g_ewald;
     const double qscale = qqrd2e * scale;
-    
-    // 0.5 b/c of double counting
-    double efact = qscale * 0.5*MY_PIS/area;
-    double ffact = qscale * MY_PI/area;
+    double efact = qscale * 0.5*MY_PIS/area; // * 0.5 to avoid double counting
+    double ffact = qscale * MY_PI/area; // * 0.5 to avoid double counting
     
     // loop over ALL atoms
     
@@ -1315,11 +1313,11 @@ void Ewald::slabcorr()
         const double e_slabcorr = efact * q[i] * qlist[j] * 
           (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
 
-        if (eflag_global) energy -= qscale * e_slabcorr;
+        if (eflag_global) energy -= e_slabcorr;
         
         // per-atom energy
 
-        if (eflag_atom) for (int i = 0; i < nlocal; i++) eatom[i] += e_slabcorr;
+        if (eflag_atom) for (int i = 0; i < nlocal; i++) eatom[i] -= e_slabcorr;
         
         // add on force corrections
         
