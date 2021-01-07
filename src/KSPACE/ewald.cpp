@@ -44,7 +44,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), zlist(nullptr), qlist(nullptr)
+  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -56,7 +56,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
   
-  zlist = nullptr;
+  xlist = nullptr;
   qlist = nullptr;
   
   ug = nullptr;
@@ -367,7 +367,7 @@ void Ewald::compute(int eflag, int vflag)
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    if (slabflag && slab_volfactor == 1.0) fetch_z(); // number of atoms changes, need to update zlist
+    if (slabflag && slab_volfactor == 1.0) fetch_x(); // number of atoms changes, need to update xlist
     natoms_original = atom->natoms;
   }
 
@@ -1159,14 +1159,14 @@ void Ewald::fetch_z()
   
   // gather q and z positions
   
-  double zlist_local[nlocal];
+  double xlist_local[nlocal];
   double qlist_local[nlocal];
   for (i = 0; i < nlocal; i++) {
-    zlist_local[i] = x[i][2];
+    xlist_local[i] = x[i][2];
     qlist_local[i] = q[i];
   }
   
-  MPI_Allgatherv(zlist_local,nlocal,MPI_DOUBLE,zlist,nlocal_list,disp,MPI_DOUBLE,world);
+  MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,disp,MPI_DOUBLE,world);
   MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,disp,MPI_DOUBLE,world);
   
   //if (comm->me == 0) for (i = 0; i < nprocs; i++) printf("DEBUG: %d %d\n",i,disp[i]);
@@ -1184,7 +1184,7 @@ void Ewald::allocate()
   kzvecs = new int[kmax3d];
   
   if (slabflag && slab_volfactor == 1.0) {
-    zlist = new double[natoms_original];
+    xlist = new double[natoms_original];
     qlist = new double[natoms_original];
   }
 
@@ -1209,7 +1209,7 @@ void Ewald::deallocate()
   delete [] kzvecs;
   
   if (slabflag && slab_volfactor == 1.0) {
-    delete [] zlist;
+    delete [] xlist;
     delete [] qlist;
   }
 
@@ -1239,6 +1239,7 @@ void Ewald::slabcorr()
   double **f = atom->f;
   
   // if volfactor > 1: EW3DC slab correction else EW2D
+  
   if (slab_volfactor > 1.0) {
     // compute local contribution to global dipole moment
     
@@ -1310,7 +1311,7 @@ void Ewald::slabcorr()
         
         // could also skip self interaction, but since zii = 0 ...
         
-        double zij = zlist[j] - x[i][2];
+        double xij = xlist[j] - x[i][2];
         const double e_slabcorr = efact * q[i] * qlist[j] * 
           (exp(-zij*zij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*zij*erf(g_ewald*zij));
 
