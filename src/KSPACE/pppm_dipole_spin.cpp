@@ -112,8 +112,6 @@ void PPPMDipoleSpin::init()
   if (spinflag && strcmp(update->unit_style,"metal") != 0)
     error->all(FLERR,"'metal' units have to be used with spins");
 
-  if (slabflag && slab_volfactor == 1.0) 
-    error->all(FLERR,"Cannot use (yet) EW2D with PPPMDipoleSpin");
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use nonperiodic boundaries with PPPMDipoleSpin");
   if (slabflag) {
