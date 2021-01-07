@@ -51,6 +51,7 @@ class KSpace : protected Pointers {
   int mixflag;                   // 1 if geometric mixing rules are enforced
                                  // for LJ coefficients
   int slabflag;
+  int matrixflag;                // 1 if A matrix for constant potential needed
   int scalar_pressure_flag;      // 1 if using MSM fast scalar pressure
   double slab_volfactor;
 
