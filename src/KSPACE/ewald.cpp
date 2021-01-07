@@ -326,7 +326,7 @@ void Ewald::setup()
     kmax_created = kmax;
   }
   
-  if (slabflag && slab_volfactor == 1.0) fetch_z();
+  if (slabflag && slab_volfactor == 1.0) fetch_x();
 
   // pre-compute Ewald coefficients
 
@@ -1127,10 +1127,11 @@ void Ewald::coeffs_triclinic()
 }
 
 /* ----------------------------------------------------------------------
-   fetch all z-positions of atoms and store them in array
+   Get q and x,y or z positions of all atoms and store in arrays,
+   x,y or z is determined by the non-periodic dimension.
 ------------------------------------------------------------------------- */
 
-void Ewald::fetch_z()
+void Ewald::fetch_x()
 {
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
@@ -1313,7 +1314,7 @@ void Ewald::slabcorr()
         
         double xij = xlist[j] - x[i][2];
         const double e_slabcorr = efact * q[i] * qlist[j] * 
-          (exp(-zij*zij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*zij*erf(g_ewald*zij));
+          (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
 
         if (eflag_global) energy -= qscale * e_slabcorr;
         
@@ -1323,7 +1324,7 @@ void Ewald::slabcorr()
         
         // add on force corrections
         
-        f[i][2] -= ffact * q[i]*qlist[j] * erf(g_ewald*zij);
+        f[i][2] -= ffact * q[i]*qlist[j] * erf(g_ewald*xij);
       }
     }
   }
