@@ -45,6 +45,7 @@ class Ewald : public KSpace {
   double unitk[3];
   int *kxvecs,*kyvecs,*kzvecs;
   int kxmax_orig,kymax_orig,kzmax_orig;
+  int xlistdim;
   double *xlist, *qlist;
   double *ug;
   double **eg,**vg;
