@@ -270,8 +270,6 @@ void PPPMDisp::init()
     error->universe_all(FLERR,"PPPMDisp can only currently be used with "
                         "comm_style brick");
 
-  if (slabflag && slab_volfactor == 1.0) 
-    error->all(FLERR,"Cannot use (yet) EW2D with PPPMDisp");  
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with PPPMDisp");
   if (slabflag == 1) {

@@ -208,8 +208,6 @@ void PPPM::init()
   if (!atom->q_flag)
     error->all(FLERR,"Kspace style requires atom attribute q");
 
-  if (slabflag && slab_volfactor == 1.0) 
-    error->all(FLERR,"Cannot use (yet) EW2D with PPPM");
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with PPPM");
   if (slabflag) {
