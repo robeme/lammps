@@ -207,6 +207,8 @@ void PPPM::init()
   if (!atom->q_flag)
     error->all(FLERR,"Kspace style requires atom attribute q");
 
+  if (slabflag && slab_volfactor == 1.0) 
+    error->all(FLERR,"Cannot use (yet) EW2D with PPPM");
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with PPPM");
   if (slabflag) {
@@ -214,6 +216,7 @@ void PPPM::init()
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR,"Incorrect boundaries with slab PPPM");
   }
+  
 
   if (order < 2 || order > MAXORDER)
     error->all(FLERR,fmt::format("PPPM order cannot be < 2 or > {}",MAXORDER));
