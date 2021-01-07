@@ -98,7 +98,6 @@ void Ewald::init()
   if (comm->me == 0) utils::logmesg(lmp,"Ewald initialization ...\n");
 
   // error check
-
   triclinic_check();
   if (domain->dimension == 2)
     error->all(FLERR,"Cannot use Ewald with 2d simulation");
@@ -108,7 +107,15 @@ void Ewald::init()
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with Ewald");
   if (slabflag) {
-    if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
+    if (slab_volfactor == 1.0) {
+      int ndim = 0;
+      if (domain->xperiodic != 1) { xlistdim = 0; ndim++; }
+      if (domain->yperiodic != 1) { xlistdim = 1; ndim++; }
+      if (domain->zperiodic != 1) { xlistdim = 2; ndim++; }
+      if (ndim>1) error->all(FLERR,"Cannot use < 2 periodic boundaries with EW2D");
+      
+      if (comm->me == 0) printf("%d %d\n",ndim,xlistdim);
+    } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR,"Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
@@ -1161,10 +1168,12 @@ void Ewald::fetch_x()
   
   // gather q and z positions
   
+  if (comm->me == 0) printf("*** xlistdim *** %d\n", xlistdim);
+  
   double xlist_local[nlocal];
   double qlist_local[nlocal];
   for (i = 0; i < nlocal; i++) {
-    xlist_local[i] = x[i][2];
+    xlist_local[i] = x[i][xlistdim];
     qlist_local[i] = q[i];
   }
   
