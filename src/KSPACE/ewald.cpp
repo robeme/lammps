@@ -1294,7 +1294,7 @@ void Ewald::slabcorr()
 }
 
 /* ----------------------------------------------------------------------
-   Slab-geometry correction term according to EW2D. See Hu, JCTC 2014
+   Slab-geometry correction term (k=0) of EW2D. See Hu, JCTC 2014
 ------------------------------------------------------------------------- */
 
 void Ewald::ew2d()
@@ -1306,10 +1306,11 @@ void Ewald::ew2d()
   int nlocal = atom->nlocal;
     
   double g_ewald_inv = 1.0 / g_ewald;
+  double g_ewald_sq = g_ewald*g_ewald;
   
   const double qscale = qqrd2e * scale;
   double efact = qscale * MY_PIS/area;      
-  double ffact = qscale * 2.0 * MY_PI/area;
+  double ffact = qscale * MY_2PI/area;
   
   // loop over ALL atoms
   
@@ -1320,7 +1321,7 @@ void Ewald::ew2d()
       
       double xij = xlist[j] - x[i][2];
       const double e_slabcorr = efact * q[i] * qlist[j] * 
-        (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
+        (exp(-xij*xij*g_ewald_sq)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
 
       if (eflag_global) energy -= e_slabcorr;
       
