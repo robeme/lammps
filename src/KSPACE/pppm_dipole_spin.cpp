@@ -115,6 +115,8 @@ void PPPMDipoleSpin::init()
 
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use nonperiodic boundaries with PPPMDipoleSpin");
+  if (slabflag && slab_volfactor == 1.0)
+    error->all(FLERR,"Cannot (yet) use PPPMDipoleSpin with EW2D"); 
   if (slabflag) {
     if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)

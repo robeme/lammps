@@ -87,6 +87,8 @@ void EwaldDipoleSpin::init()
     
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use nonperiodic boundaries with EwaldDipoleSpin");
+  if (slabflag && slab_volfactor == 1.0)
+    error->all(FLERR,"Cannot (yet) use EwaldDipoleSpin with EW2D");
   if (slabflag) {
     if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)

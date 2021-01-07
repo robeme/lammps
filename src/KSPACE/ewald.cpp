@@ -56,6 +56,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
   
+  xlistdim = -1;
   xlist = nullptr;
   qlist = nullptr;
   
@@ -1169,8 +1170,6 @@ void Ewald::fetch_x()
   
   MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,disp,MPI_DOUBLE,world);
   MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,disp,MPI_DOUBLE,world);
-  
-  //if (comm->me == 0) for (i = 0; i < nprocs; i++) printf("DEBUG: %d %d\n",i,disp[i]);
 }
 
 
