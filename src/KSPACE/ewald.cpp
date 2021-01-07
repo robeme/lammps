@@ -499,7 +499,8 @@ void Ewald::compute(int eflag, int vflag)
 
   // 2d slab correction
 
-  if (slabflag == 1) slabcorr();
+  if (slabflag == 1 && slab_volfactor > 1.0) slabcorr();
+  else if (slabflag == 1 && slab_volfactor == 1.0) ew2d();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1238,96 +1239,98 @@ void Ewald::deallocate()
 
 void Ewald::slabcorr()
 {
+  // compute local contribution to global dipole moment
+
+  double *q = atom->q;
+  double **x = atom->x;
+  double zprd = domain->zprd;
+  int nlocal = atom->nlocal;
+
+  double dipole = 0.0;
+  for (int i = 0; i < nlocal; i++) dipole += q[i]*x[i][2];
+
+  // sum local contributions to get global dipole moment
+
+  double dipole_all;
+  MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+
+  // need to make non-neutral systems and/or
+  //  per-atom energy translationally invariant
+
+  double dipole_r2 = 0.0;
+  if (eflag_atom || fabs(qsum) > SMALL) {
+    for (int i = 0; i < nlocal; i++)
+      dipole_r2 += q[i]*x[i][2]*x[i][2];
+
+    // sum local contributions
+
+    double tmp;
+    MPI_Allreduce(&dipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+    dipole_r2 = tmp;
+  }
+
+  // compute corrections
+
+  const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
+    qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
+  const double qscale = qqrd2e * scale;
+
+  if (eflag_global) energy += qscale * e_slabcorr;
+
+  // per-atom energy
+
+  if (eflag_atom) {
+    double efact = qscale * MY_2PI/volume;
+    for (int i = 0; i < nlocal; i++)
+      eatom[i] += efact * q[i]*(x[i][2]*dipole_all - 0.5*(dipole_r2 +
+        qsum*x[i][2]*x[i][2]) - qsum*zprd*zprd/12.0);
+  }
+
+  // add on force corrections
+
+  double ffact = qscale * (-4.0*MY_PI/volume);
+  double **f = atom->f;
+
+  for (int i = 0; i < nlocal; i++) f[i][2] += ffact * q[i]*(dipole_all - qsum*x[i][2]);
+}
+
+/* ----------------------------------------------------------------------
+   Slab-geometry correction term according to EW2D.
+------------------------------------------------------------------------- */
+
+void Ewald::ew2d()
+{
   double *q = atom->q;
   double **x = atom->x;
   int nlocal = atom->nlocal;
   double **f = atom->f;
+    
+  double g_ewald_inv = 1.0 / g_ewald;
   
-  // if volfactor > 1: EW3DC slab correction else EW2D
+  const double qscale = qqrd2e * scale;
+  double efact = qscale * 0.5*MY_PIS/area; // * 0.5 to avoid double counting
+  double ffact = qscale * MY_PI/area;      // * 0.5 to avoid double counting
   
-  if (slab_volfactor > 1.0) {
-    // compute local contribution to global dipole moment
-    
-    double zprd = domain->zprd;
-    
-    double dipole = 0.0;
-    for (int i = 0; i < nlocal; i++) dipole += q[i]*x[i][2];
-
-    // sum local contributions to get global dipole moment
-
-    double dipole_all;
-    MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
-
-    // need to make non-neutral systems and/or
-    //  per-atom energy translationally invariant
-
-    double dipole_r2 = 0.0;
-    if (eflag_atom || fabs(qsum) > SMALL) {
-      for (int i = 0; i < nlocal; i++)
-        dipole_r2 += q[i]*x[i][2]*x[i][2];
-
-      // sum local contributions
-
-      double tmp;
-      MPI_Allreduce(&dipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-      dipole_r2 = tmp;
-    }
-
-    // compute corrections
-
-    const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
-      qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
-    const double qscale = qqrd2e * scale;
-
-    if (eflag_global) energy += qscale * e_slabcorr;
-
-    // per-atom energy
-
-    if (eflag_atom) {
-      double efact = qscale * MY_2PI/volume;
-      for (int i = 0; i < nlocal; i++)
-        eatom[i] += efact * q[i]*(x[i][2]*dipole_all - 0.5*(dipole_r2 +
-          qsum*x[i][2]*x[i][2]) - qsum*zprd*zprd/12.0);
-    }
-    
-    // (dipole_all*dipole_all - qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)
-    // q[i]*(x[i][2]*dipole_all - 0.5*(dipole_r2 + qsum*x[i][2]*x[i][2]) - qsum*zprd*zprd/12.0)
-
-    // add on force corrections
-
-    double ffact = qscale * (-4.0*MY_PI/volume);
-
-    for (int i = 0; i < nlocal; i++) f[i][2] += ffact * q[i]*(dipole_all - qsum*x[i][2]);
-  } else {
+  // loop over ALL atoms
   
-    int *tag = atom->tag; 
-    
-    double g_ewald_inv = 1.0 / g_ewald;
-    const double qscale = qqrd2e * scale;
-    double efact = qscale * 0.5*MY_PIS/area; // * 0.5 to avoid double counting
-    double ffact = qscale * MY_PI/area; // * 0.5 to avoid double counting
-    
-    // loop over ALL atoms
-    
-    for (int i = 0; i < nlocal; i++) {
-      for (int j = 0; j < natoms_original; j++) {
-        
-        // could also skip self interaction, but since zii = 0 ...
-        
-        double xij = xlist[j] - x[i][2];
-        const double e_slabcorr = efact * q[i] * qlist[j] * 
-          (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
+  for (int i = 0; i < nlocal; i++) {
+    for (int j = 0; j < natoms_original; j++) {
+      
+      // could also skip self interaction, but since zii = 0 ...
+      
+      double xij = xlist[j] - x[i][2];
+      const double e_slabcorr = efact * q[i] * qlist[j] * 
+        (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
 
-        if (eflag_global) energy -= e_slabcorr;
-        
-        // per-atom energy
+      if (eflag_global) energy -= e_slabcorr;
+      
+      // per-atom energy
 
-        if (eflag_atom) for (int i = 0; i < nlocal; i++) eatom[i] -= e_slabcorr;
-        
-        // add on force corrections
-        
-        f[i][2] -= ffact * q[i]*qlist[j] * erf(g_ewald*xij);
-      }
+      if (eflag_atom) for (int i = 0; i < nlocal; i++) eatom[i] -= e_slabcorr;
+      
+      // add on force corrections
+      
+      f[i][2] -= ffact * q[i]*qlist[j] * erf(g_ewald*xij);
     }
   }
 }

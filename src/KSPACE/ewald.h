@@ -65,6 +65,7 @@ class Ewald : public KSpace {
   virtual void allocate();
   void deallocate();
   void slabcorr();
+  void ew2d();
   void fetch_x();
 
   // triclinic
