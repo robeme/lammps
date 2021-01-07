@@ -117,7 +117,7 @@ void Ewald::init()
       error->all(FLERR,"Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
       error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
-                 "and slab correction");
+                 "and slab correction nor EW2D");
   }
 
   // compute two charge force
@@ -315,6 +315,30 @@ void Ewald::setup()
   }
 
   gsqmx *= 1.00001;
+  
+  // overwrite settings if EW2D and take recipe from metalwalls
+  if (slabflag == 1 && slab_volfactor == 1.0) {
+   
+    double gmin, gmax;
+    gmin = MIN(unitk[0],unitk[1]);
+    gmin = MIN(unitk[2],gmin);
+    gmax = 2.0*g_ewald/gmin*sqrt(-log(accuracy_relative));
+    gsqmx = gmax*gmax;
+
+    if (kewaldflag == 1) {
+      kxmax = kxmax_orig = kx_ewald;
+      kymax = kymax_orig = ky_ewald;
+      kzmax = kzmax_orig = kz_ewald;
+    } else {
+      kxmax = kxmax_orig = ceil(gmax*gmin/unitk[0]);
+      kymax = kymax_orig = ceil(gmax*gmin/unitk[1]);
+      kzmax = kzmax_orig = ceil(gmax*gmin/unitk[2]);
+    }
+    
+    kmax = MAX(kxmax,kymax);
+    kmax = MAX(kmax,kzmax);
+    kmax3d = (2*kzmax+1)*(2*kxmax*kymax+kxmax+kymax);
+  }
 
   // if size has grown, reallocate k-dependent and nlocal-dependent arrays
 
@@ -639,6 +663,8 @@ void Ewald::eik_dot_r()
   for (k = 1; k <= kxmax; k++) {
     for (l = 1; l <= kymax; l++) {
       for (m = 1; m <= kzmax; m++) {
+        
+      
         sqk = (k*unitk[0] * k*unitk[0]) + (l*unitk[1] * l*unitk[1]) +
           (m*unitk[2] * m*unitk[2]);
         if (sqk <= gsqmx) {
@@ -774,257 +800,291 @@ void Ewald::coeffs()
   double preu = 4.0*MY_PI/volume;
 
   kcount = 0;
+  
+  if (slabflag == 1 && slab_volfactor == 1.0) {
+    
+    // EW2D metalwalls approach
 
-  // (k,0,0), (0,l,0), (0,0,m)
-
-  for (m = 1; m <= kmax; m++) {
-    sqk = (m*unitk[0]) * (m*unitk[0]);
-    if (sqk <= gsqmx) {
-      kxvecs[kcount] = m;
-      kyvecs[kcount] = 0;
-      kzvecs[kcount] = 0;
-      ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-      eg[kcount][0] = 2.0*unitk[0]*m*ug[kcount];
-      eg[kcount][1] = 0.0;
-      eg[kcount][2] = 0.0;
-      vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
-      vg[kcount][0] = 1.0 + vterm*(unitk[0]*m)*(unitk[0]*m);
-      vg[kcount][1] = 1.0;
-      vg[kcount][2] = 1.0;
-      vg[kcount][3] = 0.0;
-      vg[kcount][4] = 0.0;
-      vg[kcount][5] = 0.0;
-      kcount++;
+    int lstart = 1;
+    for (k = 0; k <= kxmax; k++) {
+      for (l = lstart; l <= kymax; l++) {
+        for (m = -kzmax; m <= kzmax; m++) {
+          sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[1]*l) * (unitk[1]*l) +
+            (unitk[2]*m) * (unitk[2]*m);
+          if (sqk <= gsqmx) {
+            kxvecs[kcount] = k;
+            kyvecs[kcount] = l;
+            kzvecs[kcount] = m;
+            ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+            eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
+            eg[kcount][1] = 2.0*unitk[1]*l*ug[kcount];
+            eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
+            vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
+            vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+            vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+            vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+            vg[kcount][3] = vterm*unitk[0]*k*unitk[1]*l;
+            vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
+            vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
+            kcount++;
+            if (comm->me == 0) printf("%d %d %d %d\n",kcount, k,l,m);
+          }
+        }
+      }
+      lstart = -kymax;
     }
-    sqk = (m*unitk[1]) * (m*unitk[1]);
-    if (sqk <= gsqmx) {
-      kxvecs[kcount] = 0;
-      kyvecs[kcount] = m;
-      kzvecs[kcount] = 0;
-      ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-      eg[kcount][0] = 0.0;
-      eg[kcount][1] = 2.0*unitk[1]*m*ug[kcount];
-      eg[kcount][2] = 0.0;
-      vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
-      vg[kcount][0] = 1.0;
-      vg[kcount][1] = 1.0 + vterm*(unitk[1]*m)*(unitk[1]*m);
-      vg[kcount][2] = 1.0;
-      vg[kcount][3] = 0.0;
-      vg[kcount][4] = 0.0;
-      vg[kcount][5] = 0.0;
-      kcount++;
-    }
-    sqk = (m*unitk[2]) * (m*unitk[2]);
-    if (sqk <= gsqmx) {
-      kxvecs[kcount] = 0;
-      kyvecs[kcount] = 0;
-      kzvecs[kcount] = m;
-      ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-      eg[kcount][0] = 0.0;
-      eg[kcount][1] = 0.0;
-      eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
-      vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
-      vg[kcount][0] = 1.0;
-      vg[kcount][1] = 1.0;
-      vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
-      vg[kcount][3] = 0.0;
-      vg[kcount][4] = 0.0;
-      vg[kcount][5] = 0.0;
-      kcount++;
-    }
-  }
+  } else {
 
-  // 1 = (k,l,0), 2 = (k,-l,0)
-
-  for (k = 1; k <= kxmax; k++) {
-    for (l = 1; l <= kymax; l++) {
-      sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[1]*l) * (unitk[1]*l);
+    // (k,0,0), (0,l,0), (0,0,m)
+    for (m = 1; m <= kmax; m++) {
+      sqk = (m*unitk[0]) * (m*unitk[0]);
       if (sqk <= gsqmx) {
-        kxvecs[kcount] = k;
-        kyvecs[kcount] = l;
+        kxvecs[kcount] = m;
+        kyvecs[kcount] = 0;
         kzvecs[kcount] = 0;
         ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-        eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
-        eg[kcount][1] = 2.0*unitk[1]*l*ug[kcount];
+        eg[kcount][0] = 2.0*unitk[0]*m*ug[kcount];
+        eg[kcount][1] = 0.0;
         eg[kcount][2] = 0.0;
         vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
-        vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
-        vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+        vg[kcount][0] = 1.0 + vterm*(unitk[0]*m)*(unitk[0]*m);
+        vg[kcount][1] = 1.0;
         vg[kcount][2] = 1.0;
-        vg[kcount][3] = vterm*unitk[0]*k*unitk[1]*l;
+        vg[kcount][3] = 0.0;
         vg[kcount][4] = 0.0;
         vg[kcount][5] = 0.0;
         kcount++;
-
-        kxvecs[kcount] = k;
-        kyvecs[kcount] = -l;
+      }
+      sqk = (m*unitk[1]) * (m*unitk[1]);
+      if (sqk <= gsqmx) {
+        kxvecs[kcount] = 0;
+        kyvecs[kcount] = m;
         kzvecs[kcount] = 0;
         ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-        eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
-        eg[kcount][1] = -2.0*unitk[1]*l*ug[kcount];
+        eg[kcount][0] = 0.0;
+        eg[kcount][1] = 2.0*unitk[1]*m*ug[kcount];
         eg[kcount][2] = 0.0;
-        vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
-        vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
-        vg[kcount][2] = 1.0;
-        vg[kcount][3] = -vterm*unitk[0]*k*unitk[1]*l;
-        vg[kcount][4] = 0.0;
-        vg[kcount][5] = 0.0;
-        kcount++;;
-      }
-    }
-  }
-
-  // 1 = (0,l,m), 2 = (0,l,-m)
-
-  for (l = 1; l <= kymax; l++) {
-    for (m = 1; m <= kzmax; m++) {
-      sqk = (unitk[1]*l) * (unitk[1]*l) + (unitk[2]*m) * (unitk[2]*m);
-      if (sqk <= gsqmx) {
-        kxvecs[kcount] = 0;
-        kyvecs[kcount] = l;
-        kzvecs[kcount] = m;
-        ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-        eg[kcount][0] =  0.0;
-        eg[kcount][1] =  2.0*unitk[1]*l*ug[kcount];
-        eg[kcount][2] =  2.0*unitk[2]*m*ug[kcount];
         vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
         vg[kcount][0] = 1.0;
-        vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
-        vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+        vg[kcount][1] = 1.0 + vterm*(unitk[1]*m)*(unitk[1]*m);
+        vg[kcount][2] = 1.0;
         vg[kcount][3] = 0.0;
         vg[kcount][4] = 0.0;
-        vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
-        kcount++;
-
-        kxvecs[kcount] = 0;
-        kyvecs[kcount] = l;
-        kzvecs[kcount] = -m;
-        ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-        eg[kcount][0] =  0.0;
-        eg[kcount][1] =  2.0*unitk[1]*l*ug[kcount];
-        eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
-        vg[kcount][0] = 1.0;
-        vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
-        vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
-        vg[kcount][3] = 0.0;
-        vg[kcount][4] = 0.0;
-        vg[kcount][5] = -vterm*unitk[1]*l*unitk[2]*m;
+        vg[kcount][5] = 0.0;
         kcount++;
       }
-    }
-  }
-
-  // 1 = (k,0,m), 2 = (k,0,-m)
-
-  for (k = 1; k <= kxmax; k++) {
-    for (m = 1; m <= kzmax; m++) {
-      sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[2]*m) * (unitk[2]*m);
+      sqk = (m*unitk[2]) * (m*unitk[2]);
       if (sqk <= gsqmx) {
-        kxvecs[kcount] = k;
+        kxvecs[kcount] = 0;
         kyvecs[kcount] = 0;
         kzvecs[kcount] = m;
         ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-        eg[kcount][0] =  2.0*unitk[0]*k*ug[kcount];
-        eg[kcount][1] =  0.0;
-        eg[kcount][2] =  2.0*unitk[2]*m*ug[kcount];
+        eg[kcount][0] = 0.0;
+        eg[kcount][1] = 0.0;
+        eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
         vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
-        vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+        vg[kcount][0] = 1.0;
         vg[kcount][1] = 1.0;
         vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
         vg[kcount][3] = 0.0;
-        vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
-        vg[kcount][5] = 0.0;
-        kcount++;
-
-        kxvecs[kcount] = k;
-        kyvecs[kcount] = 0;
-        kzvecs[kcount] = -m;
-        ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-        eg[kcount][0] =  2.0*unitk[0]*k*ug[kcount];
-        eg[kcount][1] =  0.0;
-        eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
-        vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
-        vg[kcount][1] = 1.0;
-        vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
-        vg[kcount][3] = 0.0;
-        vg[kcount][4] = -vterm*unitk[0]*k*unitk[2]*m;
+        vg[kcount][4] = 0.0;
         vg[kcount][5] = 0.0;
         kcount++;
       }
     }
-  }
 
-  // 1 = (k,l,m), 2 = (k,-l,m), 3 = (k,l,-m), 4 = (k,-l,-m)
+    // 1 = (k,l,0), 2 = (k,-l,0)
 
-  for (k = 1; k <= kxmax; k++) {
-    for (l = 1; l <= kymax; l++) {
-      for (m = 1; m <= kzmax; m++) {
-        sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[1]*l) * (unitk[1]*l) +
-          (unitk[2]*m) * (unitk[2]*m);
+    for (k = 1; k <= kxmax; k++) {
+      for (l = 1; l <= kymax; l++) {
+        sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[1]*l) * (unitk[1]*l);
         if (sqk <= gsqmx) {
           kxvecs[kcount] = k;
           kyvecs[kcount] = l;
-          kzvecs[kcount] = m;
+          kzvecs[kcount] = 0;
           ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
           eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
           eg[kcount][1] = 2.0*unitk[1]*l*ug[kcount];
-          eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
+          eg[kcount][2] = 0.0;
           vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
           vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
           vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
-          vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+          vg[kcount][2] = 1.0;
           vg[kcount][3] = vterm*unitk[0]*k*unitk[1]*l;
-          vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
-          vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
+          vg[kcount][4] = 0.0;
+          vg[kcount][5] = 0.0;
           kcount++;
 
           kxvecs[kcount] = k;
           kyvecs[kcount] = -l;
-          kzvecs[kcount] = m;
+          kzvecs[kcount] = 0;
           ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
           eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
           eg[kcount][1] = -2.0*unitk[1]*l*ug[kcount];
-          eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
+          eg[kcount][2] = 0.0;
           vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
           vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
-          vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+          vg[kcount][2] = 1.0;
           vg[kcount][3] = -vterm*unitk[0]*k*unitk[1]*l;
-          vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
-          vg[kcount][5] = -vterm*unitk[1]*l*unitk[2]*m;
+          vg[kcount][4] = 0.0;
+          vg[kcount][5] = 0.0;
+          kcount++;;
+        }
+      }
+    }
+
+    // 1 = (0,l,m), 2 = (0,l,-m)
+
+    for (l = 1; l <= kymax; l++) {
+      for (m = 1; m <= kzmax; m++) {
+        sqk = (unitk[1]*l) * (unitk[1]*l) + (unitk[2]*m) * (unitk[2]*m);
+        if (sqk <= gsqmx) {
+          kxvecs[kcount] = 0;
+          kyvecs[kcount] = l;
+          kzvecs[kcount] = m;
+          ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+          eg[kcount][0] =  0.0;
+          eg[kcount][1] =  2.0*unitk[1]*l*ug[kcount];
+          eg[kcount][2] =  2.0*unitk[2]*m*ug[kcount];
+          vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
+          vg[kcount][0] = 1.0;
+          vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+          vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+          vg[kcount][3] = 0.0;
+          vg[kcount][4] = 0.0;
+          vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
           kcount++;
 
-          kxvecs[kcount] = k;
+          kxvecs[kcount] = 0;
           kyvecs[kcount] = l;
           kzvecs[kcount] = -m;
           ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-          eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
-          eg[kcount][1] = 2.0*unitk[1]*l*ug[kcount];
+          eg[kcount][0] =  0.0;
+          eg[kcount][1] =  2.0*unitk[1]*l*ug[kcount];
           eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
-          vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+          vg[kcount][0] = 1.0;
           vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
           vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
-          vg[kcount][3] = vterm*unitk[0]*k*unitk[1]*l;
-          vg[kcount][4] = -vterm*unitk[0]*k*unitk[2]*m;
+          vg[kcount][3] = 0.0;
+          vg[kcount][4] = 0.0;
           vg[kcount][5] = -vterm*unitk[1]*l*unitk[2]*m;
-          kcount++;
-
-          kxvecs[kcount] = k;
-          kyvecs[kcount] = -l;
-          kzvecs[kcount] = -m;
-          ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
-          eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
-          eg[kcount][1] = -2.0*unitk[1]*l*ug[kcount];
-          eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
-          vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
-          vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
-          vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
-          vg[kcount][3] = -vterm*unitk[0]*k*unitk[1]*l;
-          vg[kcount][4] = -vterm*unitk[0]*k*unitk[2]*m;
-          vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
           kcount++;
         }
       }
     }
+
+    // 1 = (k,0,m), 2 = (k,0,-m)
+
+    for (k = 1; k <= kxmax; k++) {
+      for (m = 1; m <= kzmax; m++) {
+        sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[2]*m) * (unitk[2]*m);
+        if (sqk <= gsqmx) {
+          kxvecs[kcount] = k;
+          kyvecs[kcount] = 0;
+          kzvecs[kcount] = m;
+          ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+          eg[kcount][0] =  2.0*unitk[0]*k*ug[kcount];
+          eg[kcount][1] =  0.0;
+          eg[kcount][2] =  2.0*unitk[2]*m*ug[kcount];
+          vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
+          vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+          vg[kcount][1] = 1.0;
+          vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+          vg[kcount][3] = 0.0;
+          vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
+          vg[kcount][5] = 0.0;
+          kcount++;
+
+          kxvecs[kcount] = k;
+          kyvecs[kcount] = 0;
+          kzvecs[kcount] = -m;
+          ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+          eg[kcount][0] =  2.0*unitk[0]*k*ug[kcount];
+          eg[kcount][1] =  0.0;
+          eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
+          vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+          vg[kcount][1] = 1.0;
+          vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+          vg[kcount][3] = 0.0;
+          vg[kcount][4] = -vterm*unitk[0]*k*unitk[2]*m;
+          vg[kcount][5] = 0.0;
+          kcount++;
+        }
+      }
+    }
+
+    // 1 = (k,l,m), 2 = (k,-l,m), 3 = (k,l,-m), 4 = (k,-l,-m)
+
+    for (k = 1; k <= kxmax; k++) {
+      for (l = 1; l <= kymax; l++) {
+        for (m = 1; m <= kzmax; m++) {
+          sqk = (unitk[0]*k) * (unitk[0]*k) + (unitk[1]*l) * (unitk[1]*l) +
+            (unitk[2]*m) * (unitk[2]*m);
+          if (sqk <= gsqmx) {
+            kxvecs[kcount] = k;
+            kyvecs[kcount] = l;
+            kzvecs[kcount] = m;
+            ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+            eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
+            eg[kcount][1] = 2.0*unitk[1]*l*ug[kcount];
+            eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
+            vterm = -2.0*(1.0/sqk + 0.25*g_ewald_sq_inv);
+            vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+            vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+            vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+            vg[kcount][3] = vterm*unitk[0]*k*unitk[1]*l;
+            vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
+            vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
+            kcount++;
+
+            kxvecs[kcount] = k;
+            kyvecs[kcount] = -l;
+            kzvecs[kcount] = m;
+            ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+            eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
+            eg[kcount][1] = -2.0*unitk[1]*l*ug[kcount];
+            eg[kcount][2] = 2.0*unitk[2]*m*ug[kcount];
+            vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+            vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+            vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+            vg[kcount][3] = -vterm*unitk[0]*k*unitk[1]*l;
+            vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
+            vg[kcount][5] = -vterm*unitk[1]*l*unitk[2]*m;
+            kcount++;
+
+            kxvecs[kcount] = k;
+            kyvecs[kcount] = l;
+            kzvecs[kcount] = -m;
+            ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+            eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
+            eg[kcount][1] = 2.0*unitk[1]*l*ug[kcount];
+            eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
+            vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+            vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+            vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+            vg[kcount][3] = vterm*unitk[0]*k*unitk[1]*l;
+            vg[kcount][4] = -vterm*unitk[0]*k*unitk[2]*m;
+            vg[kcount][5] = -vterm*unitk[1]*l*unitk[2]*m;
+            kcount++;
+
+            kxvecs[kcount] = k;
+            kyvecs[kcount] = -l;
+            kzvecs[kcount] = -m;
+            ug[kcount] = preu*exp(-0.25*sqk*g_ewald_sq_inv)/sqk;
+            eg[kcount][0] = 2.0*unitk[0]*k*ug[kcount];
+            eg[kcount][1] = -2.0*unitk[1]*l*ug[kcount];
+            eg[kcount][2] = -2.0*unitk[2]*m*ug[kcount];
+            vg[kcount][0] = 1.0 + vterm*(unitk[0]*k)*(unitk[0]*k);
+            vg[kcount][1] = 1.0 + vterm*(unitk[1]*l)*(unitk[1]*l);
+            vg[kcount][2] = 1.0 + vterm*(unitk[2]*m)*(unitk[2]*m);
+            vg[kcount][3] = -vterm*unitk[0]*k*unitk[1]*l;
+            vg[kcount][4] = -vterm*unitk[0]*k*unitk[2]*m;
+            vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
+            kcount++;
+          }
+        }
+      }
+    } 
   }
 }
 
@@ -1375,6 +1435,8 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
+  if (slabflag == 1 && slab_volfactor == 1.0)
+    error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
 
   int i,k;
 
