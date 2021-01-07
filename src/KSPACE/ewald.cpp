@@ -1294,26 +1294,27 @@ void Ewald::slabcorr()
 }
 
 /* ----------------------------------------------------------------------
-   Slab-geometry correction term according to EW2D.
+   Slab-geometry correction term according to EW2D. See Hu, JCTC 2014
 ------------------------------------------------------------------------- */
 
 void Ewald::ew2d()
 {
   double *q = atom->q;
   double **x = atom->x;
-  int nlocal = atom->nlocal;
   double **f = atom->f;
+  int *tag = atom->tag;
+  int nlocal = atom->nlocal;
     
   double g_ewald_inv = 1.0 / g_ewald;
   
   const double qscale = qqrd2e * scale;
-  double efact = qscale * 0.5*MY_PIS/area; // * 0.5 to avoid double counting
-  double ffact = qscale * MY_PI/area;      // * 0.5 to avoid double counting
+  double efact = qscale * MY_PIS/area;      
+  double ffact = qscale * 2.0 * MY_PI/area;
   
   // loop over ALL atoms
   
   for (int i = 0; i < nlocal; i++) {
-    for (int j = 0; j < natoms_original; j++) {
+    for (int j = tag[i]; j < natoms_original; j++) {
       
       // could also skip self interaction, but since zii = 0 ...
       
