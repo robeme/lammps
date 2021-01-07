@@ -37,14 +37,15 @@ class Ewald : public KSpace {
   void compute_group_group(int, int, int);
 
  protected:
-  int kxmax, kymax, kzmax;
-  int kcount, kmax, kmax3d, kmax_created;
-  double gsqmx, volume;
+  int kxmax,kymax,kzmax;
+  int kcount,kmax,kmax3d,kmax_created;
+  double gsqmx,volume,area;
   int nmax;
 
   double unitk[3];
-  int *kxvecs, *kyvecs, *kzvecs;
-  int kxmax_orig, kymax_orig, kzmax_orig;
+  int *kxvecs,*kyvecs,*kzvecs;
+  int kxmax_orig,kymax_orig,kzmax_orig;
+  double *zlist, *qlist;
   double *ug;
   double **eg, **vg;
   double **ek;
@@ -63,6 +64,7 @@ class Ewald : public KSpace {
   virtual void allocate();
   void deallocate();
   void slabcorr();
+  void fetch_z();
 
   // triclinic
 
