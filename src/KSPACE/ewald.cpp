@@ -1315,9 +1315,9 @@ void Ewald::ew2d()
   // loop over ALL atoms
   
   for (int i = 0; i < nlocal; i++) {
-    for (int j = tag[i]; j < natoms_original; j++) {
+    for (int j = tag[i]+1; j < natoms_original; j++) {
       
-      // could also skip self interaction, but since zii = 0 ...
+      // tag[i]+1 skips self interaction
       
       double xij = xlist[j] - x[i][2];
       const double e_slabcorr = efact * q[i] * qlist[j] * 
