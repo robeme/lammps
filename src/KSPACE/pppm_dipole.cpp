@@ -128,6 +128,8 @@ void PPPMDipole::init()
   if (dipoleflag && strcmp(update->unit_style,"electron") == 0)
     error->all(FLERR,"Cannot (yet) use 'electron' units with dipoles");
 
+  if (slabflag && slab_volfactor == 1.0) 
+    error->all(FLERR,"Cannot use (yet) EW2D with PPPMDipole");
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use nonperiodic boundaries with PPPMDipole");
   if (slabflag) {
