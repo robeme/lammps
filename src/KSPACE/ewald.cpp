@@ -548,6 +548,10 @@ void Ewald::eik_dot_r()
   // (k,0,0), (0,l,0), (0,0,m)
 
   for (ic = 0; ic < 3; ic++) {
+    
+    // skip h=(0,0) in case of EW2D 
+    if (ic == xlistdim) continue;
+    
     sqk = unitk[ic]*unitk[ic];
     if (sqk <= gsqmx) {
       cstr1 = 0.0;
@@ -842,7 +846,7 @@ void Ewald::coeffs()
     // (k,0,0), (0,l,0), (0,0,m)
     for (m = 1; m <= kmax; m++) {
       sqk = (m*unitk[0]) * (m*unitk[0]);
-      if (sqk <= gsqmx) {
+      if (sqk <= gsqmx && xlistdim != 0) {
         kxvecs[kcount] = m;
         kyvecs[kcount] = 0;
         kzvecs[kcount] = 0;
@@ -860,7 +864,7 @@ void Ewald::coeffs()
         kcount++;
       }
       sqk = (m*unitk[1]) * (m*unitk[1]);
-      if (sqk <= gsqmx) {
+      if (sqk <= gsqmx && xlistdim != 1) {
         kxvecs[kcount] = 0;
         kyvecs[kcount] = m;
         kzvecs[kcount] = 0;
@@ -878,7 +882,7 @@ void Ewald::coeffs()
         kcount++;
       }
       sqk = (m*unitk[2]) * (m*unitk[2]);
-      if (sqk <= gsqmx) {
+      if (sqk <= gsqmx && xlistdim != 2) {
         kxvecs[kcount] = 0;
         kyvecs[kcount] = 0;
         kzvecs[kcount] = m;
@@ -1394,7 +1398,8 @@ void Ewald::slabcorr()
 }
 
 /* ----------------------------------------------------------------------
-   Slab-geometry correction term (k=0) of EW2D. See Hu, JCTC 2014
+   Slab-geometry correction term (k=0) of EW2D. See Hu, JCTC 10:12 (2014)
+   pp. 5254-5264 or metalwalls ewald and parallelization documentation.
 ------------------------------------------------------------------------- */
 
 void Ewald::ew2d()
@@ -1423,7 +1428,7 @@ void Ewald::ew2d()
       
       xij = xlist[j] - x[i][xlistdim];
       
-      // a matrix component 
+      // resembles (aij) matrix component in constant potential
       aij = efact * ( exp( -xij*xij * g_ewald_sq ) * g_ewald_inv + 
                          MY_PIS * xij * erf( xij * g_ewald ) );
       // coulomb potential; see eq. (4) in metalwalls parallelization doc
