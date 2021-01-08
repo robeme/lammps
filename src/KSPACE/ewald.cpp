@@ -44,7 +44,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr), amatrix(nullptr)
+  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr), taglist(nullptr), amatrix(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -57,6 +57,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kxvecs = kyvecs = kzvecs = nullptr;
   
   xlistdim = -1;
+  taglist = nullptr;
   xlist = qlist = nullptr;
   amatrix = nullptr;
   
@@ -317,8 +318,8 @@ void Ewald::setup()
 
   gsqmx *= 1.00001;
   
-  // overwrite settings if EW2D and take recipe from metalwalls
-  if (slabflag == 1 && slab_volfactor == 1.0) {
+  // overwrite settings if EW2D and take recipe from metalwalls (deactivated) TODO
+  if (slabflag == -1 && slab_volfactor == 1.0) {
    
     double gmin, gmax;
     gmin = MIN(unitk[0],unitk[1]);
@@ -399,7 +400,7 @@ void Ewald::compute(int eflag, int vflag)
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    if (slabflag && slab_volfactor == 1.0) fetch_x(); // number of atoms changes, need to update xlist
+    if (slabflag == 1 && slab_volfactor == 1.0) fetch_x(); // number of atoms changed need to update xlist
     natoms_original = atom->natoms;
   }
 
@@ -802,7 +803,7 @@ void Ewald::coeffs()
 
   kcount = 0;
   
-  if (slabflag == 1 && slab_volfactor == 1.0) {
+  if (slabflag == -1 && slab_volfactor == 1.0) { // (deactivated) TODO
     
     // EW2D metalwalls approach
 
@@ -828,7 +829,6 @@ void Ewald::coeffs()
             vg[kcount][4] = vterm*unitk[0]*k*unitk[2]*m;
             vg[kcount][5] = vterm*unitk[1]*l*unitk[2]*m;
             kcount++;
-            if (comm->me == 0) printf("%d %d %d %d\n",kcount, k,l,m);
           }
         }
       }
@@ -1229,13 +1229,16 @@ void Ewald::fetch_x()
   
   // gather q and z positions
   
+  int taglist_local[nlocal];
   double xlist_local[nlocal];
   double qlist_local[nlocal];
   for (i = 0; i < nlocal; i++) {
-    xlist_local[i] = x[i][xlistdim];
+    taglist_local[i] = tag[i];
     qlist_local[i] = q[i];
+    xlist_local[i] = x[i][xlistdim];
   }
   
+  MPI_Allgatherv(taglist_local,nlocal,MPI_INT,taglist,nlocal_list,disp,MPI_INT,world);
   MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,disp,MPI_DOUBLE,world);
   MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,disp,MPI_DOUBLE,world);
 }
@@ -1253,7 +1256,8 @@ void Ewald::allocate()
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
   
-  if (slabflag && slab_volfactor == 1.0) {
+  if (slabflag == 1 && slab_volfactor == 1.0) {
+    taglist = new int[natoms];
     xlist = new double[natoms];
     qlist = new double[natoms];
   }
@@ -1280,7 +1284,8 @@ void Ewald::deallocate()
   delete [] kyvecs;
   delete [] kzvecs;
   
-  if (slabflag && slab_volfactor == 1.0) {
+  if (slabflag == 1 && slab_volfactor == 1.0) {
+    delete [] taglist;
     delete [] xlist;
     delete [] qlist;
   }
@@ -1378,35 +1383,45 @@ void Ewald::ew2d()
   double g_ewald_sq = g_ewald*g_ewald;
   
   const double qscale = qqrd2e * scale;
-  double efact = qscale * MY_PIS/area;
+  double efact = 2.0 * MY_PIS/area;
   double ffact = qscale * MY_2PI/area;
   
-  // loop over ALL atoms
-  
-  for (int i = 0; i < nlocal; i++) {
-    for (int j = tag[i]; j < natoms_original; j++) {
+  // loop over ALL atom interactions
+   
+  int i,j;
+  double pot_ij, eij, xij;
+  double e_keq0 = 0.0;
+  for (i = 0; i < nlocal; i++) {
+    pot_ij = 0.0;
+    for (j = 0; j < natoms_original; j++) {
       
-      // tag[i] skips self interaction
+      xij = xlist[j] - x[i][xlistdim];
       
-      double xij = xlist[j] - x[i][xlistdim];
-      const double e_slabcorr = efact * q[i] * qlist[j] * 
-        (exp(-xij*xij*g_ewald*g_ewald)*g_ewald_inv + MY_PIS*xij*erf(g_ewald*xij));
-
-      if (eflag_global) energy -= e_slabcorr;
-      
-      // per-atom energy
-
-      if (eflag_atom) eatom[i] -= e_slabcorr;
+      // see eq. (4) in metalwalls parallelization doc
+      eij = efact * ( exp( -xij*xij * g_ewald_sq ) * g_ewald_inv + 
+                         MY_PIS * xij * erf( xij * g_ewald ) );
+      pot_ij += qlist[j] * eij;
       
       // A matrix calculation
       
-      if (matrixflag) amatrix[tag[i]][j] -= e_slabcorr;
+      if (matrixflag) amatrix[tag[i]][taglist[j]] -= eij;
       
       // add on force corrections
       
-      f[i][2] -= ffact * q[i]*qlist[j] * erf(g_ewald*xij);
+      f[i][2] -= ffact * q[i]*qlist[j] * erf( g_ewald*xij );
     }
+    
+    // per-atom energy
+
+    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
+    
+    e_keq0 += q[i] * pot_ij;
+    
   }
+  
+  printf("e_keq0: %f\n", e_keq0); 
+  
+  if (eflag_global) energy -= qscale * e_keq0 * 0.5;
 }
 
 /* ----------------------------------------------------------------------
