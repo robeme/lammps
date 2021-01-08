@@ -1413,7 +1413,7 @@ void Ewald::ew2d()
     
     // per-atom energy
 
-    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
+    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij;
     
     e_keq0 += q[i] * pot_ij;
     
