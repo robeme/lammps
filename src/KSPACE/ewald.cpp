@@ -1429,8 +1429,11 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
     group_allocate_flag = 1;
   }
   
-  // TODO only need size of groups
-  if (matrixflag) taglist = new int[atom->natoms];
+  // TODO adjust matrix and taglist to include only total size of both groups
+  if (matrixflag) {
+    int natoms = atom->natoms;
+    taglist = new int[natoms];
+  }
 
   e2group = 0.0; //energy
   f2group[0] = 0.0; //force in x-direction
