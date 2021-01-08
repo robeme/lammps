@@ -271,10 +271,11 @@ void ComputeCoulPot::pair_contribution()
   int *ilist,*jlist,*numneigh,**firstneigh;
 
   double **x = atom->x;
+  double *q = atom->q;
   tagint *molecule = atom->molecule;
   int *type = atom->type;
   int *mask = atom->mask;
-  int *tag = atom->tag;
+  tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
   double *special_coul = force->special_coul;
 
@@ -348,7 +349,7 @@ void ComputeCoulPot::pair_contribution()
 
       if (rsq < cutsq[itype][jtype]) {
          gradQ_V_local[tag[i]-1][tag[j]-1] += pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
-         gradQ_V_local[tag[i]-1][tag[j]-1] *= 2.0/(q[i]*q[j]);
+         gradQ_V_local[tag[i]-1][tag[j]-1] *= 2.0/(atom->q[i]*atom->q[j]);
       }
     }
   }
