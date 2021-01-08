@@ -16,7 +16,7 @@
      K-space terms added by Stan Moore (BYU)
 ------------------------------------------------------------------------- */
 
-#include "compute_group_group.h"
+#include "compute_coul_pot.h"
 
 #include <cstring>
 #include <cmath>
@@ -43,7 +43,7 @@ enum{OFF,INTER,INTRA};
 
 /* ---------------------------------------------------------------------- */
 
-ComputeGroupGroup::ComputeGroupGroup(LAMMPS *lmp, int narg, char **arg) :
+ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
   group2(nullptr)
 {
@@ -67,6 +67,7 @@ ComputeGroupGroup::ComputeGroupGroup(LAMMPS *lmp, int narg, char **arg) :
   kspaceflag = 0;
   boundaryflag = 1;
   molflag = OFF;
+  matrixflag = 0;
 
   int iarg = 4;
   while (iarg < narg) {
@@ -82,6 +83,13 @@ ComputeGroupGroup::ComputeGroupGroup(LAMMPS *lmp, int narg, char **arg) :
         error->all(FLERR,"Illegal compute group/group command");
       if (strcmp(arg[iarg+1],"yes") == 0) kspaceflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) kspaceflag = 0;
+      else error->all(FLERR,"Illegal compute group/group command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"matrix") == 0) {
+      if (iarg+2 > narg)
+        error->all(FLERR,"Illegal compute group/group command");
+      if (strcmp(arg[iarg+1],"yes") == 0) matrixflag = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) matrixflag = 0;
       else error->all(FLERR,"Illegal compute group/group command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {
@@ -109,7 +117,7 @@ ComputeGroupGroup::ComputeGroupGroup(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-ComputeGroupGroup::~ComputeGroupGroup()
+ComputeCoulPot::~ComputeCoulPot()
 {
   delete [] group2;
   delete [] vector;
@@ -117,7 +125,7 @@ ComputeGroupGroup::~ComputeGroupGroup()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeGroupGroup::init()
+void ComputeCoulPot::init()
 {
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
@@ -171,29 +179,14 @@ void ComputeGroupGroup::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeGroupGroup::init_list(int /*id*/, NeighList *ptr)
+void ComputeCoulPot::init_list(int /*id*/, NeighList *ptr)
 {
   list = ptr;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double ComputeGroupGroup::compute_scalar()
-{
-  invoked_scalar = invoked_vector = update->ntimestep;
-
-  scalar = 0.0;
-  vector[0] = vector[1] = vector[2] = 0.0;
-
-  if (pairflag) pair_contribution();
-  if (kspaceflag) kspace_contribution();
-
-  return scalar;
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeGroupGroup::compute_vector()
+void ComputeCoulPot::compute_vector()
 {
   invoked_scalar = invoked_vector = update->ntimestep;
 
@@ -206,7 +199,7 @@ void ComputeGroupGroup::compute_vector()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeGroupGroup::pair_contribution()
+void ComputeCoulPot::pair_contribution()
 {
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
@@ -325,7 +318,7 @@ void ComputeGroupGroup::pair_contribution()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeGroupGroup::kspace_contribution()
+void ComputeCoulPot::kspace_contribution()
 {
   double *vector_kspace = force->kspace->f2group;
 
@@ -363,7 +356,7 @@ void ComputeGroupGroup::kspace_contribution()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeGroupGroup::kspace_correction()
+void ComputeCoulPot::kspace_correction()
 {
 
   // total charge of groups A & B, needed for correction term
