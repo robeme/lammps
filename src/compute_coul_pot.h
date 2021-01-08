@@ -29,19 +29,22 @@ class ComputeCoulPot : public Compute {
   ComputeCoulPot(class LAMMPS *, int, char **);
   ~ComputeCoulPot();
   void init();
+  void setup();
   void init_list(int, class NeighList *);
-  void compute_vector();
+  void compute_array();
 
  private:
   char *group2;
-  int jgroup,jgroupbit,othergroupbit;
-  double **cutsq;
+  int jgroup,jgroupbit,othergroupbit,jgroupnum,igroupnum;
+  int natoms,natoms_original;
+  double **cutsq, **gradQ_V;
   double e_self,e_correction;
   int pairflag,kspaceflag,boundaryflag,molflag,matrixflag;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
 
+  void reallocate();
   void pair_contribution();
   void kspace_contribution();
   void kspace_correction();
