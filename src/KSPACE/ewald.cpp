@@ -1416,7 +1416,7 @@ void Ewald::ew2d()
   // loop over ALL atom interactions
    
   int i,j;
-  double pot_ij, eij, xij;
+  double pot_ij, aij, xij, e_keq0_all;
   double e_keq0 = 0.0;
   for (i = 0; i < nlocal; i++) {
     pot_ij = 0.0;
@@ -1424,25 +1424,30 @@ void Ewald::ew2d()
       
       xij = xlist[j] - x[i][xlistdim];
       
-      // see eq. (4) in metalwalls parallelization doc
-      eij = efact * ( exp( -xij*xij * g_ewald_sq ) * g_ewald_inv + 
+      // a matrix component 
+      aij = efact * ( exp( -xij*xij * g_ewald_sq ) * g_ewald_inv + 
                          MY_PIS * xij * erf( xij * g_ewald ) );
-      pot_ij += qlist[j] * eij;
+      // coulomb potential; see eq. (4) in metalwalls parallelization doc
+      pot_ij += qlist[j] * aij;
       
       // add on force corrections
       
       f[i][2] -= ffact * q[i]*qlist[j] * erf( g_ewald*xij );
     }
     
-    // per-atom energy
+    // per-atom energy; see eq. (20) in metalwalls ewald doc
 
-    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij;
+    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
     
     e_keq0 += q[i] * pot_ij;
     
   }
   
-  if (eflag_global) energy -= qscale * e_keq0 * 0.5;
+  // sum local contributions; see eq. (20) in metalwalls ewald doc
+  
+  MPI_Allreduce(&e_keq0_all,&e_keq0,1,MPI_DOUBLE,MPI_SUM,world);
+  
+  if (eflag_global) energy -= qscale * e_keq0_all * 0.5;
 }
 
 /* ----------------------------------------------------------------------
