@@ -67,6 +67,7 @@ ComputeGroupGroup::ComputeGroupGroup(LAMMPS *lmp, int narg, char **arg) :
   kspaceflag = 0;
   boundaryflag = 1;
   molflag = OFF;
+  matrixflag = 0;
 
   int iarg = 4;
   while (iarg < narg) {
@@ -82,6 +83,13 @@ ComputeGroupGroup::ComputeGroupGroup(LAMMPS *lmp, int narg, char **arg) :
         error->all(FLERR,"Illegal compute group/group command");
       if (strcmp(arg[iarg+1],"yes") == 0) kspaceflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) kspaceflag = 0;
+      else error->all(FLERR,"Illegal compute group/group command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"matrix") == 0) {
+      if (iarg+2 > narg)
+        error->all(FLERR,"Illegal compute group/group command");
+      if (strcmp(arg[iarg+1],"yes") == 0) matrixflag = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) matrixflag = 0;
       else error->all(FLERR,"Illegal compute group/group command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {

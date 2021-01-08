@@ -48,16 +48,16 @@ class Ewald : public KSpace {
   int xlistdim;
   int *taglist;
   double *xlist, *qlist;
-  double **amatrix;
   double *ug;
   double **eg,**vg;
   double **ek;
+  double **gradQ_V;
   double *sfacrl,*sfacim,*sfacrl_all,*sfacim_all;
   double ***cs,***sn;
 
   // group-group interactions
 
-  int group_allocate_flag;
+  int group_allocate_flag, matrixflag;
   double *sfacrl_A,*sfacim_A,*sfacrl_A_all,*sfacim_A_all;
   double *sfacrl_B,*sfacim_B,*sfacrl_B_all,*sfacim_B_all;
 
@@ -69,6 +69,7 @@ class Ewald : public KSpace {
   void slabcorr();
   void ew2d();
   void fetch_x();
+  void fetch_tags();
 
   // triclinic
 

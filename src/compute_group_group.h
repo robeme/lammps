@@ -38,7 +38,7 @@ class ComputeGroupGroup : public Compute {
   int jgroup,jgroupbit,othergroupbit;
   double **cutsq;
   double e_self,e_correction;
-  int pairflag,kspaceflag,boundaryflag,molflag;
+  int pairflag,kspaceflag,boundaryflag,molflag,matrixflag;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
