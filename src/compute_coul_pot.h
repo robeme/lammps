@@ -1,6 +1,6 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://www.lammps.org/, Sandia National Laboratories
+   http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -12,33 +12,32 @@
 ------------------------------------------------------------------------- */
 
 #ifdef COMPUTE_CLASS
-// clang-format off
-ComputeStyle(group/group,ComputeGroupGroup);
-// clang-format on
+
+ComputeStyle(coul/pot,ComputeCoulPot)
+
 #else
 
-#ifndef LMP_COMPUTE_GROUP_GROUP_H
-#define LMP_COMPUTE_GROUP_GROUP_H
+#ifndef LMP_COMPUTE_COUL_POT_H
+#define LMP_COMPUTE_COUL_POT_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeGroupGroup : public Compute {
+class ComputeCoulPot : public Compute {
  public:
-  ComputeGroupGroup(class LAMMPS *, int, char **);
-  ~ComputeGroupGroup();
+  ComputeCoulPot(class LAMMPS *, int, char **);
+  ~ComputeCoulPot();
   void init();
   void init_list(int, class NeighList *);
-  double compute_scalar();
   void compute_vector();
 
  private:
   char *group2;
-  int jgroup, jgroupbit, othergroupbit;
+  int jgroup,jgroupbit,othergroupbit;
   double **cutsq;
   double e_self,e_correction;
-  int pairflag,kspaceflag,boundaryflag,molflag;
+  int pairflag,kspaceflag,boundaryflag,molflag,matrixflag;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
@@ -48,7 +47,7 @@ class ComputeGroupGroup : public Compute {
   void kspace_correction();
 };
 
-}    // namespace LAMMPS_NS
+}
 
 #endif
 #endif
