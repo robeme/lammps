@@ -1160,15 +1160,15 @@ void Ewald::fetch_x()
   int i,j;
   
   int nlocal_list[nprocs];
-  int disp[nprocs];
+  int displs[nprocs];
   int dispsum = 0;
   
   MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
   
-  disp[0] = 0;
+  displs[0] = 0;
   for (i = 1; i < nprocs; ++i) {
     dispsum += nlocal_list[i-1];
-    disp[i] = dispsum;
+    displs[i] = dispsum;
   }
   
   // gather q and z positions
@@ -1180,8 +1180,8 @@ void Ewald::fetch_x()
     xlist_local[i] = x[i][xlistdim];
   }
   
-  MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,disp,MPI_DOUBLE,world);
-  MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,disp,MPI_DOUBLE,world);
+  MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,displs,MPI_DOUBLE,world);
 }
 
 /* ----------------------------------------------------------------------
@@ -1192,20 +1192,20 @@ void Ewald::fetch_tags()
 {
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
-  int *tag = atom->tag; 
+  tagint *tag = atom->tag; 
   
   int i,j;
   
   int nlocal_list[nprocs];
-  int disp[nprocs];
+  int displs[nprocs];
   int dispsum = 0;
   
   MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
   
-  disp[0] = 0;
+  displs[0] = 0;
   for (i = 1; i < nprocs; ++i) {
     dispsum += nlocal_list[i-1];
-    disp[i] = dispsum;
+    displs[i] = dispsum;
   }
   
   // gather tags
@@ -1215,7 +1215,7 @@ void Ewald::fetch_tags()
     taglist_local[i] = tag[i];
   }
   
-  MPI_Allgatherv(taglist_local,nlocal,MPI_INT,taglist,nlocal_list,disp,MPI_INT,world);
+  MPI_Allgatherv(taglist_local,nlocal,MPI_INT,taglist,nlocal_list,displs,MPI_INT,world);
 }
 
 
@@ -1229,7 +1229,7 @@ void Ewald::allocate()
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
   
-  int natoms = atom->natoms;
+  bigint natoms = atom->natoms;
   if (slabflag == 1 && slab_volfactor == 1.0) {
     xlist = new double[natoms];
     qlist = new double[natoms];
@@ -1345,7 +1345,7 @@ void Ewald::ew2d()
   double *q = atom->q;
   double **x = atom->x;
   double **f = atom->f;
-  int *tag = atom->tag;
+  tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
     
   double g_ewald_inv = 1.0 / g_ewald;
@@ -1431,7 +1431,7 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
   
   // TODO adjust matrix and taglist to include only total size of both groups
   if (matrixflag) {
-    int natoms = atom->natoms;
+    bigint natoms = atom->natoms;
     taglist = new int[natoms];
   }
 
