@@ -203,6 +203,21 @@ void ComputeCoulPot::setup()
   // one-time calculation of coulomb matrix
 
   compute_array();
+  
+  // store matrix in file
+  
+  FILE *fp = nullptr; // TODO file error handling
+  if (comm->me == 0) {
+    fprintf(screen,"Writing out coulomb matrix\n");
+    fp = fopen("A.mat","w");
+    for (int i = 0; i < natoms; i++) {
+      for (int j = 0; j < natoms; j++) {
+        fprintf(fp, "%.3f ", gradQ_V[i][j]);
+      }
+      fprintf(fp,"\n");
+    }
+    if (fp && comm->me == 0) fclose(fp);
+  } 
 }
 
 /* ---------------------------------------------------------------------- */
@@ -227,19 +242,6 @@ void ComputeCoulPot::compute_array()
 
   if (pairflag) pair_contribution();
   if (kspaceflag) kspace_contribution(); 
-  
-  FILE *fp = nullptr;
-  if (comm->me == 0) {
-    printf("*** trying to write out matrix ***\n");
-    fp = fopen("A.mat","w");
-    for (int i = 0; i < natoms; i++) {
-      for (int j = 0; j < natoms; j++) {
-        fprintf(fp, "%.3f ", gradQ_V[i][j]);
-      }
-      fprintf(fp,"\n");
-    }
-    if (fp && comm->me == 0) fclose(fp);
-  } 
 }
 
 /* ---------------------------------------------------------------------- */
@@ -346,6 +348,7 @@ void ComputeCoulPot::pair_contribution()
 
       if (rsq < cutsq[itype][jtype]) {
          gradQ_V_local[tag[i]-1][tag[j]-1] += pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
+         gradQ_V_local[tag[i]-1][tag[j]-1] *= 2.0/(q[i]*q[j]);
       }
     }
   }
