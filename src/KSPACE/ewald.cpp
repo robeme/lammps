@@ -44,9 +44,9 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr), taglist(nullptr), amatrix(nullptr)
+  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr), taglist(nullptr), gradQ_V(nullptr)
 {
-  group_allocate_flag = 0;
+  group_allocate_flag = matrixflag = 0;
   kmax_created = 0;
   ewaldflag = 1;
   group_group_enable = 1;
@@ -59,7 +59,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   xlistdim = -1;
   taglist = nullptr;
   xlist = qlist = nullptr;
-  amatrix = nullptr;
+  gradQ_V = nullptr;
   
   ug = nullptr;
   eg = vg = nullptr;
@@ -318,6 +318,7 @@ void Ewald::setup()
 
   gsqmx *= 1.00001;
   
+  /*
   // overwrite settings if EW2D and take recipe from metalwalls (deactivated) TODO
   if (slabflag == -1 && slab_volfactor == 1.0) {
    
@@ -341,6 +342,7 @@ void Ewald::setup()
     kmax = MAX(kmax,kzmax);
     kmax3d = (2*kzmax+1)*(2*kxmax*kymax+kxmax+kymax);
   }
+  */
 
   // if size has grown, reallocate k-dependent and nlocal-dependent arrays
 
@@ -805,6 +807,7 @@ void Ewald::coeffs()
   
   if (slabflag == -1 && slab_volfactor == 1.0) { // (deactivated) TODO
     
+    /*
     // EW2D metalwalls approach
 
     int lstart = 1;
@@ -834,6 +837,7 @@ void Ewald::coeffs()
       }
       lstart = -kymax;
     }
+    */
   } else {
 
     // (k,0,0), (0,l,0), (0,0,m)
@@ -1204,7 +1208,6 @@ void Ewald::fetch_x()
 {
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
-  int *tag = atom->tag; 
   double *q = atom->q; 
   double **x = atom->x;
 
@@ -1229,18 +1232,49 @@ void Ewald::fetch_x()
   
   // gather q and z positions
   
-  int taglist_local[nlocal];
   double xlist_local[nlocal];
   double qlist_local[nlocal];
   for (i = 0; i < nlocal; i++) {
-    taglist_local[i] = tag[i];
     qlist_local[i] = q[i];
     xlist_local[i] = x[i][xlistdim];
   }
   
-  MPI_Allgatherv(taglist_local,nlocal,MPI_INT,taglist,nlocal_list,disp,MPI_INT,world);
   MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,disp,MPI_DOUBLE,world);
   MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,disp,MPI_DOUBLE,world);
+}
+
+/* ----------------------------------------------------------------------
+   Get tags of all atoms for gradQ_V and store in array,
+------------------------------------------------------------------------- */
+
+void Ewald::fetch_tags()
+{
+  int nprocs = comm->nprocs;
+  int nlocal = atom->nlocal;
+  int *tag = atom->tag; 
+  
+  int i,j;
+  
+  int nlocal_list[nprocs];
+  int disp[nprocs];
+  int dispsum = 0;
+  
+  MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
+  
+  disp[0] = 0;
+  for (i = 1; i < nprocs; ++i) {
+    dispsum += nlocal_list[i-1];
+    disp[i] = dispsum;
+  }
+  
+  // gather tags
+  
+  int taglist_local[nlocal];
+  for (i = 0; i < nlocal; i++) {
+    taglist_local[i] = tag[i];
+  }
+  
+  MPI_Allgatherv(taglist_local,nlocal,MPI_INT,taglist,nlocal_list,disp,MPI_INT,world);
 }
 
 
@@ -1250,19 +1284,15 @@ void Ewald::fetch_x()
 
 void Ewald::allocate()
 {
-  int natoms = atom->natoms;
-
   kxvecs = new int[kmax3d];
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
   
+  int natoms = atom->natoms;
   if (slabflag == 1 && slab_volfactor == 1.0) {
-    taglist = new int[natoms];
     xlist = new double[natoms];
     qlist = new double[natoms];
   }
-  
-  if (matrixflag) memory->create(amatrix,natoms,natoms,"ewald:amatrix");
 
   ug = new double[kmax3d];
   memory->create(eg,kmax3d,3,"ewald:eg");
@@ -1285,12 +1315,9 @@ void Ewald::deallocate()
   delete [] kzvecs;
   
   if (slabflag == 1 && slab_volfactor == 1.0) {
-    delete [] taglist;
     delete [] xlist;
     delete [] qlist;
   }
-  
-  if (matrixflag) memory->destroy(amatrix);
 
   delete [] ug;
   memory->destroy(eg);
@@ -1402,10 +1429,6 @@ void Ewald::ew2d()
                          MY_PIS * xij * erf( xij * g_ewald ) );
       pot_ij += qlist[j] * eij;
       
-      // A matrix calculation
-      
-      if (matrixflag) amatrix[tag[i]][taglist[j]] -= eij;
-      
       // add on force corrections
       
       f[i][2] -= ffact * q[i]*qlist[j] * erf( g_ewald*xij );
@@ -1418,8 +1441,6 @@ void Ewald::ew2d()
     e_keq0 += q[i] * pot_ij;
     
   }
-  
-  printf("e_keq0: %f\n", e_keq0); 
   
   if (eflag_global) energy -= qscale * e_keq0 * 0.5;
 }
@@ -1460,6 +1481,9 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
     allocate_groups();
     group_allocate_flag = 1;
   }
+  
+  // TODO only need size of groups
+  if (matrixflag) taglist = new int[atom->natoms];
 
   e2group = 0.0; //energy
   f2group[0] = 0.0; //force in x-direction
@@ -1568,6 +1592,10 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 
   if (slabflag == 1)
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
+    
+  // destroy taglist if created
+  
+  if (matrixflag) delete [] taglist;
 }
 
 /* ----------------------------------------------------------------------
