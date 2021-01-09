@@ -1345,8 +1345,8 @@ void Ewald::ew2d()
       
       // add on force corrections
       
-      f[i][2] -= ffact * q[i]*qlist[j] * erf( g_ewald*xij );
-    }
+      f[i][xlistdim] -= ffact * q[i]*qlist[j] * erf( g_ewald*xij );
+    } // TODO xlistdim -> non_prd?
     
     // per-atom energy; see eq. (20) in metalwalls ewald doc
 
