@@ -16,7 +16,7 @@
      K-space terms added by Stan Moore (BYU)
 ------------------------------------------------------------------------- */
 
-#include "compute_coul_pot.h"
+#include "compute_coul_matrix.h"
 
 #include <cstring>
 #include <cmath>
@@ -44,11 +44,11 @@ enum{OFF,INTER,INTRA};
 
 /* ---------------------------------------------------------------------- */
 
-ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
+ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
   fp(nullptr), group2(nullptr), gradQ_V(nullptr), mat2tag(nullptr), id2mat(nullptr)
 {
-  if (narg < 4) error->all(FLERR,"Illegal compute coul/pot command");
+  if (narg < 4) error->all(FLERR,"Illegal compute coul/matrix command");
   
   array_flag = 1;
   size_array_cols = 0;
@@ -64,7 +64,7 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
 
   jgroup = group->find(group2);
   if (jgroup == -1)
-    error->all(FLERR,"Compute coul/pot group ID does not exist");
+    error->all(FLERR,"Compute coul/matrix group ID does not exist");
   jgroupbit = group->bitmask[jgroup];
   
   // igroup defined in parent class
@@ -82,55 +82,55 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
       if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/pot command");
+        error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"yes") == 0) pairflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) pairflag = 0;
-      else error->all(FLERR,"Illegal compute coul/pot command");
+      else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"kspace") == 0) {
       if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/pot command");
+        error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"yes") == 0) kspaceflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) kspaceflag = 0;
-      else error->all(FLERR,"Illegal compute coul/pot command");
+      else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"matrix") == 0) {
       if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/pot command");
+        error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"yes") == 0) matrixflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) matrixflag = 0;
-      else error->all(FLERR,"Illegal compute coul/pot command");
+      else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {
       if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/pot command");
+        error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"yes") == 0) boundaryflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) boundaryflag  = 0;
-      else error->all(FLERR,"Illegal compute coul/pot command");
+      else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"molecule") == 0) {
       if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/pot command");
+        error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"off") == 0) molflag = OFF;
       else if (strcmp(arg[iarg+1],"inter") == 0) molflag = INTER;
       else if (strcmp(arg[iarg+1],"intra") == 0) molflag  = INTRA;
-      else error->all(FLERR,"Illegal compute coul/pot command");
+      else error->all(FLERR,"Illegal compute coul/matrix command");
       if (molflag != OFF && atom->molecule_flag == 0)
-        error->all(FLERR,"Compute coul/pot molecule requires molecule IDs");
+        error->all(FLERR,"Compute coul/matrix molecule requires molecule IDs");
       iarg += 2;
     } else if (strcmp(arg[iarg],"file") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute coul/pot command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal compute coul/matrix command");
       if (comm->me == 0) {
         fp = fopen(arg[iarg+1],"w");
         if (fp == nullptr)
-          error->one(FLERR,fmt::format("Cannot open compute coul/pot file {}: {}",
+          error->one(FLERR,fmt::format("Cannot open compute coul/matrix file {}: {}",
                                        arg[iarg+1], utils::getsyserror()));
       }
       iarg += 2;
     } else if (strcmp(arg[iarg],"overwrite") == 0) { // TODO overwrites output if used every n steps
       overwrite = 1;                                 // e.g. by end_of_step() etc.
       iarg += 1;
-    } else error->all(FLERR,"Illegal compute coul/pot command");
+    } else error->all(FLERR,"Illegal compute coul/matrix command");
   }
 
   gradQ_V = nullptr;
@@ -148,7 +148,7 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
 
 /* ---------------------------------------------------------------------- */
 
-ComputeCoulPot::~ComputeCoulPot()
+ComputeCoulMatrix::~ComputeCoulMatrix()
 {
   delete [] group2;
   
@@ -164,23 +164,23 @@ ComputeCoulPot::~ComputeCoulPot()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::init()
+void ComputeCoulMatrix::init()
 {
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
 
   if (pairflag && force->pair == nullptr) 
-    error->all(FLERR,"No pair style defined for compute coul/pot");
+    error->all(FLERR,"No pair style defined for compute coul/matrix");
   if (force->pair_match("^hybrid",0) == nullptr
       && force->pair->single_enable == 0)
-    error->all(FLERR,"Pair style does not support compute coul/pot");
+    error->all(FLERR,"Pair style does not support compute coul/matrix");
 
-  // error if Kspace style does not compute coul/pot interactions
+  // error if Kspace style does not compute coul/matrix interactions
 
   if (kspaceflag && force->kspace == nullptr)
-    error->all(FLERR,"No Kspace style defined for compute coul/pot");
+    error->all(FLERR,"No Kspace style defined for compute coul/matrix");
   if (kspaceflag && force->kspace->group_group_enable == 0)
-    error->all(FLERR,"Kspace style does not support compute coul/pot");
+    error->all(FLERR,"Kspace style does not support compute coul/matrix");
 
   if (pairflag) {
     pair = force->pair;
@@ -195,7 +195,7 @@ void ComputeCoulPot::init()
   if (kspaceflag) {
     kspace_correction();
     if ((fabs(e_correction) > SMALL) && (comm->me == 0))
-      error->warning(FLERR,"Both groups in compute coul/pot have a net charge; "
+      error->warning(FLERR,"Both groups in compute coul/matrix have a net charge; "
                      "the Kspace boundary correction to energy will be non-zero");
   }
 
@@ -203,7 +203,7 @@ void ComputeCoulPot::init()
 
   jgroup = group->find(group2);
   if (jgroup == -1)
-    error->all(FLERR,"Compute coul/pot group ID does not exist");
+    error->all(FLERR,"Compute coul/matrix group ID does not exist");
   jgroupbit = group->bitmask[jgroup];
 
   // need an occasional half neighbor list
@@ -226,8 +226,8 @@ void ComputeCoulPot::init()
   for (int i = 0; i < natoms; i++)
   gradQ_V[i] = new double[natoms];
   
-  memory->create(mat2tag,natoms,"coul/pot:mat2tag");
-  memory->create(id2mat,natoms,"coul/pot:id2mat");
+  memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
+  memory->create(id2mat,natoms,"coul/matrix:id2mat");
   
   // assign matrix indices to global tags
   
@@ -238,7 +238,7 @@ void ComputeCoulPot::init()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::setup()
+void ComputeCoulMatrix::setup()
 {  
   
   // one-time calculation of coulomb matrix at simulation setup
@@ -265,14 +265,14 @@ void ComputeCoulPot::setup()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::init_list(int /*id*/, NeighList *ptr)
+void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr)
 {
   list = ptr;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::compute_array()
+void ComputeCoulMatrix::compute_array()
 {
   if (natoms != natoms_original) reallocate();
   
@@ -289,7 +289,7 @@ void ComputeCoulPot::compute_array()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::reallocate()
+void ComputeCoulMatrix::reallocate()
 {
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
@@ -312,13 +312,13 @@ void ComputeCoulPot::reallocate()
   // reassignment matrix tags
   
   memory->destroy(mat2tag);
-  memory->create(mat2tag,natoms,"coul/pot:mat2tag");
+  memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
   assignment();
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::assignment()
+void ComputeCoulMatrix::assignment()
 {
   // assign matrix indices to global tags and local matrix position
   
@@ -336,19 +336,19 @@ void ComputeCoulPot::assignment()
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit && mask[i] & jgroupbit)
-      error->all(FLERR,"Same atom in both groups in compute coul/pot");
+      error->all(FLERR,"Same atom in both groups in compute coul/matrix");
     else if (mask[i] & groupbit) 
       igroupnum_local++;
     else if (mask[i] & jgroupbit) 
       jgroupnum_local++;
   }
   
-  memory->create(igroupnum_list,nprocs,"coul/pot:ilist");
-  memory->create(jgroupnum_list,nprocs,"coul/pot:jlist");
-  memory->create(idispls,nprocs,"coul/pot:idispls");
-  memory->create(jdispls,nprocs,"coul/pot:jdispls");
-  memory->create(itaglist,igroupnum,"coul/pot:itaglist");
-  memory->create(jtaglist,jgroupnum,"coul/pot:jtaglist");
+  memory->create(igroupnum_list,nprocs,"coul/matrix:ilist");
+  memory->create(jgroupnum_list,nprocs,"coul/matrix:jlist");
+  memory->create(idispls,nprocs,"coul/matrix:idispls");
+  memory->create(jdispls,nprocs,"coul/matrix:jdispls");
+  memory->create(itaglist,igroupnum,"coul/matrix:itaglist");
+  memory->create(jtaglist,jgroupnum,"coul/matrix:jtaglist");
     
   MPI_Allgather(&igroupnum_local,1,MPI_INT,igroupnum_list,1,MPI_INT,world);
   MPI_Allgather(&jgroupnum_local,1,MPI_INT,jgroupnum_list,1,MPI_INT,world);
@@ -359,8 +359,8 @@ void ComputeCoulPot::assignment()
     jdispls[i] = jdispls[i-1] + jgroupnum_list[i-1];
   }
   
-  memory->create(itaglist_local,igroupnum_local,"coul/pot:itaglist_local");
-  memory->create(jtaglist_local,jgroupnum_local,"coul/pot:jtaglist_local");
+  memory->create(itaglist_local,igroupnum_local,"coul/matrix:itaglist_local");
+  memory->create(jtaglist_local,jgroupnum_local,"coul/matrix:jtaglist_local");
   
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -397,7 +397,7 @@ void ComputeCoulPot::assignment()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::pair_contribution()
+void ComputeCoulMatrix::pair_contribution()
 {
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
@@ -501,7 +501,7 @@ void ComputeCoulPot::pair_contribution()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::kspace_contribution()
+void ComputeCoulMatrix::kspace_contribution()
 {
   double *vector_kspace = force->kspace->f2group;
 
@@ -539,7 +539,7 @@ void ComputeCoulPot::kspace_contribution()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulPot::kspace_correction()
+void ComputeCoulMatrix::kspace_correction()
 {
 
   // total charge of groups A & B, needed for correction term
