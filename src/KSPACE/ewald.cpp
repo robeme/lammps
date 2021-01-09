@@ -335,7 +335,7 @@ void Ewald::setup()
     kmax_created = kmax;
   }
   
-  if (slabflag && slab_volfactor == 1.0) fetch_x();
+  if (slabflag && slab_volfactor == 1.0) fetch_qandx();
 
   // pre-compute Ewald coefficients
 
@@ -376,7 +376,7 @@ void Ewald::compute(int eflag, int vflag)
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    if (slabflag == 1 && slab_volfactor == 1.0) fetch_x(); // number of atoms changed need to update xlist
+    if (slabflag == 1 && slab_volfactor == 1.0) fetch_qandx(); // number of atoms changed need to update xlist
     natoms_original = atom->natoms;
   }
 
@@ -1144,9 +1144,14 @@ void Ewald::coeffs_triclinic()
 /* ----------------------------------------------------------------------
    Get q and x,y or z positions of all atoms and store in arrays,
    x,y or z is determined by the non-periodic dimension.
+   TODO it would be super useful if there would a more general function 
+     which fetches any global atom property list (int or double) and 
+     stores them in an array. something like 
+       fetch_global_iprop(int &prop) or
+       fetch_global_dprop(double &prop)
 ------------------------------------------------------------------------- */
 
-void Ewald::fetch_x()
+void Ewald::fetch_qandx()
 {
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;

@@ -39,10 +39,13 @@ class ComputeCoulPot : public Compute {
   int natoms,natoms_original;
   double **cutsq, **gradQ_V;
   double e_self,e_correction;
-  int pairflag,kspaceflag,boundaryflag,molflag,matrixflag;
+  int pairflag,kspaceflag,boundaryflag,molflag,matrixflag,overwrite;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
+  FILE *fp;
+  
+  long filepos;
 
   void reallocate();
   void pair_contribution();

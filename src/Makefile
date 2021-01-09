@@ -60,6 +60,7 @@ PACKAGE = \
 	colloid \
 	colvars \
 	compress \
+	conp \
 	coreshell \
 	diffraction \
 	dipole \
