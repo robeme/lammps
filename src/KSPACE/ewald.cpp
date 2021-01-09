@@ -332,7 +332,7 @@ void Ewald::setup()
     kmax_created = kmax;
   }
   
-  if (slabflag && slab_volfactor == 1.0) fetch_qandx();
+  if (slabflag == 1 && slab_volfactor == 1.0) fetch_qandx();
 
   // pre-compute Ewald coefficients
 
@@ -373,7 +373,8 @@ void Ewald::compute(int eflag, int vflag)
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    if (slabflag == 1 && slab_volfactor == 1.0) fetch_qandx(); // number of atoms changed need to update xlist
+    // need to update xlist and qlist if number of atoms changed 
+    if (slabflag == 1 && slab_volfactor == 1.0) fetch_qandx(); 
     natoms_original = atom->natoms;
   }
 
@@ -522,6 +523,7 @@ void Ewald::eik_dot_r()
   for (ic = 0; ic < 3; ic++) {
     
     // skip h=(0,0) in case of EW2D 
+     
     if (ic == xlistdim) continue;
     
     sqk = unitk[ic]*unitk[ic];
@@ -642,8 +644,6 @@ void Ewald::eik_dot_r()
   for (k = 1; k <= kxmax; k++) {
     for (l = 1; l <= kymax; l++) {
       for (m = 1; m <= kzmax; m++) {
-        
-      
         sqk = (k*unitk[0] * k*unitk[0]) + (l*unitk[1] * l*unitk[1]) +
           (m*unitk[2] * m*unitk[2]);
         if (sqk <= gsqmx) {
@@ -1029,7 +1029,7 @@ void Ewald::coeffs()
         }
       }
     }
-  } 
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1199,7 +1199,7 @@ void Ewald::allocate()
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
   
-  bigint natoms = atom->natoms;
+  bigint natoms = atom->natoms; // TODO does not depend on K-vectors and needs perhaps to be shifted
   if (slabflag == 1 && slab_volfactor == 1.0) {
     memory->create(xlist,natoms,"ewald:xlist");
     memory->create(qlist,natoms,"ewald:xlist");
@@ -1318,12 +1318,12 @@ void Ewald::ew2d()
   tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
     
-  double g_ewald_inv = 1.0 / g_ewald;
-  double g_ewald_sq = g_ewald*g_ewald;
+  const double g_ewald_inv = 1.0 / g_ewald;
+  const double g_ewald_sq = g_ewald*g_ewald;
   
   const double qscale = qqrd2e * scale;
-  double efact = 2.0 * MY_PIS/area;
-  double ffact = qscale * MY_2PI/area;
+  const double efact = 2.0 * MY_PIS/area;
+  const double ffact = qscale * MY_2PI/area;
   
   // loop over ALL atom interactions
    
@@ -1389,7 +1389,7 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
-  if (slabflag == 1 && slab_volfactor == 1.0)
+  if (slabflag == 1 && slab_volfactor == 1.0) // TODO ... but I'm on it!
     error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
 
   int i,k;
