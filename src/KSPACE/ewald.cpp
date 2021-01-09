@@ -43,9 +43,9 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr), taglist(nullptr), gradQ_V(nullptr)
+  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr)
 {
-  group_allocate_flag = matrixflag = 0;
+  group_allocate_flag = 0;
   kmax_created = 0;
   ewaldflag = 1;
   group_group_enable = 1;
@@ -56,9 +56,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kxvecs = kyvecs = kzvecs = nullptr;
   
   xlistdim = -1;
-  taglist = nullptr;
   xlist = qlist = nullptr;
-  gradQ_V = nullptr;
   
   ug = nullptr;
   eg = vg = nullptr;
@@ -1156,73 +1154,40 @@ void Ewald::fetch_qandx()
   int nlocal = atom->nlocal;
   double *q = atom->q; 
   double **x = atom->x;
+  double *xlist_local, *qlist_local;
+  int *nlocal_list,*displs;
 
   if (atom->natoms != natoms_original) {
     deallocate();
     allocate();
   }
   
-  int i,j;
-  
-  int nlocal_list[nprocs];
-  int displs[nprocs];
-  int dispsum = 0;
+  memory->create(nlocal_list,nprocs,"ewald:nlocal_list");
+  memory->create(displs,nprocs,"ewald:displs");
   
   MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
-  
+ 
   displs[0] = 0;
-  for (i = 1; i < nprocs; ++i) {
-    dispsum += nlocal_list[i-1];
-    displs[i] = dispsum;
-  }
+  for (int i = 1; i < nprocs; ++i)
+    displs[i] = displs[i-1] + nlocal_list[i-1];
   
   // gather q and z positions
   
-  double xlist_local[nlocal];
-  double qlist_local[nlocal];
-  for (i = 0; i < nlocal; i++) {
+  memory->create(xlist_local,nlocal,"ewald:xlist_local");
+  memory->create(qlist_local,nlocal,"ewald:qlist_local");
+  for (int i = 0; i < nlocal; i++) {
     qlist_local[i] = q[i];
     xlist_local[i] = x[i][xlistdim];
   }
   
   MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,displs,MPI_DOUBLE,world);
+  
+  memory->destroy(xlist_local);
+  memory->destroy(qlist_local);
+  memory->destroy(nlocal_list);
+  memory->destroy(displs);
 }
-
-/* ----------------------------------------------------------------------
-   Get tags of all atoms for gradQ_V and store in array,
-------------------------------------------------------------------------- */
-
-void Ewald::fetch_tags()
-{
-  int nprocs = comm->nprocs;
-  int nlocal = atom->nlocal;
-  tagint *tag = atom->tag; 
-  
-  int i,j;
-  
-  int nlocal_list[nprocs];
-  int displs[nprocs];
-  int dispsum = 0;
-  
-  MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
-  
-  displs[0] = 0;
-  for (i = 1; i < nprocs; ++i) {
-    dispsum += nlocal_list[i-1];
-    displs[i] = dispsum;
-  }
-  
-  // gather tags
-  
-  int taglist_local[nlocal];
-  for (i = 0; i < nlocal; i++) {
-    taglist_local[i] = tag[i];
-  }
-  
-  MPI_Allgatherv(taglist_local,nlocal,MPI_INT,taglist,nlocal_list,displs,MPI_INT,world);
-}
-
 
 /* ----------------------------------------------------------------------
    allocate memory that depends on # of K-vectors
@@ -1236,8 +1201,8 @@ void Ewald::allocate()
   
   bigint natoms = atom->natoms;
   if (slabflag == 1 && slab_volfactor == 1.0) {
-    xlist = new double[natoms];
-    qlist = new double[natoms];
+    memory->create(xlist,natoms,"ewald:xlist");
+    memory->create(qlist,natoms,"ewald:xlist");
   }
 
   ug = new double[kmax3d];
@@ -1261,8 +1226,8 @@ void Ewald::deallocate()
   delete [] kzvecs;
   
   if (slabflag == 1 && slab_volfactor == 1.0) {
-    delete [] xlist;
-    delete [] qlist;
+    memory->destroy(xlist);
+    memory->destroy(qlist);
   }
 
   delete [] ug;
@@ -1433,12 +1398,6 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
     allocate_groups();
     group_allocate_flag = 1;
   }
-  
-  // TODO adjust matrix and taglist to include only total size of both groups
-  if (matrixflag) {
-    bigint natoms = atom->natoms;
-    taglist = new int[natoms];
-  }
 
   e2group = 0.0; //energy
   f2group[0] = 0.0; //force in x-direction
@@ -1547,10 +1506,6 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 
   if (slabflag == 1)
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
-    
-  // destroy taglist if created
-  
-  if (matrixflag) delete [] taglist;
 }
 
 /* ----------------------------------------------------------------------

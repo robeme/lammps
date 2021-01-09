@@ -32,11 +32,15 @@ class ComputeCoulPot : public Compute {
   void setup();
   void init_list(int, class NeighList *);
   void compute_array();
+  
+ protected:
+  tagint *id2mat;
 
  private:
   char *group2;
   int jgroup,jgroupbit,othergroupbit,jgroupnum,igroupnum;
   int natoms,natoms_original;
+  tagint *mat2tag;
   double **cutsq, **gradQ_V;
   double e_self,e_correction;
   int pairflag,kspaceflag,boundaryflag,molflag,matrixflag,overwrite;
@@ -46,7 +50,8 @@ class ComputeCoulPot : public Compute {
   FILE *fp;
   
   long filepos;
-
+  
+  void assignment();
   void reallocate();
   void pair_contribution();
   void kspace_contribution();
