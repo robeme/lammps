@@ -46,7 +46,7 @@ enum{OFF,INTER,INTRA};
 
 ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  group2(nullptr), gradQ_V(nullptr)
+  fp(nullptr), group2(nullptr), gradQ_V(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute coul/pot command");
   
@@ -70,6 +70,7 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   boundaryflag = 1;
   molflag = OFF;
   matrixflag = 0;
+  overwrite = 0;
   
   igroupnum = jgroupnum = natoms_original = natoms = 0;
 
@@ -113,10 +114,32 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
       if (molflag != OFF && atom->molecule_flag == 0)
         error->all(FLERR,"Compute coul/pot molecule requires molecule IDs");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"file") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal compute coul/pot command");
+      if (comm->me == 0) {
+        fp = fopen(arg[iarg+1],"w");
+        if (fp == nullptr)
+          error->one(FLERR,fmt::format("Cannot open compute coul/pot file {}: {}",
+                                       arg[iarg+1], utils::getsyserror()));
+      }
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"overwrite") == 0) { // TODO overwrites output if used every n steps
+      overwrite = 1;                                 // e.g. by end_of_step() etc.
+      iarg += 1;
     } else error->all(FLERR,"Illegal compute coul/pot command");
   }
 
   gradQ_V = nullptr;
+  
+  // print file comment lines
+
+  if (fp && comm->me == 0) {
+    clearerr(fp);
+    fprintf(fp,"# coulomb matrix for constant potential\n");
+    if (ferror(fp))
+      error->one(FLERR,"Error writing file header");
+    filepos = ftell(fp);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -127,6 +150,8 @@ ComputeCoulPot::~ComputeCoulPot()
   for (int i = 0; i < natoms; i++)
     delete [] gradQ_V[i];
   delete [] gradQ_V;
+  
+  if (fp && comm->me == 0) fclose(fp);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -187,7 +212,7 @@ void ComputeCoulPot::init()
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   
-  natoms = atom->natoms; // TODO ... = igroupnum+jgroupnum;
+  natoms = igroupnum+jgroupnum;
   
   gradQ_V = new double*[natoms];
   for (int i = 0; i < natoms; i++)
@@ -206,17 +231,14 @@ void ComputeCoulPot::setup()
   
   // store matrix in file
   
-  FILE *fp = nullptr; // TODO file error handling
   if (comm->me == 0) {
     fprintf(screen,"Writing out coulomb matrix\n");
-    fp = fopen("A.mat","w");
     for (int i = 0; i < natoms; i++) {
       for (int j = 0; j < natoms; j++) {
         fprintf(fp, "%.3f ", gradQ_V[i][j]);
       }
       fprintf(fp,"\n");
     }
-    if (fp && comm->me == 0) fclose(fp);
   } 
 }
 
