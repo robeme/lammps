@@ -46,7 +46,7 @@ enum{OFF,INTER,INTRA};
 
 ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  fp(nullptr), group2(nullptr), gradQ_V(nullptr)
+  fp(nullptr), group2(nullptr), gradQ_V(nullptr), mat2tag(nullptr), id2mat(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute coul/pot command");
   
@@ -56,6 +56,8 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   size_array_rows_variable = 0;
   extarray = 0;
   
+  fp = nullptr;
+  
   int n = strlen(arg[3]) + 1;
   group2 = new char[n];
   strcpy(group2,arg[3]);
@@ -64,6 +66,8 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
   if (jgroup == -1)
     error->all(FLERR,"Compute coul/pot group ID does not exist");
   jgroupbit = group->bitmask[jgroup];
+  
+  // igroup defined in parent class
 
   pairflag = 1;
   kspaceflag = 0;
@@ -147,6 +151,10 @@ ComputeCoulPot::ComputeCoulPot(LAMMPS *lmp, int narg, char **arg) :
 ComputeCoulPot::~ComputeCoulPot()
 {
   delete [] group2;
+  
+  memory->destroy(mat2tag);
+  memory->destroy(id2mat);
+  
   for (int i = 0; i < natoms; i++)
     delete [] gradQ_V[i];
   delete [] gradQ_V;
@@ -211,12 +219,19 @@ void ComputeCoulPot::init()
   
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
-  
   natoms = igroupnum+jgroupnum;
   
+  // TODO use method in library to create BIG array
   gradQ_V = new double*[natoms];
   for (int i = 0; i < natoms; i++)
   gradQ_V[i] = new double[natoms];
+  
+  memory->create(mat2tag,natoms,"coul/pot:mat2tag");
+  memory->create(id2mat,natoms,"coul/pot:id2mat");
+  
+  // assign matrix indices to global tags
+  
+  assignment();
   
   natoms_original = natoms;
 }
@@ -224,15 +239,21 @@ void ComputeCoulPot::init()
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulPot::setup()
-{
-  // one-time calculation of coulomb matrix
+{  
+  
+  // one-time calculation of coulomb matrix at simulation setup
 
-  compute_array();
+  //compute_array();
   
   // store matrix in file
   
-  if (comm->me == 0) {
+  if (fp && comm->me == 0) {
     fprintf(screen,"Writing out coulomb matrix\n");
+
+    for (int i = 0; i < natoms; i++)
+      fprintf(fp,"%d ", mat2tag[i]);
+    fprintf(fp,"\n");  
+
     for (int i = 0; i < natoms; i++) {
       for (int j = 0; j < natoms; j++) {
         fprintf(fp, "%.3f ", gradQ_V[i][j]);
@@ -270,17 +291,108 @@ void ComputeCoulPot::compute_array()
 
 void ComputeCoulPot::reallocate()
 {
+  igroupnum = group->count(igroup);
+  jgroupnum = group->count(jgroup);
+  natoms = igroupnum+jgroupnum;
+  
   // grow coulomb matrix
   
+  // TODO use memory->destroy()
   for (int i = 0; i < natoms; i++)
     delete [] gradQ_V[i];
   delete [] gradQ_V;
   
+  // TODO use memory->create()
   gradQ_V = new double*[natoms];
   for (int i = 0; i < natoms; i++)
     gradQ_V[i] = new double[natoms];
 
   natoms_original = natoms;
+  
+  // reassignment matrix tags
+  
+  memory->destroy(mat2tag);
+  memory->create(mat2tag,natoms,"coul/pot:mat2tag");
+  assignment();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulPot::assignment()
+{
+  // assign matrix indices to global tags and local matrix position
+  
+  int *mask = atom->mask;
+  int nlocal = atom->nlocal;
+  int nprocs = comm->nprocs;  
+  tagint *tag = atom->tag;
+  tagint *itaglist, *itaglist_local;
+  tagint *jtaglist, *jtaglist_local;
+  
+  int igroupnum_local, jgroupnum_local;
+  
+  int *igroupnum_list, *jgroupnum_list, *idispls, *jdispls;
+  
+  igroupnum_local = jgroupnum_local = 0;
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit && mask[i] & jgroupbit)
+      error->all(FLERR,"Same atom in both groups in compute coul/pot");
+    else if (mask[i] & groupbit) 
+      igroupnum_local++;
+    else if (mask[i] & jgroupbit) 
+      jgroupnum_local++;
+  }
+  
+  memory->create(igroupnum_list,nprocs,"coul/pot:ilist");
+  memory->create(jgroupnum_list,nprocs,"coul/pot:jlist");
+  memory->create(idispls,nprocs,"coul/pot:idispls");
+  memory->create(jdispls,nprocs,"coul/pot:jdispls");
+  memory->create(itaglist,igroupnum,"coul/pot:itaglist");
+  memory->create(jtaglist,jgroupnum,"coul/pot:jtaglist");
+    
+  MPI_Allgather(&igroupnum_local,1,MPI_INT,igroupnum_list,1,MPI_INT,world);
+  MPI_Allgather(&jgroupnum_local,1,MPI_INT,jgroupnum_list,1,MPI_INT,world);
+
+  idispls[0] = jdispls[0] = 0;
+  for (int i = 1; i < nprocs; i++) {
+    idispls[i] = idispls[i-1] + igroupnum_list[i-1];
+    jdispls[i] = jdispls[i-1] + jgroupnum_list[i-1];
+  }
+  
+  memory->create(itaglist_local,igroupnum_local,"coul/pot:itaglist_local");
+  memory->create(jtaglist_local,jgroupnum_local,"coul/pot:jtaglist_local");
+  
+  igroupnum_local = jgroupnum_local = 0;
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      itaglist_local[igroupnum_local] = tag[i];
+      igroupnum_local++;
+    } else if (mask[i] & jgroupbit) {
+      jtaglist_local[jgroupnum_local] = tag[i];
+      jgroupnum_local++;
+    }
+  }
+  
+  MPI_Allgatherv(itaglist_local,igroupnum_local,MPI_LMP_TAGINT,
+                 itaglist,igroupnum_list,idispls,MPI_LMP_TAGINT,world);
+  MPI_Allgatherv(jtaglist_local,jgroupnum_local,MPI_LMP_TAGINT,
+                 jtaglist,jgroupnum_list,jdispls,MPI_LMP_TAGINT,world);
+  
+  for (int i = 0; i < igroupnum; i++)
+    mat2tag[i] = itaglist[i];
+  for (int i = 0; i < jgroupnum; i++)
+    mat2tag[igroupnum+i] = jtaglist[i];
+  
+  // TODO create also a id2mat for each procs based on mat2tag
+  
+  memory->destroy(igroupnum_list);
+  memory->destroy(jgroupnum_list);
+  memory->destroy(idispls);
+  memory->destroy(jdispls);
+  memory->destroy(itaglist);
+  memory->destroy(jtaglist);
+  memory->destroy(itaglist_local);
+  memory->destroy(jtaglist_local);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -370,8 +482,8 @@ void ComputeCoulPot::pair_contribution()
       jtype = type[j];
 
       if (rsq < cutsq[itype][jtype]) {
-         gradQ_V_local[tag[i]-1][tag[j]-1] += pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
-         gradQ_V_local[tag[i]-1][tag[j]-1] *= 2.0/(atom->q[i]*atom->q[j]);
+         //gradQ_V_local[tag[i]-1][tag[j]-1] += pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
+         //gradQ_V_local[tag[i]-1][tag[j]-1] *= 2.0/(atom->q[i]*atom->q[j]);
       }
     }
   }
@@ -379,8 +491,9 @@ void ComputeCoulPot::pair_contribution()
   // need to gather data from all procs
 
   for (int i = 0; i < natoms; i++)
-    MPI_Reduce(gradQ_V_local[i],gradQ_V[i],natoms,MPI_DOUBLE,MPI_SUM,0,world);
-    
+    MPI_Reduce(&gradQ_V_local[i],&gradQ_V[i],natoms,MPI_DOUBLE,MPI_SUM,0,world);
+  
+  // TODO do the BIG array stuff with memory create from library.cpp  
   for (int i = 0; i < natoms; i++)
     delete [] gradQ_V_local[i];
   delete [] gradQ_V_local;
