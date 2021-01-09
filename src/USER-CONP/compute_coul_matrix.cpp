@@ -154,10 +154,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
   
   memory->destroy(mat2tag);
   memory->destroy(id2mat);
-  
-  for (int i = 0; i < natoms; i++)
-    delete [] gradQ_V[i];
-  delete [] gradQ_V;
+  memory->destroy(gradQ_V);
   
   if (fp && comm->me == 0) fclose(fp);
 }
@@ -215,23 +212,22 @@ void ComputeCoulMatrix::init()
     neighbor->requests[irequest]->occasional = 1;
   }
   
+  // create local coulomb matrix
+  int nlocal = atom->nlocal;
+  memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
+   
   // get number of atoms in each group
   
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   natoms = igroupnum+jgroupnum;
   
-  // TODO use method in library to create BIG array
-  gradQ_V = new double*[natoms];
-  for (int i = 0; i < natoms; i++)
-  gradQ_V[i] = new double[natoms];
-  
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
   memory->create(id2mat,natoms,"coul/matrix:id2mat");
   
   // assign matrix indices to global tags
   
-  assignment();
+  matrix_assignment();
   
   natoms_original = natoms;
 }
@@ -239,8 +235,7 @@ void ComputeCoulMatrix::init()
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::setup()
-{  
-  
+{
   // one-time calculation of coulomb matrix at simulation setup
 
   //compute_array();
@@ -254,6 +249,8 @@ void ComputeCoulMatrix::setup()
       fprintf(fp,"%d ", mat2tag[i]);
     fprintf(fp,"\n");  
 
+    // TODO gather full coulomb matrix here 
+     
     for (int i = 0; i < natoms; i++) {
       for (int j = 0; j < natoms; j++) {
         fprintf(fp, "%.3f ", gradQ_V[i][j]);
@@ -276,12 +273,7 @@ void ComputeCoulMatrix::compute_array()
 {
   if (natoms != natoms_original) reallocate();
   
-  // initialize gradQ_V to zero  
-    
-  size_t nbytes = sizeof(double) * natoms;
-  if (nbytes)
-    for (int i = 0; i < natoms; i++)
-      memset(&gradQ_V[i][0],0,nbytes);
+  // TODO initialize gradQ_V to zero  
 
   if (pairflag) pair_contribution();
   if (kspaceflag) kspace_contribution(); 
@@ -297,28 +289,22 @@ void ComputeCoulMatrix::reallocate()
   
   // grow coulomb matrix
   
-  // TODO use memory->destroy()
-  for (int i = 0; i < natoms; i++)
-    delete [] gradQ_V[i];
-  delete [] gradQ_V;
-  
-  // TODO use memory->create()
-  gradQ_V = new double*[natoms];
-  for (int i = 0; i < natoms; i++)
-    gradQ_V[i] = new double[natoms];
-
-  natoms_original = natoms;
+  int nlocal = atom->nlocal;
+  memory->destroy(gradQ_V);
+  memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
   
   // reassignment matrix tags
   
   memory->destroy(mat2tag);
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  assignment();
+  matrix_assignment();
+  
+  natoms_original = natoms;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::assignment()
+void ComputeCoulMatrix::matrix_assignment()
 {
   // assign matrix indices to global tags and local matrix position
   
@@ -482,21 +468,12 @@ void ComputeCoulMatrix::pair_contribution()
       jtype = type[j];
 
       if (rsq < cutsq[itype][jtype]) {
-         //gradQ_V_local[tag[i]-1][tag[j]-1] += pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
-         //gradQ_V_local[tag[i]-1][tag[j]-1] *= 2.0/(atom->q[i]*atom->q[j]);
+         //gradQ_V_local[i][j] += 2.0*/(atom->q[i]*atom->q[j])*qqscale ... pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
       }
     }
   }
   
-  // need to gather data from all procs
-
-  for (int i = 0; i < natoms; i++)
-    MPI_Reduce(&gradQ_V_local[i],&gradQ_V[i],natoms,MPI_DOUBLE,MPI_SUM,0,world);
-  
-  // TODO do the BIG array stuff with memory create from library.cpp  
-  for (int i = 0; i < natoms; i++)
-    delete [] gradQ_V_local[i];
-  delete [] gradQ_V_local;
+  // need to gather data from all procs later
 }
 
 /* ---------------------------------------------------------------------- */
