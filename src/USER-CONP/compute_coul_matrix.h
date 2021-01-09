@@ -51,7 +51,7 @@ class ComputeCoulMatrix : public Compute {
   
   long filepos;
   
-  void assignment();
+  void matrix_assignment();
   void reallocate();
   void pair_contribution();
   void kspace_contribution();
