@@ -46,7 +46,7 @@ enum{OFF,INTER,INTRA};
 
 ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  fp(nullptr), group2(nullptr), gradQ_V(nullptr), mat2tag(nullptr), local2mat(nullptr)
+  fp(nullptr), group2(nullptr), tag2mat(nullptr), gradQ_V(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute coul/matrix command");
   
@@ -57,6 +57,8 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   extarray = 0;
   
   fp = nullptr;
+  tag2mat = nullptr;
+  gradQ_V = nullptr;
 
   pairflag = 1;
   kspaceflag = 0;
@@ -79,8 +81,6 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   // should matrix be recalculated? TODO recalculate coulomb matrix
   
   recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
-  
-  igroupnum = jgroupnum = natoms_original = natoms = 0;
 
   int iarg = 5;
   while (iarg < narg) {
@@ -133,8 +133,6 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
       iarg += 2;
     } else error->all(FLERR,"Illegal compute coul/matrix command");
   }
-
-  gradQ_V = nullptr;
   
   // print file comment lines
 
@@ -154,8 +152,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
   delete [] group2;
   
   memory->destroy(mat2tag);
-  memory->destroy(local2mat);
-  memory->destroy(gradQ_V);
+  memory->destroy(tag2mat);
   
   if (fp && comm->me == 0) fclose(fp);
 }
@@ -211,54 +208,70 @@ void ComputeCoulMatrix::init()
     neighbor->requests[irequest]->pair = 0;
     neighbor->requests[irequest]->compute = 1;
     neighbor->requests[irequest]->occasional = 1;
-  }
-  
-  // create local coulomb matrix for each proc and gather later
-  int nlocal = atom->nlocal;
-  memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
-   
-  // get number of atoms in each group
+  }  
   
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   natoms = igroupnum+jgroupnum;
   
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  memory->create(local2mat,natoms,"coul/matrix:local2mat");
+  memory->create(tag2mat,natoms,"coul/matrix:tag2mat");
   
-  // assign matrix indices to global tags
+  // assign atom tags to matrix locations and vice versa
   
-  local_matrix_assignment();
-  
-  natoms_original = natoms;
+  matrix_assignment(); 
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::setup()
 {
-  // one-time calculation of coulomb matrix at simulation setup
+  // create local coulomb matrix for each proc and gather later
+  
+  int nlocal = atom->nlocal;
+  int nprocs = comm->nprocs;
+  int *recvcounts,*displs;
+  double **matrix;
+  
+  memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
+
+  for (int i = 0; i < nlocal; i++)
+    for (int j = 0; j < nlocal; j++)
+      gradQ_V[i][j] = 0.0;
+  
+  // initial calculation of coulomb matrix at setup of simulation
 
   compute_array();
   
-  // store matrix in file
+  // gather coulomb matrix contributions from all procs 
   
+  memory->create(matrix,natoms,natoms,"coul/matrix:matrix");
+  memory->create(recvcounts,nprocs,"coul/matrix:recvcounts");
+  memory->create(displs,nprocs,"coul/matrix:displs");  
+  
+  int n = nlocal*nlocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  
+  MPI_Allgatherv(&gradQ_V[0][0],nlocal*nlocal,MPI_DOUBLE,
+                 matrix,recvcounts,displs,MPI_DOUBLE,world);
+  
+  printf(" *** %d is here! ***\n", comm->me);
+  
+  // write initial matrix to file
+    
   if (fp && comm->me == 0) {
     fprintf(screen,"Writing out coulomb matrix\n");
-
-    for (int i = 0; i < natoms; i++)
-      fprintf(fp,"%d ", mat2tag[i]);
-    fprintf(fp,"\n");  
-
-    // TODO gather full coulomb matrix and write out
-     
-//    for (int i = 0; i < natoms; i++) {
-//      for (int j = 0; j < natoms; j++) {
-//        fprintf(fp, "%.3f ", gradQ_V[i][j]);
-//      }
-//      fprintf(fp,"\n");
-//    }
-  } 
+    write_matrix(matrix);
+  }
+  
+  memory->destroy(displs);
+  memory->destroy(recvcounts);
+  memory->destroy(matrix);
+  memory->destroy(gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -272,10 +285,6 @@ void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr)
 
 void ComputeCoulMatrix::compute_array()
 {
-  if (natoms != natoms_original) reallocate();
-  
-  // TODO initialize gradQ_V to zero  
-
   if (pairflag) pair_contribution();
   if (kspaceflag) kspace_contribution(); 
 }
@@ -283,29 +292,34 @@ void ComputeCoulMatrix::compute_array()
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::reallocate()
-{
+{ 
+  bigint igroupnum, jgroupnum, natoms;
+  
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   natoms = igroupnum+jgroupnum;
   
-  // grow coulomb matrix
-  
-  int nlocal = atom->nlocal;
-  memory->destroy(gradQ_V);
-  memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
-  
-  // reassignment matrix tags
-  
   memory->destroy(mat2tag);
+  memory->destroy(tag2mat);
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  local_matrix_assignment();
+  memory->create(tag2mat,natoms,"coul/matrix:tag2mat");
   
-  natoms_original = natoms;
+  // since atom number has changed, reassign atom tags to matrix locations
+  
+  matrix_assignment(); 
 }
 
-/* ---------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------- 
+   looks up to which proc each atom in each group belongs and creates a
+   sorted array which assigns a matrix index to a tag and a local index
+   to a matrix entry. entries are sorted: first group A then group B. 
+   need to be so complex here b/c atom tags might not be be consecutive 
+   or sorted in any way. TODO there's probably a much simpler way to 
+   infer a list of tags in each group but I can't find it in the group 
+   class ... 
+------------------------------------------------------------------------- */  
 
-void ComputeCoulMatrix::local_matrix_assignment()
+void ComputeCoulMatrix::matrix_assignment()
 {
   // assign matrix indices to global tags and local matrix position
   
@@ -330,12 +344,10 @@ void ComputeCoulMatrix::local_matrix_assignment()
       jgroupnum_local++;
   }
   
-  memory->create(igroupnum_list,nprocs,"coul/matrix:ilist");
-  memory->create(jgroupnum_list,nprocs,"coul/matrix:jlist");
   memory->create(idispls,nprocs,"coul/matrix:idispls");
   memory->create(jdispls,nprocs,"coul/matrix:jdispls");
-  memory->create(itaglist,igroupnum,"coul/matrix:itaglist");
-  memory->create(jtaglist,jgroupnum,"coul/matrix:jtaglist");
+  memory->create(igroupnum_list,nprocs,"coul/matrix:ilist");
+  memory->create(jgroupnum_list,nprocs,"coul/matrix:jlist");
     
   MPI_Allgather(&igroupnum_local,1,MPI_INT,igroupnum_list,1,MPI_INT,world);
   MPI_Allgather(&jgroupnum_local,1,MPI_INT,jgroupnum_list,1,MPI_INT,world);
@@ -360,26 +372,40 @@ void ComputeCoulMatrix::local_matrix_assignment()
     }
   }
   
+  memory->create(itaglist,igroupnum,"coul/matrix:itaglist");
+  memory->create(jtaglist,jgroupnum,"coul/matrix:jtaglist");
+  
   MPI_Allgatherv(itaglist_local,igroupnum_local,MPI_LMP_TAGINT,
                  itaglist,igroupnum_list,idispls,MPI_LMP_TAGINT,world);
   MPI_Allgatherv(jtaglist_local,jgroupnum_local,MPI_LMP_TAGINT,
                  jtaglist,jgroupnum_list,jdispls,MPI_LMP_TAGINT,world);
   
-  for (int i = 0; i < igroupnum; i++)
-    mat2tag[i] = itaglist[i];
-  for (int i = 0; i < jgroupnum; i++)
-    mat2tag[igroupnum+i] = jtaglist[i];
-  
-  // TODO create also a local2mat for each procs based on mat2tag
-  
   memory->destroy(igroupnum_list);
   memory->destroy(jgroupnum_list);
   memory->destroy(idispls);
   memory->destroy(jdispls);
-  memory->destroy(itaglist);
-  memory->destroy(jtaglist);
   memory->destroy(itaglist_local);
   memory->destroy(jtaglist_local);
+  
+  // store to which tag the value in the matrix belongs
+  
+  for (bigint i = 0; i < igroupnum; i++)
+    mat2tag[i] = itaglist[i];
+  for (bigint i = 0; i < jgroupnum; i++)
+    mat2tag[igroupnum+i] = jtaglist[i];
+  
+  // TODO Could be also nice to add an attribute to each atom which tells 
+  // where in the matrix it's value actually belongs? 
+
+  // store tag position in matrix
+
+  for (bigint i = 0; i < natoms; i++)
+    for (bigint j = 0; j < natoms; j++)
+      if (tag[i] == mat2tag[j]) tag2mat[i] = j; 
+  
+  memory->destroy(itaglist);
+  memory->destroy(jtaglist);
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -399,17 +425,6 @@ void ComputeCoulMatrix::pair_contribution()
   tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
   double *special_coul = force->special_coul;
-
-  double **gradQ_V_local = new double*[natoms];
-    for (int i = 0; i < natoms; i++)
-        gradQ_V_local[i] = new double[natoms];
-      
-  // initialize gradQ_V_local to zero      
-        
-  size_t nbytes = sizeof(double) * natoms;
-  if (nbytes)
-    for (int i = 0; i < natoms; i++)
-      memset(&gradQ_V_local[i][0],0,nbytes);
   
   // invoke half neighbor list (will copy or build if necessary)
 
@@ -462,19 +477,20 @@ void ComputeCoulMatrix::pair_contribution()
         }
       }
 
-      delx = xtmp - x[j][0];
+      delx = xtmp - x[j][0]; // TODO include non periodic dim!
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       rsq = delx*delx + dely*dely + delz*delz;
       jtype = type[j];
 
       if (rsq < cutsq[itype][jtype]) {
-         //gradQ_V_local[i][j] += 2.0*/(atom->q[i]*atom->q[j])*qqscale ... pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
+         eng = pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
+         eng *= 1.0; // undo scaling to get potential
+         gradQ_V[i][j] += eng;
+         gradQ_V[j][i] += eng;
       }
     }
   }
-  
-  // need to gather data from all procs later
 }
 
 /* ---------------------------------------------------------------------- */
@@ -579,4 +595,22 @@ void ComputeCoulMatrix::kspace_correction()
 
   e_correction -= qsum_A*qsum_B;
   e_correction *= qscale * MY_PI2 / (g_ewald*g_ewald);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::write_matrix(double **matrix)
+{ 
+  fprintf(fp,"# atom id -> matrix\n");
+  for (int i = 0; i < natoms; i++)
+    fprintf(fp,"%d ", mat2tag[i]);
+  fprintf(fp,"\n");  
+ 
+  fprintf(fp,"# matrix\n");
+  for (int i = 0; i < natoms; i++) {
+    for (int j = 0; j < natoms; j++) {
+      fprintf(fp, "%.3f ", matrix[i][j]);
+    }
+    fprintf(fp,"\n");
+  }
 }
