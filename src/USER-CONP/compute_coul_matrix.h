@@ -34,16 +34,17 @@ class ComputeCoulMatrix : public Compute {
   void compute_array();
   
  protected:
-  tagint *id2mat;
+  tagint *local2mat; // TODO check if ewald really needs this
 
  private:
   char *group2;
   int jgroup,jgroupbit,othergroupbit,jgroupnum,igroupnum;
   int natoms,natoms_original;
+  int recalc_every;
   tagint *mat2tag;
   double **cutsq, **gradQ_V;
   double e_self,e_correction;
-  int pairflag,kspaceflag,boundaryflag,molflag,matrixflag,overwrite;
+  int pairflag,kspaceflag,boundaryflag,molflag,overwrite;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
@@ -51,7 +52,7 @@ class ComputeCoulMatrix : public Compute {
   
   long filepos;
   
-  void matrix_assignment();
+  void local_matrix_assignment();
   void reallocate();
   void pair_contribution();
   void kspace_contribution();

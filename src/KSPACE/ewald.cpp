@@ -87,6 +87,10 @@ Ewald::~Ewald()
   memory->destroy(ek);
   memory->destroy3d_offset(cs,-kmax_created);
   memory->destroy3d_offset(sn,-kmax_created);
+  if (slabflag == 1 && slab_volfactor == 1.0) {
+    memory->destroy(nprd_all);
+    memory->destroy(q_all);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -332,7 +336,12 @@ void Ewald::setup()
     kmax_created = kmax;
   }
   
-  if (slabflag == 1 && slab_volfactor == 1.0) fetch_all();
+  if (slabflag == 1 && slab_volfactor == 1.0) {
+    bigint natoms = atom->natoms; 
+    memory->create(nprd_all,natoms,"ewald:nprd_all");
+    memory->create(q_all,natoms,"ewald:nprd_all");
+    fetch_all();
+  }
 
   // pre-compute Ewald coefficients
 
@@ -373,8 +382,14 @@ void Ewald::compute(int eflag, int vflag)
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    // need to update nprd_all and q_all if number of atoms changed 
-    if (slabflag == 1 && slab_volfactor == 1.0) fetch_all(); 
+    if (slabflag == 1 && slab_volfactor == 1.0) {
+      memory->destroy(nprd_all);
+      memory->destroy(q_all);
+      bigint natoms = atom->natoms; 
+      memory->create(nprd_all,natoms,"ewald:nprd_all");
+      memory->create(q_all,natoms,"ewald:nprd_all");
+      fetch_all(); 
+    }  
     natoms_original = atom->natoms;
   }
 
@@ -1156,11 +1171,6 @@ void Ewald::fetch_all()
   double **x = atom->x;
   double *nprd_locals, *q_locals;
   int *nlocal_list,*displs;
-
-  if (atom->natoms != natoms_original) {
-    deallocate();
-    allocate();
-  }
   
   memory->create(nlocal_list,nprocs,"ewald:nlocal_list");
   memory->create(displs,nprocs,"ewald:displs");
@@ -1198,12 +1208,6 @@ void Ewald::allocate()
   kxvecs = new int[kmax3d];
   kyvecs = new int[kmax3d];
   kzvecs = new int[kmax3d];
-  
-  bigint natoms = atom->natoms; // TODO does not depend on K-vectors and needs perhaps to be shifted
-  if (slabflag == 1 && slab_volfactor == 1.0) {
-    memory->create(nprd_all,natoms,"ewald:nprd_all");
-    memory->create(q_all,natoms,"ewald:nprd_all");
-  }
 
   ug = new double[kmax3d];
   memory->create(eg,kmax3d,3,"ewald:eg");
@@ -1224,11 +1228,6 @@ void Ewald::deallocate()
   delete [] kxvecs;
   delete [] kyvecs;
   delete [] kzvecs;
-  
-  if (slabflag == 1 && slab_volfactor == 1.0) {
-    memory->destroy(nprd_all);
-    memory->destroy(q_all);
-  }
 
   delete [] ug;
   memory->destroy(eg);
