@@ -46,7 +46,7 @@ enum{OFF,INTER,INTRA};
 
 ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  fp(nullptr), group2(nullptr), gradQ_V(nullptr), mat2tag(nullptr), id2mat(nullptr)
+  fp(nullptr), group2(nullptr), gradQ_V(nullptr), mat2tag(nullptr), local2mat(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute coul/matrix command");
   
@@ -57,6 +57,15 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   extarray = 0;
   
   fp = nullptr;
+
+  pairflag = 1;
+  kspaceflag = 0;
+  boundaryflag = 1; // include infite boundary correction term
+  molflag = OFF;
+  recalc_every = 0; 
+  overwrite = 1;
+  
+  // get jgroup; igroup defined in parent class
   
   int n = strlen(arg[3]) + 1;
   group2 = new char[n];
@@ -64,21 +73,16 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
 
   jgroup = group->find(group2);
   if (jgroup == -1)
-    error->all(FLERR,"Compute coul/matrix group ID does not exist");
+    error->all(FLERR,"Compute coul/matrix group ID does not exist"); 
   jgroupbit = group->bitmask[jgroup];
   
-  // igroup defined in parent class
-
-  pairflag = 1;
-  kspaceflag = 0;
-  boundaryflag = 1;
-  molflag = OFF;
-  matrixflag = 0;
-  overwrite = 0;
+  // should matrix be recalculated? TODO recalculate coulomb matrix
+  
+  recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
   
   igroupnum = jgroupnum = natoms_original = natoms = 0;
 
-  int iarg = 4;
+  int iarg = 5;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
       if (iarg+2 > narg)
@@ -92,13 +96,6 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
         error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"yes") == 0) kspaceflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) kspaceflag = 0;
-      else error->all(FLERR,"Illegal compute coul/matrix command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"matrix") == 0) {
-      if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/matrix command");
-      if (strcmp(arg[iarg+1],"yes") == 0) matrixflag = 1;
-      else if (strcmp(arg[iarg+1],"no") == 0) matrixflag = 0;
       else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {
@@ -118,6 +115,13 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
       if (molflag != OFF && atom->molecule_flag == 0)
         error->all(FLERR,"Compute coul/matrix molecule requires molecule IDs");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"overwrite") == 0) { // TODO  if matrix is recalculated overwrite or append output
+      if (iarg+2 > narg)
+        error->all(FLERR,"Illegal compute coul/matrix command");
+      if (strcmp(arg[iarg+1],"yes") == 0) overwrite = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) overwrite  = 0;
+      else error->all(FLERR,"Illegal compute coul/matrix command");                    
+      iarg += 2;
     } else if (strcmp(arg[iarg],"file") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal compute coul/matrix command");
       if (comm->me == 0) {
@@ -127,9 +131,6 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
                                        arg[iarg+1], utils::getsyserror()));
       }
       iarg += 2;
-    } else if (strcmp(arg[iarg],"overwrite") == 0) { // TODO overwrites output if used every n steps
-      overwrite = 1;                                 // e.g. by end_of_step() etc.
-      iarg += 1;
     } else error->all(FLERR,"Illegal compute coul/matrix command");
   }
 
@@ -153,7 +154,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
   delete [] group2;
   
   memory->destroy(mat2tag);
-  memory->destroy(id2mat);
+  memory->destroy(local2mat);
   memory->destroy(gradQ_V);
   
   if (fp && comm->me == 0) fclose(fp);
@@ -212,7 +213,7 @@ void ComputeCoulMatrix::init()
     neighbor->requests[irequest]->occasional = 1;
   }
   
-  // create local coulomb matrix
+  // create local coulomb matrix for each proc and gather later
   int nlocal = atom->nlocal;
   memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
    
@@ -223,11 +224,11 @@ void ComputeCoulMatrix::init()
   natoms = igroupnum+jgroupnum;
   
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  memory->create(id2mat,natoms,"coul/matrix:id2mat");
+  memory->create(local2mat,natoms,"coul/matrix:local2mat");
   
   // assign matrix indices to global tags
   
-  matrix_assignment();
+  local_matrix_assignment();
   
   natoms_original = natoms;
 }
@@ -238,7 +239,7 @@ void ComputeCoulMatrix::setup()
 {
   // one-time calculation of coulomb matrix at simulation setup
 
-  //compute_array();
+  compute_array();
   
   // store matrix in file
   
@@ -249,14 +250,14 @@ void ComputeCoulMatrix::setup()
       fprintf(fp,"%d ", mat2tag[i]);
     fprintf(fp,"\n");  
 
-    // TODO gather full coulomb matrix here 
+    // TODO gather full coulomb matrix and write out
      
-    for (int i = 0; i < natoms; i++) {
-      for (int j = 0; j < natoms; j++) {
-        fprintf(fp, "%.3f ", gradQ_V[i][j]);
-      }
-      fprintf(fp,"\n");
-    }
+//    for (int i = 0; i < natoms; i++) {
+//      for (int j = 0; j < natoms; j++) {
+//        fprintf(fp, "%.3f ", gradQ_V[i][j]);
+//      }
+//      fprintf(fp,"\n");
+//    }
   } 
 }
 
@@ -297,14 +298,14 @@ void ComputeCoulMatrix::reallocate()
   
   memory->destroy(mat2tag);
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  matrix_assignment();
+  local_matrix_assignment();
   
   natoms_original = natoms;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::matrix_assignment()
+void ComputeCoulMatrix::local_matrix_assignment()
 {
   // assign matrix indices to global tags and local matrix position
   
@@ -369,7 +370,7 @@ void ComputeCoulMatrix::matrix_assignment()
   for (int i = 0; i < jgroupnum; i++)
     mat2tag[igroupnum+i] = jtaglist[i];
   
-  // TODO create also a id2mat for each procs based on mat2tag
+  // TODO create also a local2mat for each procs based on mat2tag
   
   memory->destroy(igroupnum_list);
   memory->destroy(jgroupnum_list);
