@@ -44,7 +44,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), xlist(nullptr), qlist(nullptr)
+  sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -56,8 +56,8 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
   
-  xlistdim = -1;
-  xlist = qlist = nullptr;
+  nprd_dim = -1;
+  nprd_all = q_all = nullptr;
   
   ug = nullptr;
   eg = vg = nullptr;
@@ -108,9 +108,9 @@ void Ewald::init()
   if (slabflag) {
     if (slab_volfactor == 1.0) {
       int ndim = 0;
-      if (domain->xperiodic != 1) { xlistdim = 0; ndim++; }
-      if (domain->yperiodic != 1) { xlistdim = 1; ndim++; }
-      if (domain->zperiodic != 1) { xlistdim = 2; ndim++; }
+      if (domain->xperiodic != 1) { nprd_dim = 0; ndim++; }
+      if (domain->yperiodic != 1) { nprd_dim = 1; ndim++; }
+      if (domain->zperiodic != 1) { nprd_dim = 2; ndim++; }
       if (ndim>1) error->all(FLERR,"Cannot use < 2 periodic boundaries with EW2D");
     } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
@@ -223,9 +223,9 @@ void Ewald::setup()
 
   double zprd_slab = zprd*slab_volfactor;
   volume = xprd * yprd * zprd_slab;
-  if (xlistdim == 0) area = yprd * zprd;
-  if (xlistdim == 1) area = xprd * zprd;
-  if (xlistdim == 2) area = xprd * yprd;
+  if (nprd_dim == 0) area = yprd * zprd;
+  if (nprd_dim == 1) area = xprd * zprd;
+  if (nprd_dim == 2) area = xprd * yprd;
 
   unitk[0] = 2.0*MY_PI/xprd;
   unitk[1] = 2.0*MY_PI/yprd;
@@ -374,7 +374,7 @@ void Ewald::compute(int eflag, int vflag)
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    // need to update xlist and qlist if number of atoms changed 
+    // need to update nprd_all and q_all if number of atoms changed 
     if (slabflag == 1 && slab_volfactor == 1.0) fetch_qandx(); 
     natoms_original = atom->natoms;
   }
@@ -525,7 +525,7 @@ void Ewald::eik_dot_r()
     
     // skip h=(0,0) in case of EW2D 
      
-    if (ic == xlistdim) continue;
+    if (ic == nprd_dim) continue;
     
     sqk = unitk[ic]*unitk[ic];
     if (sqk <= gsqmx) {
@@ -784,7 +784,7 @@ void Ewald::coeffs()
   // (k,0,0), (0,l,0), (0,0,m)
   for (m = 1; m <= kmax; m++) {
     sqk = (m*unitk[0]) * (m*unitk[0]);
-    if (sqk <= gsqmx && xlistdim != 0) {
+    if (sqk <= gsqmx && nprd_dim != 0) {
       kxvecs[kcount] = m;
       kyvecs[kcount] = 0;
       kzvecs[kcount] = 0;
@@ -802,7 +802,7 @@ void Ewald::coeffs()
       kcount++;
     }
     sqk = (m*unitk[1]) * (m*unitk[1]);
-    if (sqk <= gsqmx && xlistdim != 1) {
+    if (sqk <= gsqmx && nprd_dim != 1) {
       kxvecs[kcount] = 0;
       kyvecs[kcount] = m;
       kzvecs[kcount] = 0;
@@ -820,7 +820,7 @@ void Ewald::coeffs()
       kcount++;
     }
     sqk = (m*unitk[2]) * (m*unitk[2]);
-    if (sqk <= gsqmx && xlistdim != 2) {
+    if (sqk <= gsqmx && nprd_dim != 2) {
       kxvecs[kcount] = 0;
       kyvecs[kcount] = 0;
       kzvecs[kcount] = m;
@@ -1155,7 +1155,7 @@ void Ewald::fetch_qandx()
   int nlocal = atom->nlocal;
   double *q = atom->q; 
   double **x = atom->x;
-  double *xlist_local, *qlist_local;
+  double *nprd_locals, *q_locals;
   int *nlocal_list,*displs;
 
   if (atom->natoms != natoms_original) {
@@ -1174,18 +1174,18 @@ void Ewald::fetch_qandx()
   
   // gather q and z positions
   
-  memory->create(xlist_local,nlocal,"ewald:xlist_local");
-  memory->create(qlist_local,nlocal,"ewald:qlist_local");
+  memory->create(nprd_locals,nlocal,"ewald:nprd_locals");
+  memory->create(q_locals,nlocal,"ewald:q_locals");
   for (int i = 0; i < nlocal; i++) {
-    qlist_local[i] = q[i];
-    xlist_local[i] = x[i][xlistdim];
+    q_locals[i] = q[i];
+    nprd_locals[i] = x[i][nprd_dim];
   }
   
-  MPI_Allgatherv(xlist_local,nlocal,MPI_DOUBLE,xlist,nlocal_list,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(qlist_local,nlocal,MPI_DOUBLE,qlist,nlocal_list,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(nprd_locals,nlocal,MPI_DOUBLE,nprd_all,nlocal_list,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(q_locals,nlocal,MPI_DOUBLE,q_all,nlocal_list,displs,MPI_DOUBLE,world);
   
-  memory->destroy(xlist_local);
-  memory->destroy(qlist_local);
+  memory->destroy(nprd_locals);
+  memory->destroy(q_locals);
   memory->destroy(nlocal_list);
   memory->destroy(displs);
 }
@@ -1202,8 +1202,8 @@ void Ewald::allocate()
   
   bigint natoms = atom->natoms; // TODO does not depend on K-vectors and needs perhaps to be shifted
   if (slabflag == 1 && slab_volfactor == 1.0) {
-    memory->create(xlist,natoms,"ewald:xlist");
-    memory->create(qlist,natoms,"ewald:xlist");
+    memory->create(nprd_all,natoms,"ewald:nprd_all");
+    memory->create(q_all,natoms,"ewald:nprd_all");
   }
 
   ug = new double[kmax3d];
@@ -1227,8 +1227,8 @@ void Ewald::deallocate()
   delete [] kzvecs;
   
   if (slabflag == 1 && slab_volfactor == 1.0) {
-    memory->destroy(xlist);
-    memory->destroy(qlist);
+    memory->destroy(nprd_all);
+    memory->destroy(q_all);
   }
 
   delete [] ug;
@@ -1329,24 +1329,24 @@ void Ewald::ew2d()
   // loop over ALL atom interactions
    
   int i,j;
-  double pot_ij, aij, xij, e_keq0_all;
+  double pot_ij, aij, dij, e_keq0_all;
   double e_keq0 = 0.0;
   for (i = 0; i < nlocal; i++) {
     pot_ij = 0.0;
     for (j = 0; j < natoms_original; j++) {
       
-      xij = xlist[j] - x[i][xlistdim];
+      dij = nprd_all[j] - x[i][nprd_dim];
       
       // resembles (aij) matrix component in constant potential
-      aij = efact * ( exp( -xij*xij * g_ewald_sq ) * g_ewald_inv + 
-                         MY_PIS * xij * erf( xij * g_ewald ) );
+      aij = efact * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
+                         MY_PIS * dij * erf( dij * g_ewald ) );
       // coulomb potential; see eq. (4) in metalwalls parallelization doc
-      pot_ij += qlist[j] * aij;
+      pot_ij += q_all[j] * aij;
       
       // add on force corrections
       
-      f[i][xlistdim] -= ffact * q[i]*qlist[j] * erf( g_ewald*xij );
-    } // TODO xlistdim -> non_prd?
+      f[i][nprd_dim] -= ffact * q[i]*q_all[j] * erf( g_ewald*dij );
+    }
     
     // per-atom energy; see eq. (20) in metalwalls ewald doc
 
