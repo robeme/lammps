@@ -387,7 +387,7 @@ void ComputeCoulMatrix::kspace_contribution()
   double aij;
   
   for (bigint i = 0; i < natoms; i++) {
-    printf("(%d/%d)\n",i+1,natoms);
+    if (comm->me == 0) printf("(%d/%d)\n",i+1,natoms);
     for (bigint j = i; j < natoms; j++) {
       aij = kspace->compute_atom_atom(mat2tag[i],mat2tag[j]);
       

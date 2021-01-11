@@ -1619,13 +1619,12 @@ double Ewald::compute_atom_atom(tagint a1, tagint a2)
   sfacrl_2_all = new double[kcount];
   sfacim_2_all = new double[kcount];
 
-  for (k = 0; k < kcount; k++) {
-    kx = kxvecs[k];
-    ky = kyvecs[k];
-    kz = kzvecs[k];
-
-    for (i = 0; i < nlocal; i++) {
-      if ((tag[i] == a1) || (tag[i] == a2)) {
+  for (i = 0; i < nlocal; i++) {
+    if ((tag[i] == a1) || (tag[i] == a2)) {
+      for (k = 0; k < kcount; k++) {
+        kx = kxvecs[k];
+        ky = kyvecs[k];
+        kz = kzvecs[k];
 
         cypz = cs[ky][1][i]*cs[kz][2][i] - sn[ky][1][i]*sn[kz][2][i];
         sypz = sn[ky][1][i]*cs[kz][2][i] + cs[ky][1][i]*sn[kz][2][i];
