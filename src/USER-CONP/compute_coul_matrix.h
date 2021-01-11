@@ -42,8 +42,9 @@ class ComputeCoulMatrix : public Compute {
   bigint jgroupnum, igroupnum, natoms;
   int recalc_every;
   double **cutsq,**gradQ_V;
-  double e_self,e_correction,g_ewald;
-  int pairflag,kspaceflag,boundaryflag,overwrite;
+  double e_self,e_correction;
+  double g_ewald,eta;
+  int pairflag,kspaceflag,boundaryflag,overwrite,gaussians;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
