@@ -153,6 +153,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
   
   memory->destroy(mat2tag);
   memory->destroy(tag2mat);
+  memory->destroy(gradQ_V);
   
   if (fp && comm->me == 0) fclose(fp);
 }
@@ -220,58 +221,41 @@ void ComputeCoulMatrix::init()
   // assign atom tags to matrix locations and vice versa
   
   matrix_assignment(); 
+  
+  // TODO would be nicer to have a local matrix and gather it later
+  // to reduce a little bit the memory consumption ... However, for 
+  // this wo work I think the atom ids must be from 1,...,N and consecutive
+  
+  memory->create(gradQ_V,natoms,natoms,"coul/matrix:gradQ_V");
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::setup()
 {
-  // create local coulomb matrix for each proc and gather later
-  
-  int nlocal = atom->nlocal;
-  int nprocs = comm->nprocs;
-  int *recvcounts,*displs;
   double **matrix;
   
-  memory->create(gradQ_V,nlocal,nlocal,"coul/matrix:gradQ_V");
-
-  for (int i = 0; i < nlocal; i++)
-    for (int j = 0; j < nlocal; j++)
+  for (int i = 0; i < natoms; i++)
+    for (int j = 0; j < natoms; j++)
       gradQ_V[i][j] = 0.0;
   
   // initial calculation of coulomb matrix at setup of simulation
 
   compute_array();
   
-  // gather coulomb matrix contributions from all procs 
+  // reduce coulomb matrix with contributions from all procs
+  // TODO guess all procs need to know the full matrix for matrix inversion
   
   memory->create(matrix,natoms,natoms,"coul/matrix:matrix");
-  memory->create(recvcounts,nprocs,"coul/matrix:recvcounts");
-  memory->create(displs,nprocs,"coul/matrix:displs");  
   
-  int n = nlocal*nlocal;
-  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
-  
-  displs[0] = 0;
-  for (int i = 1; i < nprocs; i++)
-    displs[i] = displs[i-1] + recvcounts[i-1];
-  
-  MPI_Allgatherv(&gradQ_V[0][0],nlocal*nlocal,MPI_DOUBLE,
-                 matrix,recvcounts,displs,MPI_DOUBLE,world);
-  
-  printf(" *** %d is here! ***\n", comm->me);
-  
-  // write initial matrix to file
+  MPI_Allreduce(&gradQ_V[0][0], &matrix[0][0], natoms*natoms, MPI_DOUBLE, MPI_SUM, world);
     
   if (fp && comm->me == 0) {
-    fprintf(screen,"Writing out coulomb matrix\n");
+    fprintf(screen,"Writing coulomb matrix ...\n");
     write_matrix(matrix);
   }
   
-  memory->destroy(displs);
-  memory->destroy(recvcounts);
   memory->destroy(matrix);
-  memory->destroy(gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -301,8 +285,10 @@ void ComputeCoulMatrix::reallocate()
   
   memory->destroy(mat2tag);
   memory->destroy(tag2mat);
-  memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
+  memory->destroy(gradQ_V);
+  memory->create(gradQ_V,natoms,natoms,"coul/matrix:gradQ_V");
   memory->create(tag2mat,natoms,"coul/matrix:tag2mat");
+  memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
   
   // since atom number has changed, reassign atom tags to matrix locations
   
@@ -476,6 +462,8 @@ void ComputeCoulMatrix::pair_contribution()
           if (molecule[i] != molecule[j]) continue;
         }
       }
+      
+      printf("%d doing real-space stuff for (%d,%d)\n", comm->me, tag[i], tag[j]);
 
       delx = xtmp - x[j][0]; // TODO include non periodic dim!
       dely = ytmp - x[j][1];
@@ -486,8 +474,7 @@ void ComputeCoulMatrix::pair_contribution()
       if (rsq < cutsq[itype][jtype]) {
          eng = pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
          eng *= 1.0; // undo scaling to get potential
-         gradQ_V[i][j] += eng;
-         gradQ_V[j][i] += eng;
+         gradQ_V[tag2mat[tag[i]]][tag2mat[tag[j]]] += 1.0;
       }
     }
   }
