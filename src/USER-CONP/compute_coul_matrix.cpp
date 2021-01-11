@@ -67,8 +67,9 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   gradQ_V = nullptr;
 
   pairflag = 1;
-  kspaceflag = 0;
-  boundaryflag = 0; // include infite boundary correction term
+  kspaceflag = 1; 
+  boundaryflag = 1; // include infite boundary correction term
+  gaussians = 1;
   recalc_every = 0; 
   overwrite = 1;
   
@@ -88,8 +89,9 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   // should matrix be recalculated? TODO recalculate coulomb matrix
   
   recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
+  eta = utils::numeric(FLERR,arg[5],false,lmp);
 
-  int iarg = 5;
+  int iarg = 6;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
       if (iarg+2 > narg)
@@ -273,116 +275,7 @@ void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr)
 void ComputeCoulMatrix::compute_array()
 {
   if (pairflag) pair_contribution();
-  if (kspaceflag) kspace_contribution(); 
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::reallocate()
-{ 
-  bigint igroupnum, jgroupnum, natoms;
-  
-  igroupnum = group->count(igroup);
-  jgroupnum = group->count(jgroup);
-  natoms = igroupnum+jgroupnum;
-  
-  memory->destroy(mat2tag);
-  memory->destroy(gradQ_V);
-  memory->create(gradQ_V,natoms,natoms,"coul/matrix:gradQ_V");
-  memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  
-  // since atom number has changed, reassign atom tags to matrix locations
-  
-  matrix_assignment(); 
-}
-
-/* ---------------------------------------------------------------------- 
-   looks up to which proc each atom in each group belongs and creates a
-   sorted array which assigns a matrix index to a tag and a local index
-   to a matrix entry. entries are sorted: first group A then group B. 
-   need to be so complex here b/c atom tags might not be be consecutive 
-   or sorted in any way. TODO there's probably a much simpler way to 
-   infer a list of tags in each group but I can't find it in the group 
-   class ... 
-------------------------------------------------------------------------- */  
-
-void ComputeCoulMatrix::matrix_assignment()
-{
-  // assign matrix indices to global tags and local matrix position
-  
-  int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-  int nprocs = comm->nprocs;  
-  tagint *tag = atom->tag;
-  tagint *itaglist, *itaglist_local;
-  tagint *jtaglist, *jtaglist_local;
-  
-  int igroupnum_local, jgroupnum_local;
-  
-  int *igroupnum_list, *jgroupnum_list, *idispls, *jdispls;
-  
-  igroupnum_local = jgroupnum_local = 0;
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit && mask[i] & jgroupbit)
-      error->all(FLERR,"Same atom in both groups in compute coul/matrix");
-    else if (mask[i] & groupbit) 
-      igroupnum_local++;
-    else if (mask[i] & jgroupbit) 
-      jgroupnum_local++;
-  }
-  
-  memory->create(idispls,nprocs,"coul/matrix:idispls");
-  memory->create(jdispls,nprocs,"coul/matrix:jdispls");
-  memory->create(igroupnum_list,nprocs,"coul/matrix:ilist");
-  memory->create(jgroupnum_list,nprocs,"coul/matrix:jlist");
-    
-  MPI_Allgather(&igroupnum_local,1,MPI_INT,igroupnum_list,1,MPI_INT,world);
-  MPI_Allgather(&jgroupnum_local,1,MPI_INT,jgroupnum_list,1,MPI_INT,world);
-
-  idispls[0] = jdispls[0] = 0;
-  for (int i = 1; i < nprocs; i++) {
-    idispls[i] = idispls[i-1] + igroupnum_list[i-1];
-    jdispls[i] = jdispls[i-1] + jgroupnum_list[i-1];
-  }
-  
-  memory->create(itaglist_local,igroupnum_local,"coul/matrix:itaglist_local");
-  memory->create(jtaglist_local,jgroupnum_local,"coul/matrix:jtaglist_local");
-  
-  igroupnum_local = jgroupnum_local = 0;
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      itaglist_local[igroupnum_local] = tag[i];
-      igroupnum_local++;
-    } else if (mask[i] & jgroupbit) {
-      jtaglist_local[jgroupnum_local] = tag[i];
-      jgroupnum_local++;
-    }
-  }
-  
-  memory->create(itaglist,igroupnum,"coul/matrix:itaglist");
-  memory->create(jtaglist,jgroupnum,"coul/matrix:jtaglist");
-  
-  MPI_Allgatherv(itaglist_local,igroupnum_local,MPI_LMP_TAGINT,
-                 itaglist,igroupnum_list,idispls,MPI_LMP_TAGINT,world);
-  MPI_Allgatherv(jtaglist_local,jgroupnum_local,MPI_LMP_TAGINT,
-                 jtaglist,jgroupnum_list,jdispls,MPI_LMP_TAGINT,world);
-  
-  memory->destroy(igroupnum_list);
-  memory->destroy(jgroupnum_list);
-  memory->destroy(idispls);
-  memory->destroy(jdispls);
-  memory->destroy(itaglist_local);
-  memory->destroy(jtaglist_local);
-  
-  // store to which tag the value in the matrix belongs
-  
-  for (bigint i = 0; i < igroupnum; i++)
-    mat2tag[i] = itaglist[i];
-  for (bigint i = 0; i < jgroupnum; i++)
-    mat2tag[igroupnum+i] = jtaglist[i];
-  
-  memory->destroy(itaglist);
-  memory->destroy(jtaglist);
+  //if (kspaceflag) kspace_contribution(); 
 }
 
 /* ---------------------------------------------------------------------- */
@@ -391,7 +284,7 @@ void ComputeCoulMatrix::pair_contribution()
 {
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
-  double r,rinv,rsq,grij,expm2,t,erfc,eng;
+  double r,rinv,rsq,grij,etarij,expm2,t,erfc,eng;
   int *ilist,*jlist,*numneigh,**firstneigh;
   bigint ipos,jpos;
 
@@ -401,6 +294,8 @@ void ComputeCoulMatrix::pair_contribution()
   int *mask = atom->mask;
   tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
+  
+  double etaij = 0.0;
   
   // invoke half neighbor list (will copy or build if necessary)
   
@@ -426,7 +321,7 @@ void ComputeCoulMatrix::pair_contribution()
     jlist = firstneigh[i];
     jnum = numneigh[i];
 
-    // TODO guess real-space part of matrix is symmetrical, hence start from jj == ii
+    // real-space part of matrix is symmetric, start from jj == ii
 
     for (jj = ii; jj < jnum; jj++) {
       j = jlist[jj];
@@ -445,18 +340,28 @@ void ComputeCoulMatrix::pair_contribution()
       if (rsq < cutsq[itype][jtype]) {
         r = sqrt(rsq);
         rinv = 1.0 / r;
+        eng = rinv;
         if (kspaceflag) {
           grij = g_ewald * r;
           expm2 = exp(-grij*grij);
           t = 1.0 / (1.0 + EWALD_P*grij);
           erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
           
-          // TODO add erfc(eta*rij) for gaussian charge dist in real-space ...
+          eng *= erfc;
           
-          eng = erfc * rinv;
-        } else {
-          eng = rinv;
-        }      
+          // check if we have realspace gaussians
+        
+          if (gaussians) {
+            // TODO eta from coeffs of pair coul/long/gauss
+            
+            etarij = eta * r;
+            expm2 = exp(-etarij*etarij);
+            t = 1.0 / (1.0 + EWALD_P*etarij);
+            erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
+            
+            eng -= erfc*rinv;
+          }
+        }    
         
         // locate matrix position of ij pair
         
@@ -592,4 +497,112 @@ void ComputeCoulMatrix::write_matrix(double **matrix)
     }
     fprintf(fp,"\n");
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::reallocate()
+{ 
+  bigint igroupnum, jgroupnum, natoms;
+  
+  igroupnum = group->count(igroup);
+  jgroupnum = group->count(jgroup);
+  natoms = igroupnum+jgroupnum;
+  
+  memory->destroy(mat2tag);
+  memory->destroy(gradQ_V);
+  memory->create(gradQ_V,natoms,natoms,"coul/matrix:gradQ_V");
+  memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
+  
+  // since atom number has changed, reassign atom tags to matrix locations
+  
+  matrix_assignment(); 
+}
+
+/* ---------------------------------------------------------------------- 
+   looks up to which proc each atom in each group belongs and creates a
+   sorted array which assigns a tag to a matrix position. entries are 
+   sorted: first group A then group B. need to be so complex here b/c 
+   atom tags might not be be consecutive or sorted in any way. TODO 
+   there's probably a much simpler way to infer a list of tags in each 
+   group but I can't find it in the group class ... 
+------------------------------------------------------------------------- */  
+
+void ComputeCoulMatrix::matrix_assignment()
+{
+  // assign matrix indices to global tags and local matrix position
+  
+  int *mask = atom->mask;
+  int nlocal = atom->nlocal;
+  int nprocs = comm->nprocs;  
+  tagint *tag = atom->tag;
+  tagint *itaglist, *itaglist_local;
+  tagint *jtaglist, *jtaglist_local;
+  
+  int igroupnum_local, jgroupnum_local;
+  
+  int *igroupnum_list, *jgroupnum_list, *idispls, *jdispls;
+  
+  igroupnum_local = jgroupnum_local = 0;
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit && mask[i] & jgroupbit)
+      error->all(FLERR,"Same atom in both groups in compute coul/matrix");
+    else if (mask[i] & groupbit) 
+      igroupnum_local++;
+    else if (mask[i] & jgroupbit) 
+      jgroupnum_local++;
+  }
+  
+  memory->create(idispls,nprocs,"coul/matrix:idispls");
+  memory->create(jdispls,nprocs,"coul/matrix:jdispls");
+  memory->create(igroupnum_list,nprocs,"coul/matrix:ilist");
+  memory->create(jgroupnum_list,nprocs,"coul/matrix:jlist");
+    
+  MPI_Allgather(&igroupnum_local,1,MPI_INT,igroupnum_list,1,MPI_INT,world);
+  MPI_Allgather(&jgroupnum_local,1,MPI_INT,jgroupnum_list,1,MPI_INT,world);
+
+  idispls[0] = jdispls[0] = 0;
+  for (int i = 1; i < nprocs; i++) {
+    idispls[i] = idispls[i-1] + igroupnum_list[i-1];
+    jdispls[i] = jdispls[i-1] + jgroupnum_list[i-1];
+  }
+  
+  memory->create(itaglist_local,igroupnum_local,"coul/matrix:itaglist_local");
+  memory->create(jtaglist_local,jgroupnum_local,"coul/matrix:jtaglist_local");
+  
+  igroupnum_local = jgroupnum_local = 0;
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+      itaglist_local[igroupnum_local] = tag[i];
+      igroupnum_local++;
+    } else if (mask[i] & jgroupbit) {
+      jtaglist_local[jgroupnum_local] = tag[i];
+      jgroupnum_local++;
+    }
+  }
+  
+  memory->create(itaglist,igroupnum,"coul/matrix:itaglist");
+  memory->create(jtaglist,jgroupnum,"coul/matrix:jtaglist");
+  
+  MPI_Allgatherv(itaglist_local,igroupnum_local,MPI_LMP_TAGINT,
+                 itaglist,igroupnum_list,idispls,MPI_LMP_TAGINT,world);
+  MPI_Allgatherv(jtaglist_local,jgroupnum_local,MPI_LMP_TAGINT,
+                 jtaglist,jgroupnum_list,jdispls,MPI_LMP_TAGINT,world);
+  
+  memory->destroy(igroupnum_list);
+  memory->destroy(jgroupnum_list);
+  memory->destroy(idispls);
+  memory->destroy(jdispls);
+  memory->destroy(itaglist_local);
+  memory->destroy(jtaglist_local);
+  
+  // store to which tag the value in the matrix belongs
+  
+  for (bigint i = 0; i < igroupnum; i++)
+    mat2tag[i] = itaglist[i];
+  for (bigint i = 0; i < jgroupnum; i++)
+    mat2tag[igroupnum+i] = jtaglist[i];
+  
+  memory->destroy(itaglist);
+  memory->destroy(jtaglist);
 }
