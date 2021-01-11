@@ -35,7 +35,6 @@ class ComputeCoulMatrix : public Compute {
   
  protected:
   tagint *mat2tag; // stores tag of matrix position
-  bigint *tag2mat; // stores matrix position of each tag;  TODO check if ewald really needs this
 
  private:
   char *group2;
@@ -43,8 +42,8 @@ class ComputeCoulMatrix : public Compute {
   bigint jgroupnum, igroupnum, natoms;
   int recalc_every;
   double **cutsq,**gradQ_V;
-  double e_self,e_correction;
-  int pairflag,kspaceflag,boundaryflag,molflag,overwrite;
+  double e_self,e_correction,g_ewald;
+  int pairflag,kspaceflag,boundaryflag,overwrite;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
