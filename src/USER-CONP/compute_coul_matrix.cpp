@@ -39,6 +39,13 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 
 #define SMALL 0.00001
+#define EWALD_F   1.12837917
+#define EWALD_P   0.3275911
+#define A1        0.254829592
+#define A2       -0.284496736
+#define A3        1.421413741
+#define A4       -1.453152027
+#define A5        1.061405429
 
 enum{OFF,INTER,INTRA};
 
@@ -46,7 +53,7 @@ enum{OFF,INTER,INTRA};
 
 ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  fp(nullptr), group2(nullptr), tag2mat(nullptr), gradQ_V(nullptr)
+  fp(nullptr), group2(nullptr), gradQ_V(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute coul/matrix command");
   
@@ -57,15 +64,15 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   extarray = 0;
   
   fp = nullptr;
-  tag2mat = nullptr;
   gradQ_V = nullptr;
 
   pairflag = 1;
   kspaceflag = 0;
-  boundaryflag = 1; // include infite boundary correction term
-  molflag = OFF;
+  boundaryflag = 0; // include infite boundary correction term
   recalc_every = 0; 
   overwrite = 1;
+  
+  g_ewald = 0.0;
   
   // get jgroup; igroup defined in parent class
   
@@ -105,16 +112,6 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
       else if (strcmp(arg[iarg+1],"no") == 0) boundaryflag  = 0;
       else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
-    } else if (strcmp(arg[iarg],"molecule") == 0) {
-      if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute coul/matrix command");
-      if (strcmp(arg[iarg+1],"off") == 0) molflag = OFF;
-      else if (strcmp(arg[iarg+1],"inter") == 0) molflag = INTER;
-      else if (strcmp(arg[iarg+1],"intra") == 0) molflag  = INTRA;
-      else error->all(FLERR,"Illegal compute coul/matrix command");
-      if (molflag != OFF && atom->molecule_flag == 0)
-        error->all(FLERR,"Compute coul/matrix molecule requires molecule IDs");
-      iarg += 2;
     } else if (strcmp(arg[iarg],"overwrite") == 0) { // TODO  if matrix is recalculated overwrite or append output
       if (iarg+2 > narg)
         error->all(FLERR,"Illegal compute coul/matrix command");
@@ -152,7 +149,6 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
   delete [] group2;
   
   memory->destroy(mat2tag);
-  memory->destroy(tag2mat);
   memory->destroy(gradQ_V);
   
   if (fp && comm->me == 0) fclose(fp);
@@ -164,7 +160,9 @@ void ComputeCoulMatrix::init()
 {
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
-
+  
+  // TODO basically, we need just the cutsq from pair_style ...
+  
   if (pairflag && force->pair == nullptr) 
     error->all(FLERR,"No pair style defined for compute coul/matrix");
   if (force->pair_match("^hybrid",0) == nullptr
@@ -183,8 +181,10 @@ void ComputeCoulMatrix::init()
     cutsq = force->pair->cutsq;
   } else pair = nullptr;
 
-  if (kspaceflag) kspace = force->kspace;
-  else kspace = nullptr;
+  if (kspaceflag) {
+    kspace = force->kspace;
+    g_ewald = force->kspace->g_ewald;
+  } else kspace = nullptr;
 
   // compute Kspace correction terms
 
@@ -216,7 +216,6 @@ void ComputeCoulMatrix::init()
   natoms = igroupnum+jgroupnum;
   
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
-  memory->create(tag2mat,natoms,"coul/matrix:tag2mat");
   
   // assign atom tags to matrix locations and vice versa
   
@@ -235,16 +234,20 @@ void ComputeCoulMatrix::setup()
 {
   double **matrix;
   
-  for (int i = 0; i < natoms; i++)
-    for (int j = 0; j < natoms; j++)
-      gradQ_V[i][j] = 0.0;
+  // setting all entries of coulomb matrix to zero
+  
+  size_t nbytes = sizeof(double) * natoms;
+
+  if (nbytes)
+    for (int i = 0; i < natoms; i++)
+      memset(&gradQ_V[i][0],0,nbytes);
   
   // initial calculation of coulomb matrix at setup of simulation
 
   compute_array();
   
   // reduce coulomb matrix with contributions from all procs
-  // TODO guess all procs need to know the full matrix for matrix inversion
+  // all procs need to know full matrix for matrix inversion
   
   memory->create(matrix,natoms,natoms,"coul/matrix:matrix");
   
@@ -284,10 +287,8 @@ void ComputeCoulMatrix::reallocate()
   natoms = igroupnum+jgroupnum;
   
   memory->destroy(mat2tag);
-  memory->destroy(tag2mat);
   memory->destroy(gradQ_V);
   memory->create(gradQ_V,natoms,natoms,"coul/matrix:gradQ_V");
-  memory->create(tag2mat,natoms,"coul/matrix:tag2mat");
   memory->create(mat2tag,natoms,"coul/matrix:mat2tag");
   
   // since atom number has changed, reassign atom tags to matrix locations
@@ -380,18 +381,8 @@ void ComputeCoulMatrix::matrix_assignment()
   for (bigint i = 0; i < jgroupnum; i++)
     mat2tag[igroupnum+i] = jtaglist[i];
   
-  // TODO Could be also nice to add an attribute to each atom which tells 
-  // where in the matrix it's value actually belongs? 
-
-  // store tag position in matrix
-
-  for (bigint i = 0; i < natoms; i++)
-    for (bigint j = 0; j < natoms; j++)
-      if (tag[i] == mat2tag[j]) tag2mat[i] = j; 
-  
   memory->destroy(itaglist);
   memory->destroy(jtaglist);
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -400,20 +391,19 @@ void ComputeCoulMatrix::pair_contribution()
 {
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
-  double rsq,eng,fpair,factor_coul;
+  double r,rinv,rsq,grij,expm2,t,erfc,eng;
   int *ilist,*jlist,*numneigh,**firstneigh;
+  bigint ipos,jpos;
 
   double **x = atom->x;
-  double *q = atom->q;
   tagint *molecule = atom->molecule;
   int *type = atom->type;
   int *mask = atom->mask;
   tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
-  double *special_coul = force->special_coul;
   
   // invoke half neighbor list (will copy or build if necessary)
-
+  
   neighbor->build_one(list);
 
   inum = list->inum;
@@ -436,45 +426,47 @@ void ComputeCoulMatrix::pair_contribution()
     jlist = firstneigh[i];
     jnum = numneigh[i];
 
-    for (jj = 0; jj < jnum; jj++) {
-      j = jlist[jj];
-      factor_coul = special_coul[sbmask(j)];
-      j &= NEIGHMASK;
+    // TODO guess real-space part of matrix is symmetrical, hence start from jj == ii
 
+    for (jj = ii; jj < jnum; jj++) {
+      j = jlist[jj];
+      j &= NEIGHMASK;
+      
       // skip if atom J is not in either group
 
       if (!(mask[j] & groupbit || mask[j] & jgroupbit)) continue;
 
-      // skip if atoms I,J are only in the same group
-
-      int ij_flag = 0;
-      int ji_flag = 0;
-      if (mask[i] & groupbit && mask[j] & jgroupbit) ij_flag = 1;
-      if (mask[j] & groupbit && mask[i] & jgroupbit) ji_flag = 1;
-      if (!ij_flag && !ji_flag) continue;
-
-      // skip if molecule IDs of atoms I,J do not satisfy molflag setting
-
-      if (molflag != OFF) {
-        if (molflag == INTER) {
-          if (molecule[i] == molecule[j]) continue;
-        } else {
-          if (molecule[i] != molecule[j]) continue;
-        }
-      }
-      
-      printf("%d doing real-space stuff for (%d,%d)\n", comm->me, tag[i], tag[j]);
-
-      delx = xtmp - x[j][0]; // TODO include non periodic dim!
+      delx = xtmp - x[j][0];  // neighlists take care of pbc
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       rsq = delx*delx + dely*dely + delz*delz;
       jtype = type[j];
 
       if (rsq < cutsq[itype][jtype]) {
-         eng = pair->single(i,j,itype,jtype,rsq,factor_coul,0.0,fpair);
-         eng *= 1.0; // undo scaling to get potential
-         gradQ_V[tag2mat[tag[i]]][tag2mat[tag[j]]] += 1.0;
+        r = sqrt(rsq);
+        rinv = 1.0 / r;
+        if (kspaceflag) {
+          grij = g_ewald * r;
+          expm2 = exp(-grij*grij);
+          t = 1.0 / (1.0 + EWALD_P*grij);
+          erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
+          
+          // TODO add erfc(eta*rij) for gaussian charge dist in real-space ...
+          
+          eng = erfc * rinv;
+        } else {
+          eng = rinv;
+        }      
+        
+        // locate matrix position of ij pair
+        
+        for (ipos = 0; ipos < natoms; ipos++)
+          if (mat2tag[ipos] == tag[i]) break;
+        for (jpos = 0; jpos < natoms; jpos++)
+          if (mat2tag[jpos] == tag[j]) break;
+
+        gradQ_V[ipos][jpos] += eng;
+        if (tag[i] != tag[j]) gradQ_V[jpos][ipos] += eng;
       }
     }
   }
@@ -588,14 +580,14 @@ void ComputeCoulMatrix::kspace_correction()
 
 void ComputeCoulMatrix::write_matrix(double **matrix)
 { 
-  fprintf(fp,"# atom id -> matrix\n");
-  for (int i = 0; i < natoms; i++)
+  fprintf(fp,"# matrix -> atom id\n");
+  for (bigint i = 0; i < natoms; i++)
     fprintf(fp,"%d ", mat2tag[i]);
   fprintf(fp,"\n");  
- 
+
   fprintf(fp,"# matrix\n");
-  for (int i = 0; i < natoms; i++) {
-    for (int j = 0; j < natoms; j++) {
+  for (bigint i = 0; i < natoms; i++) {
+    for (bigint j = 0; j < natoms; j++) {
       fprintf(fp, "%.3f ", matrix[i][j]);
     }
     fprintf(fp,"\n");
