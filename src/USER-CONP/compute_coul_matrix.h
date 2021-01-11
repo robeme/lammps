@@ -48,6 +48,7 @@ class ComputeCoulMatrix : public Compute {
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
+  class Ewald *ewald;
   FILE *fp;
   
   long filepos;

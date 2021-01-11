@@ -35,6 +35,9 @@ class Ewald : public KSpace {
   double memory_usage();
 
   void compute_group_group(int, int, int);
+  
+  // matrix calculation
+  double compute_atom_atom(tagint,tagint);
 
  protected:
   int kxmax,kymax,kzmax;
@@ -78,6 +81,7 @@ class Ewald : public KSpace {
   // group-group interactions
 
   void slabcorr_groups(int,int,int);
+  void ew2d_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
 };

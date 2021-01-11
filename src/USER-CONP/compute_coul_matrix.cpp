@@ -275,7 +275,7 @@ void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr)
 void ComputeCoulMatrix::compute_array()
 {
   if (pairflag) pair_contribution();
-  //if (kspaceflag) kspace_contribution(); 
+  if (kspaceflag) kspace_contribution(); 
 }
 
 /* ---------------------------------------------------------------------- */
@@ -284,7 +284,7 @@ void ComputeCoulMatrix::pair_contribution()
 {
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
-  double r,rinv,rsq,grij,etarij,expm2,t,erfc,eng;
+  double r,rinv,rsq,grij,etarij,expm2,t,erfc,aij;
   int *ilist,*jlist,*numneigh,**firstneigh;
   bigint ipos,jpos;
 
@@ -340,26 +340,26 @@ void ComputeCoulMatrix::pair_contribution()
       if (rsq < cutsq[itype][jtype]) {
         r = sqrt(rsq);
         rinv = 1.0 / r;
-        eng = rinv;
+        aij = rinv;
         if (kspaceflag) {
           grij = g_ewald * r;
           expm2 = exp(-grij*grij);
           t = 1.0 / (1.0 + EWALD_P*grij);
           erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
           
-          eng *= erfc;
+          aij *= erfc;
           
           // check if we have realspace gaussians
         
           if (gaussians) {
-            // TODO eta from coeffs of pair coul/long/gauss
+            // TODO infer eta from coeffs of pair coul/long/gauss
             
             etarij = eta * r;
             expm2 = exp(-etarij*etarij);
             t = 1.0 / (1.0 + EWALD_P*etarij);
             erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
             
-            eng -= erfc*rinv;
+            aij -= erfc*rinv;
           }
         }    
         
@@ -370,48 +370,30 @@ void ComputeCoulMatrix::pair_contribution()
         for (jpos = 0; jpos < natoms; jpos++)
           if (mat2tag[jpos] == tag[j]) break;
 
-        gradQ_V[ipos][jpos] += eng;
-        if (tag[i] != tag[j]) gradQ_V[jpos][ipos] += eng;
+        gradQ_V[ipos][jpos] += aij;
+        if (tag[i] != tag[j]) gradQ_V[jpos][ipos] += aij;
       }
     }
   }
 }
 
-/* ---------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------- 
+   workaround by creating temporary groups. 
+------------------------------------------------------------------------- */  
 
 void ComputeCoulMatrix::kspace_contribution()
-{
-  double *vector_kspace = force->kspace->f2group;
-
-  force->kspace->compute_group_group(groupbit,jgroupbit,0);
-  //scalar += 2.0*force->kspace->e2group;
-  //vector[0] += vector_kspace[0];
-  //vector[1] += vector_kspace[1];
-  //vector[2] += vector_kspace[2];
-
-  // subtract extra A <--> A Kspace interaction so energy matches
-  //   real-space style of compute group-group
-  // add extra Kspace term to energy
-
-  force->kspace->compute_group_group(groupbit,jgroupbit,1);
-  //scalar -= force->kspace->e2group;
-
-  // self energy correction term
-
-  //scalar -= e_self;
-
-  // k=0 boundary correction term
-
-  if (boundaryflag) {
-    double xprd = domain->xprd;
-    double yprd = domain->yprd;
-    double zprd = domain->zprd;
-
-    // adjustment of z dimension for 2d slab Ewald
-    // 3d Ewald just uses zprd since slab_volfactor = 1.0
-
-    double volume = xprd*yprd*zprd*force->kspace->slab_volfactor;
-    //scalar -= e_correction/volume;
+{  
+  tagint *tag = atom->tag;
+  double aij;
+  
+  for (bigint i = 0; i < natoms; i++) {
+    printf("(%d/%d)\n",i+1,natoms);
+    for (bigint j = i; j < natoms; j++) {
+      aij = kspace->compute_atom_atom(mat2tag[i],mat2tag[j]);
+      
+      gradQ_V[i][j] += aij;
+      if (tag[i] != tag[j]) gradQ_V[j][i] += aij;
+    }
   }
 }
 
