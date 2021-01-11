@@ -38,7 +38,6 @@
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-#define SMALL 0.00001
 #define EWALD_F   1.12837917
 #define EWALD_P   0.3275911
 #define A1        0.254829592
@@ -69,6 +68,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   pairflag = 1;
   kspaceflag = 1; 
   boundaryflag = 1; // include infite boundary correction term
+  selfflag = 1;
   gaussians = 1;
   recalc_every = 0; 
   overwrite = 1;
@@ -89,7 +89,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   // should matrix be recalculated? TODO recalculate coulomb matrix
   
   recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
-  eta = utils::numeric(FLERR,arg[5],false,lmp);
+  eta = utils::numeric(FLERR,arg[5],false,lmp); // TODO infer from pair_style!
 
   int iarg = 6;
   while (iarg < narg) {
@@ -105,6 +105,13 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
         error->all(FLERR,"Illegal compute coul/matrix command");
       if (strcmp(arg[iarg+1],"yes") == 0) kspaceflag = 1;
       else if (strcmp(arg[iarg+1],"no") == 0) kspaceflag = 0;
+      else error->all(FLERR,"Illegal compute coul/matrix command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"self") == 0) {
+      if (iarg+2 > narg)
+        error->all(FLERR,"Illegal compute coul/matrix command");
+      if (strcmp(arg[iarg+1],"yes") == 0) selfflag = 1;
+      else if (strcmp(arg[iarg+1],"no") == 0) selfflag  = 0;
       else error->all(FLERR,"Illegal compute coul/matrix command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"boundary") == 0) {
@@ -188,15 +195,6 @@ void ComputeCoulMatrix::init()
     g_ewald = force->kspace->g_ewald;
   } else kspace = nullptr;
 
-  // compute Kspace correction terms
-
-  if (kspaceflag) {
-    kspace_correction();
-    if ((fabs(e_correction) > SMALL) && (comm->me == 0))
-      error->warning(FLERR,"Both groups in compute coul/matrix have a net charge; "
-                     "the Kspace boundary correction to energy will be non-zero");
-  }
-
   // recheck that group 2 has not been deleted
 
   jgroup = group->find(group2);
@@ -275,7 +273,9 @@ void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr)
 void ComputeCoulMatrix::compute_array()
 {
   if (pairflag) pair_contribution();
+  if (selfflag) self_contribution();
   if (kspaceflag) kspace_contribution(); 
+  if (boundaryflag) kspace_correction();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -377,9 +377,17 @@ void ComputeCoulMatrix::pair_contribution()
   }
 }
 
-/* ---------------------------------------------------------------------- 
-   workaround by creating temporary groups. 
-------------------------------------------------------------------------- */  
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::self_contribution()
+{ 
+  const double selfint = -2.0/MY_PIS*g_ewald;
+  const double prefac = MY_SQRT2/MY_PIS;
+  for (bigint i = 0; i < natoms; i++)
+    gradQ_V[i][i] += selfint + prefac*eta;
+}
+
+/* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::kspace_contribution()
 {  
@@ -389,6 +397,7 @@ void ComputeCoulMatrix::kspace_contribution()
   for (bigint i = 0; i < natoms; i++) {
     if (comm->me == 0) printf("(%d/%d)\n",i+1,natoms);
     for (bigint j = i; j < natoms; j++) {
+    
       aij = kspace->compute_atom_atom(mat2tag[i],mat2tag[j]);
       
       gradQ_V[i][j] += aij;
@@ -402,65 +411,6 @@ void ComputeCoulMatrix::kspace_contribution()
 void ComputeCoulMatrix::kspace_correction()
 {
 
-  // total charge of groups A & B, needed for correction term
-
-  double qsqsum_group,qsum_A,qsum_B;
-  qsqsum_group = qsum_A = qsum_B = 0.0;
-
-  double *q = atom->q;
-  int *mask = atom->mask;
-  int groupbit_A = groupbit;
-  int groupbit_B = jgroupbit;
-
-  for (int i = 0; i < atom->nlocal; i++) {
-    if ((mask[i] & groupbit_A) && (mask[i] & groupbit_B))
-      qsqsum_group += q[i]*q[i];
-    if (mask[i] & groupbit_A) qsum_A += q[i];
-    if (mask[i] & groupbit_B) qsum_B += q[i];
-  }
-
-  double tmp;
-  MPI_Allreduce(&qsqsum_group,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-  qsqsum_group = tmp;
-
-  MPI_Allreduce(&qsum_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-  qsum_A = tmp;
-
-  MPI_Allreduce(&qsum_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-  qsum_B = tmp;
-
-  double g_ewald = force->kspace->g_ewald;
-
-  double scale = 1.0;
-  const double qscale = force->qqrd2e * scale;
-
-  // self-energy correction
-
-  e_self = qscale * g_ewald*qsqsum_group/MY_PIS;
-  e_correction = 2.0*qsum_A*qsum_B;
-
-  // subtract extra AA terms
-
-  qsum_A = qsum_B = 0.0;
-
-  for (int i = 0; i < atom->nlocal; i++) {
-    if (!((mask[i] & groupbit_A) && (mask[i] & groupbit_B)))
-      continue;
-
-    if (mask[i] & groupbit_A) qsum_A += q[i];
-    if (mask[i] & groupbit_B) qsum_B += q[i];
-  }
-
-  MPI_Allreduce(&qsum_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-  qsum_A = tmp;
-
-  MPI_Allreduce(&qsum_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-  qsum_B = tmp;
-
-  // k=0 energy correction term (still need to divide by volume above)
-
-  e_correction -= qsum_A*qsum_B;
-  e_correction *= qscale * MY_PI2 / (g_ewald*g_ewald);
 }
 
 /* ---------------------------------------------------------------------- */

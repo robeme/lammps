@@ -107,9 +107,9 @@ class PPPM : public KSpace {
 
   // group-group interactions
 
-  int group_allocate_flag;
-  FFT_SCALAR ***density_A_brick, ***density_B_brick;
-  FFT_SCALAR *density_A_fft, *density_B_fft;
+  int group_allocate_flag, atom_allocate_flag;
+  FFT_SCALAR ***density_A_brick,***density_B_brick;
+  FFT_SCALAR *density_A_fft,*density_B_fft;
 
   int **part2grid;    // storage for particle -> grid mapping
   int nmax;

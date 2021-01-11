@@ -122,7 +122,7 @@ void Ewald::init()
       error->all(FLERR,"Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
       error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
-                 "and slab correction nor EW2D");
+                 "and slab correction nor with EW2D"); // TODO EW2D should actually work :)
   }
 
   // compute two charge force
@@ -1388,6 +1388,9 @@ double Ewald::memory_usage()
 
 void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 {
+
+  // TODO actually, I think with EW2D it's possible
+  
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
@@ -1413,7 +1416,7 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
     sfacrl_A[k] = 0.0;
     sfacim_A[k] = 0.0;
     sfacrl_A_all[k] = 0.0;
-    sfacim_A_all[k] = 0;
+    sfacim_A_all[k] = 0.0;
 
     // group B
 
@@ -1589,47 +1592,45 @@ void Ewald::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 }
 
 /* ----------------------------------------------------------------------
-   returns individual long-range entries for coulomb matrix 
+   compute the total long-range (unscaled) interaction between atom 1 and 2 
  ------------------------------------------------------------------------- */
 
 double Ewald::compute_atom_atom(tagint a1, tagint a2)
 {
-  if (slabflag && triclinic)
-    error->all(FLERR,"Cannot (yet) calculate coul/matrix contributions for triclinic systems");
-
-  int i,k;
+  int nlocal = atom->nlocal;
+  int *tag = atom->tag;
   
   if (!atom_allocate_flag) {
     allocate_atoms();
     atom_allocate_flag = 1;
   }
   
-  for (k = 0; k < kcount; k++) {
-
-    // atom one
-
-    sfacrl_1[k] = 0.0;
-    sfacim_1[k] = 0.0;
-    sfacrl_1_all[k] = 0.0;
-    sfacim_1_all[k] = 0;
-
-    // atom two
-
-    sfacrl_2[k] = 0.0;
-    sfacim_2[k] = 0.0;
-    sfacrl_2_all[k] = 0.0;
-    sfacim_2_all[k] = 0.0;
-  }
+  for (int i = 0; i < nlocal; i++) {
   
-  int nlocal = atom->nlocal;
-  int *tag = atom->tag;
-  
-  int kx,ky,kz;
-  double cypz,sypz,exprl,expim;
-
-  for (i = 0; i < nlocal; i++) {
     if ((tag[i] == a1) || (tag[i] == a2)) {
-      for (k = 0; k < kcount; k++) {
+      
+      for (int k = 0; k < kcount; k++) {
+
+        // atom one
+
+        sfacrl_1[k] = 0.0;
+        sfacim_1[k] = 0.0;
+        sfacrl_1_all[k] = 0.0;
+        sfacim_1_all[k] = 0.0;
+
+        // atom two
+
+        sfacrl_2[k] = 0.0;
+        sfacim_2[k] = 0.0;
+        sfacrl_2_all[k] = 0.0;
+        sfacim_2_all[k] = 0.0;
+      }
+      
+      int kx,ky,kz;
+      double cypz,sypz,exprl,expim;
+
+
+      for (int k = 0; k < kcount; k++) {
         kx = kxvecs[k];
         ky = kyvecs[k];
         kz = kzvecs[k];
@@ -1669,10 +1670,13 @@ double Ewald::compute_atom_atom(tagint a1, tagint a2)
   // total atom 1 <--> atom 2 interaction
   
   double aij = 0.0;
-  for (k = 0; k < kcount; k++) {
+  for (int k = 0; k < kcount; k++) {
     partial_atom = sfacrl_1_all[k]*sfacrl_2_all[k] +
       sfacim_1_all[k]*sfacim_2_all[k];
-    aij += ug[k]*partial_atom;
+    
+    // factor two required b/c ug contains only 4pi/V  
+      
+    aij += 2.0*ug[k]*partial_atom;
   }
   
   return aij;
