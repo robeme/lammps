@@ -59,6 +59,12 @@ class Ewald : public KSpace {
   int group_allocate_flag;
   double *sfacrl_A,*sfacim_A,*sfacrl_A_all,*sfacim_A_all;
   double *sfacrl_B,*sfacim_B,*sfacrl_B_all,*sfacim_B_all;
+  
+  // atom-atom interactions
+
+  int atom_allocate_flag;
+  double *sfacrl_1,*sfacim_1,*sfacrl_1_all,*sfacim_1_all;
+  double *sfacrl_2,*sfacim_2,*sfacrl_2_all,*sfacim_2_all;
 
   double rms(int, double, bigint, double);
   virtual void eik_dot_r();
@@ -81,6 +87,11 @@ class Ewald : public KSpace {
   void ew2d_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
+  
+  // atom-atom interactions
+
+  void allocate_atoms();
+  void deallocate_atoms();
 };
 
 }    // namespace LAMMPS_NS

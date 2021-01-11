@@ -46,7 +46,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
   sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
 {
-  group_allocate_flag = 0;
+  group_allocate_flag = atom_allocate_flag = 0;
   kmax_created = 0;
   ewaldflag = 1;
   group_group_enable = 1;
@@ -85,6 +85,7 @@ Ewald::~Ewald()
 {
   deallocate();
   if (group_allocate_flag) deallocate_groups();
+  if (atom_allocate_flag) deallocate_atoms();
   memory->destroy(ek);
   memory->destroy3d_offset(cs,-kmax_created);
   memory->destroy3d_offset(sn,-kmax_created);
@@ -326,6 +327,7 @@ void Ewald::setup()
     deallocate();
     allocate();
     group_allocate_flag = 0;
+    atom_allocate_flag = 0;
 
     memory->destroy(ek);
     memory->destroy3d_offset(cs,-kmax_created);
@@ -1595,30 +1597,35 @@ double Ewald::compute_atom_atom(tagint a1, tagint a2)
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) calculate coul/matrix contributions for triclinic systems");
 
+  int i,k;
+  
+  if (!atom_allocate_flag) {
+    allocate_atoms();
+    atom_allocate_flag = 1;
+  }
+  
+  for (k = 0; k < kcount; k++) {
+
+    // atom one
+
+    sfacrl_1[k] = 0.0;
+    sfacim_1[k] = 0.0;
+    sfacrl_1_all[k] = 0.0;
+    sfacim_1_all[k] = 0;
+
+    // atom two
+
+    sfacrl_2[k] = 0.0;
+    sfacim_2[k] = 0.0;
+    sfacrl_2_all[k] = 0.0;
+    sfacim_2_all[k] = 0.0;
+  }
+  
   int nlocal = atom->nlocal;
   int *tag = atom->tag;
-  int *mask = atom->mask;
-
-  int i,k;
+  
   int kx,ky,kz;
   double cypz,sypz,exprl,expim;
-  
-  double *sfacrl_1,*sfacim_1,*sfacrl_1_all,*sfacim_1_all;
-  double *sfacrl_2,*sfacim_2,*sfacrl_2_all,*sfacim_2_all;
-  
-  // atom one
-
-  sfacrl_1 = new double[kcount];
-  sfacim_1 = new double[kcount];
-  sfacrl_1_all = new double[kcount];
-  sfacim_1_all = new double[kcount];
-
-  // atom two
-
-  sfacrl_2 = new double[kcount];
-  sfacim_2 = new double[kcount];
-  sfacrl_2_all = new double[kcount];
-  sfacim_2_all = new double[kcount];
 
   for (i = 0; i < nlocal; i++) {
     if ((tag[i] == a1) || (tag[i] == a2)) {
@@ -1657,30 +1664,16 @@ double Ewald::compute_atom_atom(tagint a1, tagint a2)
   MPI_Allreduce(sfacrl_2,sfacrl_2_all,kcount,MPI_DOUBLE,MPI_SUM,world);
   MPI_Allreduce(sfacim_2,sfacim_2_all,kcount,MPI_DOUBLE,MPI_SUM,world);
   
-  double partial_group;
+  double partial_atom;
 
   // total atom 1 <--> atom 2 interaction
   
   double aij = 0.0;
   for (k = 0; k < kcount; k++) {
-    partial_group = sfacrl_1_all[k]*sfacrl_2_all[k] +
+    partial_atom = sfacrl_1_all[k]*sfacrl_2_all[k] +
       sfacim_1_all[k]*sfacim_2_all[k];
-    aij += ug[k]*partial_group;
+    aij += ug[k]*partial_atom;
   }
-  
-  // atom one
-
-  delete [] sfacrl_1;
-  delete [] sfacim_1;
-  delete [] sfacrl_1_all;
-  delete [] sfacim_1_all;
-
-  // atom two
-
-  delete [] sfacrl_2;
-  delete [] sfacim_2;
-  delete [] sfacrl_2_all;
-  delete [] sfacim_2_all;
   
   return aij;
 }
@@ -1735,4 +1728,46 @@ void Ewald::deallocate_groups()
   delete [] sfacim_B;
   delete [] sfacrl_B_all;
   delete [] sfacim_B_all;
+}
+
+/* ----------------------------------------------------------------------
+   allocate atom-atom memory that depends on # of K-vectors
+------------------------------------------------------------------------- */
+
+void Ewald::allocate_atoms()
+{
+  // atom one
+
+  sfacrl_1 = new double[kcount];
+  sfacim_1 = new double[kcount];
+  sfacrl_1_all = new double[kcount];
+  sfacim_1_all = new double[kcount];
+
+  // atom two
+
+  sfacrl_2 = new double[kcount];
+  sfacim_2 = new double[kcount];
+  sfacrl_2_all = new double[kcount];
+  sfacim_2_all = new double[kcount];
+}
+
+/* ----------------------------------------------------------------------
+   deallocate atom-atom memory that depends on # of K-vectors
+------------------------------------------------------------------------- */
+
+void Ewald::deallocate_atoms()
+{
+  // atom one
+
+  delete [] sfacrl_1;
+  delete [] sfacim_1;
+  delete [] sfacrl_1_all;
+  delete [] sfacim_1_all;
+
+  // atom two
+
+  delete [] sfacrl_2;
+  delete [] sfacim_2;
+  delete [] sfacrl_2_all;
+  delete [] sfacim_2_all;
 }
