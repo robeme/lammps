@@ -42,9 +42,9 @@ class ComputeCoulMatrix : public Compute {
   bigint jgroupnum, igroupnum, natoms;
   int recalc_every;
   double **cutsq,**gradQ_V;
-  double e_self,e_correction;
   double g_ewald,eta;
-  int pairflag,kspaceflag,boundaryflag,overwrite,gaussians;
+  int pairflag,kspaceflag,boundaryflag,selfflag;
+  int overwrite,gaussians;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
@@ -56,6 +56,7 @@ class ComputeCoulMatrix : public Compute {
   void matrix_assignment();
   void reallocate();
   void pair_contribution();
+  void self_contribution();
   void kspace_contribution();
   void kspace_correction();
   void write_matrix(double **);
