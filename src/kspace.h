@@ -125,7 +125,7 @@ class KSpace : protected Pointers {
   virtual void setup() = 0;
   virtual void setup_grid(){};
   virtual void compute(int, int) = 0;
-  virtual void compute_group_group(int, int, int){};
+  virtual void compute_group_group(int, int, int) {};
 
   virtual void pack_forward_grid(int, void *, int, int *){};
   virtual void unpack_forward_grid(int, void *, int, int *){};

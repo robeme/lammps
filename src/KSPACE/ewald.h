@@ -78,6 +78,7 @@ class Ewald : public KSpace {
   // group-group interactions
 
   void slabcorr_groups(int, int, int);
+  void ew2d_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
 };

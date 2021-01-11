@@ -1389,8 +1389,6 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
-  if (slabflag == 1 && slab_volfactor == 1.0) // TODO ... but I'm on it!
-    error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
 
   int i,k;
 
@@ -1504,8 +1502,10 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 
   // 2d slab correction
 
-  if (slabflag == 1)
+  if (slabflag == 1 && slab_volfactor > 1.0) 
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
+  else if (slabflag == 1 && slab_volfactor == 1.0)
+    ew2d_groups(groupbit_A, groupbit_B, AA_flag);
 }
 
 /* ----------------------------------------------------------------------
@@ -1584,6 +1584,116 @@ void Ewald::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 
   const double ffact = qscale * (-4.0*MY_PI/volume);
   f2group[2] += ffact * (qsum_A*dipole_B - qsum_B*dipole_A);
+}
+
+/* ----------------------------------------------------------------------
+   returns individual long-range entries for coulomb matrix 
+ ------------------------------------------------------------------------- */
+
+double Ewald::compute_atom_atom(tagint a1, tagint a2)
+{
+  if (slabflag && triclinic)
+    error->all(FLERR,"Cannot (yet) calculate coul/matrix contributions for triclinic systems");
+
+  int nlocal = atom->nlocal;
+  int *tag = atom->tag;
+  int *mask = atom->mask;
+
+  int i,k;
+  int kx,ky,kz;
+  double cypz,sypz,exprl,expim;
+  
+  double *sfacrl_1,*sfacim_1,*sfacrl_1_all,*sfacim_1_all;
+  double *sfacrl_2,*sfacim_2,*sfacrl_2_all,*sfacim_2_all;
+  
+  // atom one
+
+  sfacrl_1 = new double[kcount];
+  sfacim_1 = new double[kcount];
+  sfacrl_1_all = new double[kcount];
+  sfacim_1_all = new double[kcount];
+
+  // atom two
+
+  sfacrl_2 = new double[kcount];
+  sfacim_2 = new double[kcount];
+  sfacrl_2_all = new double[kcount];
+  sfacim_2_all = new double[kcount];
+
+  for (k = 0; k < kcount; k++) {
+    kx = kxvecs[k];
+    ky = kyvecs[k];
+    kz = kzvecs[k];
+
+    for (i = 0; i < nlocal; i++) {
+      if ((tag[i] == a1) || (tag[i] == a2)) {
+
+        cypz = cs[ky][1][i]*cs[kz][2][i] - sn[ky][1][i]*sn[kz][2][i];
+        sypz = sn[ky][1][i]*cs[kz][2][i] + cs[ky][1][i]*sn[kz][2][i];
+        exprl = cs[kx][0][i]*cypz - sn[kx][0][i]*sypz;
+        expim = sn[kx][0][i]*cypz + cs[kx][0][i]*sypz;
+
+        // atom one
+
+        if (tag[i] == a1) {
+          sfacrl_1[k] += exprl;
+          sfacim_1[k] += expim;
+        }
+
+        // atom two
+
+        if (tag[i] == a2) {
+          sfacrl_2[k] += exprl;
+          sfacim_2[k] += expim;
+        }
+      }
+    }
+  }
+  
+  // total structure factor by summing over procs
+
+  MPI_Allreduce(sfacrl_1,sfacrl_1_all,kcount,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(sfacim_1,sfacim_1_all,kcount,MPI_DOUBLE,MPI_SUM,world);
+
+  MPI_Allreduce(sfacrl_2,sfacrl_2_all,kcount,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(sfacim_2,sfacim_2_all,kcount,MPI_DOUBLE,MPI_SUM,world);
+  
+  double partial_group;
+
+  // total atom 1 <--> atom 2 interaction
+  
+  double aij = 0.0;
+  for (k = 0; k < kcount; k++) {
+    partial_group = sfacrl_1_all[k]*sfacrl_2_all[k] +
+      sfacim_1_all[k]*sfacim_2_all[k];
+    aij += ug[k]*partial_group;
+  }
+  
+  // atom one
+
+  delete [] sfacrl_1;
+  delete [] sfacim_1;
+  delete [] sfacrl_1_all;
+  delete [] sfacim_1_all;
+
+  // atom two
+
+  delete [] sfacrl_2;
+  delete [] sfacim_2;
+  delete [] sfacrl_2_all;
+  delete [] sfacim_2_all;
+  
+  return aij;
+}
+
+/* ----------------------------------------------------------------------
+   EW2D infinite boundary term (i.e. k = 0)
+------------------------------------------------------------------------- */
+
+void Ewald::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
+{
+  if (slabflag == 1 && slab_volfactor == 1.0) 
+    error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
 }
 
 /* ----------------------------------------------------------------------
