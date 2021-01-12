@@ -45,7 +45,7 @@ EwaldConp::EwaldConp(LAMMPS *lmp) : KSpace(lmp),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
   sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
 {
-  group_allocate_flag = matrix_allocate_flag = 0;
+  group_allocate_flag = 0;
   kmax_created = 0;
   ewaldflag = 1;
   group_group_enable = 1;
@@ -91,7 +91,6 @@ EwaldConp::~EwaldConp()
     memory->destroy(nprd_all);
     memory->destroy(q_all);
   }
-  if (matrix_allocate_flag) memory->destroy(matrix);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1602,19 +1601,11 @@ void EwaldConp::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
    compute the Ewald long-range matrix for given list of tags
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag)
+void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
 { 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
-  
-  if (!matrix_allocate_flag) {
-    memory->create(matrix,nmat,nmat,"ewald:matrix");
-    matrix_allocate_flag = 1;
-  } else {
-    memory->destroy(matrix);
-    memory->create(matrix,nmat,nmat,"ewald:matrix");
-  }
  
   int nlocal = atom->nlocal;
   tagint *tag = atom->tag;
@@ -1744,7 +1735,7 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag)
         }
       }
     }
-    printf("(%d,%d) on %d\n", k+1,kcount,comm->me);
+    if ((k+1) % 1000 == 0) printf("(%d,%d) on %d\n", k+1,kcount,comm->me);
   }  
   
   MPI_Allreduce(&matrix_local[0][0], &matrix[0][0], nmat*nmat, MPI_DOUBLE, MPI_SUM, world);
