@@ -1,6 +1,6 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://www.lammps.org/, Sandia National Laboratories
+   http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -12,22 +12,22 @@
 ------------------------------------------------------------------------- */
 
 #ifdef KSPACE_CLASS
-// clang-format off
-KSpaceStyle(ewald,Ewald);
-// clang-format on
+
+KSpaceStyle(ewald/conp,EwaldConp)
+
 #else
 
-#ifndef LMP_EWALD_H
-#define LMP_EWALD_H
+#ifndef LMP_EWALDCONP_H
+#define LMP_EWALDCONP_H
 
 #include "kspace.h"
 
 namespace LAMMPS_NS {
 
-class Ewald : public KSpace {
+class EwaldConp : public KSpace {
  public:
-  Ewald(class LAMMPS *);
-  virtual ~Ewald();
+  EwaldConp(class LAMMPS *);
+  virtual ~EwaldConp();
   void init();
   void setup();
   virtual void settings(int, char **);
@@ -35,6 +35,8 @@ class Ewald : public KSpace {
   double memory_usage();
 
   void compute_group_group(int, int, int);
+  
+  double** compute_matrix(int, int);
 
  protected:
   int kxmax,kymax,kzmax;
@@ -48,7 +50,7 @@ class Ewald : public KSpace {
   int nprd_dim;
   double *nprd_all, *q_all;
   double *ug;
-  double **eg, **vg;
+  double **eg,**vg;
   double **ek;
   double *sfacrl,*sfacim,*sfacrl_all,*sfacim_all;
   double ***cs,***sn;
@@ -58,7 +60,7 @@ class Ewald : public KSpace {
   int group_allocate_flag;
   double *sfacrl_A,*sfacim_A,*sfacrl_A_all,*sfacim_A_all;
   double *sfacrl_B,*sfacim_B,*sfacrl_B_all,*sfacim_B_all;
-
+ 
   double rms(int, double, bigint, double);
   virtual void eik_dot_r();
   void coeffs();
@@ -76,14 +78,13 @@ class Ewald : public KSpace {
 
   // group-group interactions
 
-  void slabcorr_groups(int, int, int);
+  void slabcorr_groups(int,int,int);
   void ew2d_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
- 
 };
 
-}    // namespace LAMMPS_NS
+}
 
 #endif
 #endif

@@ -1,7 +1,6 @@
-// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://www.lammps.org/, Sandia National Laboratories
+   https://lammps.sandia.gov/, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -19,7 +18,7 @@
      triclinic added by Stan Moore (SNL)
 ------------------------------------------------------------------------- */
 
-#include "ewald.h"
+#include "ewald_conp.h"
 
 #include "atom.h"
 #include "comm.h"
@@ -39,14 +38,14 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
+EwaldConp::EwaldConp(LAMMPS *lmp) : KSpace(lmp),
   kxvecs(nullptr), kyvecs(nullptr), kzvecs(nullptr), ug(nullptr), eg(nullptr), vg(nullptr),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
   sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
 {
-  group_allocate_flag = 0;
+  group_allocate_flag;
   kmax_created = 0;
   ewaldflag = 1;
   group_group_enable = 1;
@@ -70,7 +69,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kcount = 0;
 }
 
-void Ewald::settings(int narg, char **arg)
+void EwaldConp::settings(int narg, char **arg)
 {
   if (narg != 1) error->all(FLERR,"Illegal kspace_style ewald command");
 
@@ -81,7 +80,7 @@ void Ewald::settings(int narg, char **arg)
    free all memory
 ------------------------------------------------------------------------- */
 
-Ewald::~Ewald()
+EwaldConp::~EwaldConp()
 {
   deallocate();
   if (group_allocate_flag) deallocate_groups();
@@ -96,7 +95,7 @@ Ewald::~Ewald()
 
 /* ---------------------------------------------------------------------- */
 
-void Ewald::init()
+void EwaldConp::init()
 {
   if (comm->me == 0) utils::logmesg(lmp,"Ewald initialization ...\n");
 
@@ -214,7 +213,7 @@ void Ewald::init()
    adjust Ewald coeffs, called initially and whenever volume has changed
 ------------------------------------------------------------------------- */
 
-void Ewald::setup()
+void EwaldConp::setup()
 {
   // volume-dependent factors
 
@@ -356,7 +355,7 @@ void Ewald::setup()
    compute RMS accuracy for a dimension
 ------------------------------------------------------------------------- */
 
-double Ewald::rms(int km, double prd, bigint natoms, double q2)
+double EwaldConp::rms(int km, double prd, bigint natoms, double q2)
 {
   if (natoms == 0) natoms = 1;   // avoid division by zero
   double value = 2.0*q2*g_ewald/prd *
@@ -370,7 +369,7 @@ double Ewald::rms(int km, double prd, bigint natoms, double q2)
    compute the Ewald long-range force, energy, virial
 ------------------------------------------------------------------------- */
 
-void Ewald::compute(int eflag, int vflag)
+void EwaldConp::compute(int eflag, int vflag)
 {
   int i,j,k;
 
@@ -522,7 +521,7 @@ void Ewald::compute(int eflag, int vflag)
 
 /* ---------------------------------------------------------------------- */
 
-void Ewald::eik_dot_r()
+void EwaldConp::eik_dot_r()
 {
   int i,k,l,m,n,ic;
   double cstr1,sstr1,cstr2,sstr2,cstr3,sstr3,cstr4,sstr4;
@@ -708,7 +707,7 @@ void Ewald::eik_dot_r()
 
 /* ---------------------------------------------------------------------- */
 
-void Ewald::eik_dot_r_triclinic()
+void EwaldConp::eik_dot_r_triclinic()
 {
   int i,k,l,m,n,ic;
   double cstr1,sstr1;
@@ -786,7 +785,7 @@ void Ewald::eik_dot_r_triclinic()
    pre-compute coefficients for each Ewald K-vector
 ------------------------------------------------------------------------- */
 
-void Ewald::coeffs()
+void EwaldConp::coeffs()
 {
   int k,l,m;
   double sqk,vterm;
@@ -1053,7 +1052,7 @@ void Ewald::coeffs()
    system
 ------------------------------------------------------------------------- */
 
-void Ewald::coeffs_triclinic()
+void EwaldConp::coeffs_triclinic()
 {
   int k,l,m;
   double sqk,vterm;
@@ -1164,7 +1163,7 @@ void Ewald::coeffs_triclinic()
        fetch_global_dprop(double &prop)
 ------------------------------------------------------------------------- */
 
-void Ewald::fetch_all()
+void EwaldConp::fetch_all()
 {
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
@@ -1204,7 +1203,7 @@ void Ewald::fetch_all()
    allocate memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
-void Ewald::allocate()
+void EwaldConp::allocate()
 {
   kxvecs = new int[kmax3d];
   kyvecs = new int[kmax3d];
@@ -1224,7 +1223,7 @@ void Ewald::allocate()
    deallocate memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
-void Ewald::deallocate()
+void EwaldConp::deallocate()
 {
   delete [] kxvecs;
   delete [] kyvecs;
@@ -1248,7 +1247,7 @@ void Ewald::deallocate()
    extended to non-neutral systems (J. Chem. Phys. 131, 094107).
 ------------------------------------------------------------------------- */
 
-void Ewald::slabcorr()
+void EwaldConp::slabcorr()
 {
   // compute local contribution to global dipole moment
 
@@ -1312,7 +1311,7 @@ void Ewald::slabcorr()
    with MPI_allreduce like it is partly done in group/group.
 ------------------------------------------------------------------------- */
 
-void Ewald::ew2d()
+void EwaldConp::ew2d()
 {
   double *q = atom->q;
   double **x = atom->x;
@@ -1368,13 +1367,13 @@ void Ewald::ew2d()
    memory usage of local arrays
 ------------------------------------------------------------------------- */
 
-double Ewald::memory_usage()
+double EwaldConp::memory_usage()
 {
   double bytes = 3 * kmax3d * sizeof(int);
-  bytes += (double)(1 + 3 + 6) * kmax3d * sizeof(double);
-  bytes += (double)4 * kmax3d * sizeof(double);
-  bytes += (double)nmax*3 * sizeof(double);
-  bytes += (double)2 * (2*kmax+1)*3*nmax * sizeof(double);
+  bytes += (1 + 3 + 6) * kmax3d * sizeof(double);
+  bytes += 4 * kmax3d * sizeof(double);
+  bytes += nmax*3 * sizeof(double);
+  bytes += 2 * (2*kmax+1)*3*nmax * sizeof(double);
   return bytes;
 }
 
@@ -1386,11 +1385,8 @@ double Ewald::memory_usage()
    compute the Ewald total long-range force and energy for groups A and B
  ------------------------------------------------------------------------- */
 
-void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
-{
-
-  // TODO actually, I think with EW2D it's possible
-  
+void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
+{ 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
@@ -1521,7 +1517,7 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
    extended to non-neutral systems (J. Chem. Phys. 131, 094107).
 ------------------------------------------------------------------------- */
 
-void Ewald::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
+void EwaldConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 {
   // compute local contribution to global dipole moment
 
@@ -1595,7 +1591,7 @@ void Ewald::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
    computes infinite boundary term with EW2D (i.e. k = 0)
 ------------------------------------------------------------------------- */
 
-void Ewald::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
+void EwaldConp::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
 {
   if (slabflag == 1 && slab_volfactor == 1.0) 
     error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
@@ -1605,7 +1601,7 @@ void Ewald::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
    allocate group-group memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
-void Ewald::allocate_groups()
+void EwaldConp::allocate_groups()
 {
   // group A
 
@@ -1626,7 +1622,7 @@ void Ewald::allocate_groups()
    deallocate group-group memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
-void Ewald::deallocate_groups()
+void EwaldConp::deallocate_groups()
 {
   // group A
 

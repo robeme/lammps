@@ -320,6 +320,10 @@ void ComputeCoulMatrix::pair_contribution()
     itype = type[i];
     jlist = firstneigh[i];
     jnum = numneigh[i];
+    
+    // locate matrix position of first atom   
+    for (ipos = 0; ipos < natoms; ipos++)
+      if (mat2tag[ipos] == tag[i]) break;
 
     // real-space part of matrix is symmetric, start from jj == ii
 
@@ -363,10 +367,7 @@ void ComputeCoulMatrix::pair_contribution()
           }
         }    
         
-        // locate matrix position of ij pair
-        
-        for (ipos = 0; ipos < natoms; ipos++)
-          if (mat2tag[ipos] == tag[i]) break;
+        // locate matrix position of secont atom
         for (jpos = 0; jpos < natoms; jpos++)
           if (mat2tag[jpos] == tag[j]) break;
 
@@ -392,13 +393,12 @@ void ComputeCoulMatrix::self_contribution()
 void ComputeCoulMatrix::kspace_contribution()
 {  
   tagint *tag = atom->tag;
-  double aij;
+  double aij = 0.0;
   
   for (bigint i = 0; i < natoms; i++) {
-    if (comm->me == 0) printf("(%d/%d)\n",i+1,natoms);
     for (bigint j = i; j < natoms; j++) {
     
-      aij = kspace->compute_atom_atom(mat2tag[i],mat2tag[j]);
+      //aij = kspace->compute_atom_atom(mat2tag[i],mat2tag[j]);
       
       gradQ_V[i][j] += aij;
       if (tag[i] != tag[j]) gradQ_V[j][i] += aij;
