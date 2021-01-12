@@ -38,7 +38,7 @@ class EwaldConp : public KSpace {
   
   // k-space part of coulomb matrix computation 
   
-  void compute_matrix(bigint, tagint *);
+  void compute_matrix(bigint, tagint *, double**);
 
  protected:
   int kxmax,kymax,kzmax;
@@ -62,11 +62,6 @@ class EwaldConp : public KSpace {
   int group_allocate_flag;
   double *sfacrl_A,*sfacim_A,*sfacrl_A_all,*sfacim_A_all;
   double *sfacrl_B,*sfacim_B,*sfacrl_B_all,*sfacim_B_all;
-  
-  // coulomb matrix computations
-  
-  int matrix_allocate_flag;
-  double **matrix;
  
   double rms(int, double, bigint, double);
   virtual void eik_dot_r();

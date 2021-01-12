@@ -392,7 +392,7 @@ void ComputeCoulMatrix::self_contribution()
 
 void ComputeCoulMatrix::kspace_contribution()
 { 
-  kspace->compute_matrix(natoms,mat2tag);
+  kspace->compute_matrix(natoms,mat2tag,gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
