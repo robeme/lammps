@@ -13,21 +13,21 @@
 
 #ifdef KSPACE_CLASS
 
-KSpaceStyle(ewald,Ewald)
+KSpaceStyle(ewald/conp,EwaldConp)
 
 #else
 
-#ifndef LMP_EWALD_H
-#define LMP_EWALD_H
+#ifndef LMP_EWALDCONP_H
+#define LMP_EWALDCONP_H
 
 #include "kspace.h"
 
 namespace LAMMPS_NS {
 
-class Ewald : public KSpace {
+class EwaldConp : public KSpace {
  public:
-  Ewald(class LAMMPS *);
-  virtual ~Ewald();
+  EwaldConp(class LAMMPS *);
+  virtual ~EwaldConp();
   void init();
   void setup();
   virtual void settings(int, char **);
@@ -36,8 +36,7 @@ class Ewald : public KSpace {
 
   void compute_group_group(int, int, int);
   
-  // matrix calculation
-  double compute_atom_atom(tagint,tagint);
+  double** compute_matrix(int, int);
 
  protected:
   int kxmax,kymax,kzmax;
@@ -61,7 +60,7 @@ class Ewald : public KSpace {
   int group_allocate_flag;
   double *sfacrl_A,*sfacim_A,*sfacrl_A_all,*sfacim_A_all;
   double *sfacrl_B,*sfacim_B,*sfacrl_B_all,*sfacim_B_all;
-
+ 
   double rms(int, double, bigint, double);
   virtual void eik_dot_r();
   void coeffs();
@@ -83,7 +82,6 @@ class Ewald : public KSpace {
   void ew2d_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
- 
 };
 
 }
