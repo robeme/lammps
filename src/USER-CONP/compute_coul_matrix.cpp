@@ -391,19 +391,8 @@ void ComputeCoulMatrix::self_contribution()
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::kspace_contribution()
-{  
-  tagint *tag = atom->tag;
-  double aij = 0.0;
-  
-  for (bigint i = 0; i < natoms; i++) {
-    for (bigint j = i; j < natoms; j++) {
-    
-      //aij = kspace->compute_atom_atom(mat2tag[i],mat2tag[j]);
-      
-      gradQ_V[i][j] += aij;
-      if (tag[i] != tag[j]) gradQ_V[j][i] += aij;
-    }
-  }
+{ 
+  kspace->compute_matrix(natoms,mat2tag);
 }
 
 /* ---------------------------------------------------------------------- */

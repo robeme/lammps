@@ -45,7 +45,7 @@ EwaldConp::EwaldConp(LAMMPS *lmp) : KSpace(lmp),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
   sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
 {
-  group_allocate_flag;
+  group_allocate_flag = matrix_allocate_flag = 0;
   kmax_created = 0;
   ewaldflag = 1;
   group_group_enable = 1;
@@ -91,6 +91,7 @@ EwaldConp::~EwaldConp()
     memory->destroy(nprd_all);
     memory->destroy(q_all);
   }
+  if (matrix_allocate_flag) memory->destroy(matrix);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1595,6 +1596,165 @@ void EwaldConp::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
 {
   if (slabflag == 1 && slab_volfactor == 1.0) 
     error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
+}
+
+/* ----------------------------------------------------------------------
+   compute the Ewald long-range matrix for given list of tags
+ ------------------------------------------------------------------------- */
+
+void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag)
+{ 
+  if (slabflag && triclinic)
+    error->all(FLERR,"Cannot (yet) use K-space slab "
+               "correction with compute group/group for triclinic systems");
+  
+  if (!matrix_allocate_flag) {
+    memory->create(matrix,nmat,nmat,"ewald:matrix");
+    matrix_allocate_flag = 1;
+  } else {
+    memory->destroy(matrix);
+    memory->create(matrix,nmat,nmat,"ewald:matrix");
+  }
+ 
+  int nlocal = atom->nlocal;
+  tagint *tag = atom->tag;
+  double **csx_local, **csy_local, **csz_local;
+  double **snx_local, **sny_local, **snz_local;
+  double **csx_glob, **csy_glob, **csz_glob;
+  double **snx_glob, **sny_glob, **snz_glob;
+  double **matrix_local;
+  int i,k,l,m,n,mabs,nabs,sign_m,sign_n;
+  bigint ii,j;
+  
+  // gather only cs and sn of atoms in taglist
+  
+  memory->create(csx_local,kxmax+1,nmat,"ewald:csx_local");
+  memory->create(csy_local,kymax+1,nmat,"ewald:csy_local");
+  memory->create(csz_local,kzmax+1,nmat,"ewald:csz_local");
+  memory->create(snx_local,kxmax+1,nmat,"ewald:snx_local");
+  memory->create(sny_local,kymax+1,nmat,"ewald:sny_local");
+  memory->create(snz_local,kzmax+1,nmat,"ewald:snz_local");
+  
+  size_t nbytes = sizeof(double) * nmat;
+  
+  if (nbytes) {
+    for (k = 0; k < kcount; k++) {         
+      
+      // only positive m,n are required (see metalwalls)
+          
+      l = kxvecs[k];
+      m = abs(kyvecs[k]);
+      n = abs(kzvecs[k]);
+    
+      memset(&csx_local[l][0],0,nbytes);
+      memset(&snx_local[l][0],0,nbytes);
+      memset(&csy_local[m][0],0,nbytes);
+      memset(&sny_local[m][0],0,nbytes);
+      memset(&csz_local[n][0],0,nbytes);
+      memset(&snz_local[n][0],0,nbytes);
+    }
+  }
+  
+  for (i = 0; i < nlocal; i++) {
+    for (j = 0; j < nmat; j++) {
+      if (tag[i] == mat2tag[j]) {
+        for (k = 0; k < kcount; k++) {  
+          l = kxvecs[k];
+          m = abs(kyvecs[k]);
+          n = abs(kzvecs[k]);
+          
+          csx_local[l][j] = cs[l][0][i];
+          snx_local[l][j] = sn[l][0][i];
+          csy_local[m][j] = cs[m][1][i];
+          sny_local[m][j] = sn[m][1][i];
+          csz_local[n][j] = cs[n][2][i];
+          snz_local[n][j] = sn[n][2][i];
+        }
+      }
+    }
+  }
+  
+  memory->create(csx_glob,kxmax+1,nmat,"ewald:csx_glob");
+  memory->create(csy_glob,kymax+1,nmat,"ewald:csy_glob");
+  memory->create(csz_glob,kzmax+1,nmat,"ewald:csz_glob");
+  memory->create(snx_glob,kxmax+1,nmat,"ewald:snx_glob");
+  memory->create(sny_glob,kymax+1,nmat,"ewald:sny_glob");
+  memory->create(snz_glob,kzmax+1,nmat,"ewald:snz_glob");
+  
+  MPI_Allreduce(&csx_local[0][0], &csx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(&csy_local[0][0], &csy_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(&csz_local[0][0], &csz_glob[0][0], (kzmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(&snx_local[0][0], &snx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(&sny_local[0][0], &sny_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(&snz_local[0][0], &snz_glob[0][0], (kzmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+  
+  memory->destroy(csx_local);
+  memory->destroy(csy_local);
+  memory->destroy(csz_local);
+  memory->destroy(snx_local);
+  memory->destroy(sny_local);
+  memory->destroy(snz_local);
+  
+  memory->create(matrix_local,nmat,nmat,"ewald:matrix_local");
+
+  double cos_kxky,sin_kxky,aij;
+  double cos_kxkykz_i,sin_kxkykz_i;
+  double cos_kxkykz_j,sin_kxkykz_j;
+  
+  for (i = 0; i < nlocal; i++) { 
+    for (ii = 0; ii < nmat; ii++) {
+      if (tag[i] == mat2tag[ii]) { 
+        for (k = 0; k < kcount; k++) {
+        
+          // take care of k-vector sign
+        
+          l = kxvecs[k];
+          m = kyvecs[k];
+          n = kzvecs[k];
+          
+          mabs = abs(m);
+          sign_m = (m > 0) - (m < 0);
+          
+          nabs = abs(n);
+          sign_n = (n > 0) - (n < 0);
+
+
+          cos_kxky = cs[l][0][i] * cs[mabs][1][i] - sn[l][0][i] * sn[mabs][1][i] * sign_m;
+          sin_kxky = sn[l][0][i] * cs[mabs][1][i] + cs[l][0][i] * sn[mabs][1][i] * sign_m;
+
+          cos_kxkykz_i = cos_kxky * cs[nabs][2][i] - sin_kxky * sn[nabs][2][i] * sign_n;
+          sin_kxkykz_i = sin_kxky * cs[nabs][2][i] + cos_kxky * sn[nabs][2][i] * sign_n;
+        
+          // matrix is symmetric, compute only lower triangular
+          
+          for (j = ii; j < nmat; j++) {
+          
+            cos_kxky = csx_glob[0][j] * csy_glob[0][j] - snx_glob[0][j] * sny_glob[0][j] * sign_m;
+            sin_kxky = snx_glob[0][j] * csy_glob[0][j] + csx_glob[0][j] * sny_glob[0][j] * sign_m;
+
+            cos_kxkykz_j = cos_kxky * csz_glob[0][j] - sin_kxky * snz_glob[0][j] * sign_n;
+            sin_kxkykz_j = sin_kxky * csz_glob[0][j] + cos_kxky * snz_glob[0][j] * sign_n;
+          
+            aij = 2.0*ug[k] * ( cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j );
+            
+            matrix[ii][j] += aij;
+            if (tag[i] != mat2tag[j]) 
+              matrix[j][ii] += aij;
+          }
+        }
+      }
+    }
+  }  
+  
+  MPI_Allreduce(&matrix_local[0][0], &matrix[0][0], nmat*nmat, MPI_DOUBLE, MPI_SUM, world);
+  
+  memory->destroy(matrix_local);
+  memory->destroy(csx_glob);
+  memory->destroy(csy_glob);
+  memory->destroy(csz_glob);
+  memory->destroy(snx_glob);
+  memory->destroy(sny_glob);
+  memory->destroy(snz_glob);
 }
 
 /* ----------------------------------------------------------------------
