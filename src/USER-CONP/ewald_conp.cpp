@@ -1701,10 +1701,10 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag)
   double cos_kxkykz_i,sin_kxkykz_i;
   double cos_kxkykz_j,sin_kxkykz_j;
   
-  for (i = 0; i < nlocal; i++) { 
-    for (ii = 0; ii < nmat; ii++) {
-      if (tag[i] == mat2tag[ii]) { 
-        for (k = 0; k < kcount; k++) {
+  for (k = 0; k < kcount; k++) {
+    for (i = 0; i < nlocal; i++) { 
+      for (ii = 0; ii < nmat; ii++) {
+        if (tag[i] == mat2tag[ii]) { 
         
           // take care of k-vector sign
         
@@ -1744,6 +1744,7 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag)
         }
       }
     }
+    printf("(%d,%d) on %d\n", k+1,kcount,comm->me);
   }  
   
   MPI_Allreduce(&matrix_local[0][0], &matrix[0][0], nmat*nmat, MPI_DOUBLE, MPI_SUM, world);
