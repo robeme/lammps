@@ -1562,50 +1562,68 @@ void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
    obtained.
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B)
+void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
 { 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
 
   int nlocal = atom->nlocal;
+  tagint *tag = atom->tag;
   int *mask = atom->mask;
-
-  // gather ALL sn and cs on each proc
   
-  bigint natoms = atom->natoms;
   double **csx,**csy,**csz,**snx,**sny,**snz;
   double *csx_all,*csy_all,*csz_all;
   double *snx_all,*sny_all,*snz_all;
   
-  memory->create(csx,nlocal,kxmax+1,"ewald/conp:csx");
-  memory->create(snx,nlocal,kxmax+1,"ewald/conp:snx");
-  memory->create(csy,nlocal,kymax+1,"ewald/conp:csy");
-  memory->create(sny,nlocal,kymax+1,"ewald/conp:sny");
-  memory->create(snz,nlocal,kzmax+1,"ewald/conp:snz");
-  memory->create(csz,nlocal,kzmax+1,"ewald/conp:csz");
+  int i,j,k;
+
+  // how many local group atoms owns each proc?
   
-  memory->create(csx_all,(kxmax+1)*natoms,"ewald/conp:csx_all");
-  memory->create(snx_all,(kxmax+1)*natoms,"ewald/conp:snx_all");
-  memory->create(csy_all,(kymax+1)*natoms,"ewald/conp:csy_all");
-  memory->create(sny_all,(kymax+1)*natoms,"ewald/conp:sny_all");
-  memory->create(csz_all,(kzmax+1)*natoms,"ewald/conp:csz_all");
-  memory->create(snz_all,(kzmax+1)*natoms,"ewald/conp:snz_all");
+  bigint ngrouplocal = 0;
+  bigint ngroup;
+  for (i = 0; i < nlocal; i++)
+    if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B))
+      ngrouplocal++;
+      
+  // how many atoms do we have in total in groups    
+      
+  MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_LMP_BIGINT,MPI_SUM,world);
+
+  // gather only subset of sn and cs on each proc
   
-  // copy sn and cn to new local arrays
-   
-  for (int i = 0; i < nlocal; i++) {
-    for (int k = 0; k <= kxmax; k++) {  
-      csx[i][k] = cs[k][0][i];
-      snx[i][k] = sn[k][0][i];
-    }
-    for (int k = 0; k <= kymax; k++) { 
-      csy[i][k] = cs[k][1][i];
-      sny[i][k] = sn[k][1][i];
-    }
-    for (int k = 0; k <= kzmax; k++) { 
-      csz[i][k] = cs[k][2][i];
-      snz[i][k] = sn[k][2][i];
+  memory->create(csx,kxmax+1,ngrouplocal,"ewald/conp:csx");
+  memory->create(snx,kxmax+1,ngrouplocal,"ewald/conp:snx");
+  memory->create(csy,kymax+1,ngrouplocal,"ewald/conp:csy");
+  memory->create(sny,kymax+1,ngrouplocal,"ewald/conp:sny");
+  memory->create(snz,kzmax+1,ngrouplocal,"ewald/conp:snz");
+  memory->create(csz,kzmax+1,ngrouplocal,"ewald/conp:csz");
+  
+  memory->create(csx_all,(kxmax+1)*ngroup,"ewald/conp:csx_all");
+  memory->create(snx_all,(kxmax+1)*ngroup,"ewald/conp:snx_all");
+  memory->create(csy_all,(kymax+1)*ngroup,"ewald/conp:csy_all");
+  memory->create(sny_all,(kymax+1)*ngroup,"ewald/conp:sny_all");
+  memory->create(csz_all,(kzmax+1)*ngroup,"ewald/conp:csz_all");
+  memory->create(snz_all,(kzmax+1)*ngroup,"ewald/conp:snz_all");
+  
+  // copy sn and cn to new local arrays 
+  
+  j = 0;
+  for (i = 0; i < nlocal; i++) {
+    if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
+      for (k = 0; k <= kxmax; k++) {  
+        csx[k][j] = cs[k][0][i];
+        snx[k][j] = sn[k][0][i];
+      }
+      for (k = 0; k <= kymax; k++) { 
+        csy[k][j] = cs[k][1][i];
+        sny[k][j] = sn[k][1][i];
+      }
+      for (k = 0; k <= kzmax; k++) { 
+        csz[k][j] = cs[k][2][i];
+        snz[k][j] = sn[k][2][i];
+      }
+      j++;
     }
   }
 
@@ -1617,33 +1635,75 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B)
   
   int n;
   
-  n = (kxmax+1)*nlocal;
+  n = (kxmax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
-  MPI_Allgatherv(csx,n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(snx,n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&csx[0][0],n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&snx[0][0],n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
   
-  n = (kymax+1)*nlocal;
+  n = (kymax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
-  MPI_Allgatherv(csy,n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(sny,n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&csy[0][0],n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&sny[0][0],n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
   
-  n = (kzmax+1)*nlocal;
+  n = (kzmax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
-  MPI_Allgatherv(csz,n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(snz,n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&csz[0][0],n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&snz[0][0],n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
 
-  int kx,ky,kz;
   
+  int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
+  double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
   
+  // aij between each atom in groups
+
+  for (int k = 0; k < kcount; k++) {
+    kx = kxvecs[k];
+    ky = kyvecs[k];
+    kz = kzvecs[k];
+    
+    kyabs = abs(ky);
+    sign_ky = (ky > 0) - (ky < 0);
+    
+    kzabs = abs(kz);
+    sign_kz = (kz > 0) - (kz < 0);
+
+    for (int i = 0; i < nlocal; i++) {
+
+      if (mask[i] & groupbit_A) {
+      
+        cos_kxky = cs[kx][0][i] * cs[kyabs][1][i] - sn[kx][0][i] * sn[kyabs][1][i] * sign_ky;
+        sin_kxky = sn[kx][0][i] * cs[kyabs][1][i] + cs[kx][0][i] * sn[kyabs][1][i] * sign_ky;
+
+        cos_kxkykz_i = cos_kxky * cs[kzabs][2][i] - sin_kxky * sn[kzabs][2][i] * sign_kz;
+        sin_kxkykz_i = sin_kxky * cs[kzabs][2][i] + cos_kxky * sn[kzabs][2][i] * sign_kz;
+        
+        for (int j = 0; j < ngroup; j++) {
+          kxj = kx+j*(kxmax+1);
+          kyj = kyabs+j*(kymax+1);
+          kzj = kzabs+j*(kzmax+1);
+        
+          cos_kxky = csx_all[kxj] * csy_all[kyj] - snx_all[kxj] * sny_all[kyj] * sign_ky;
+          sin_kxky = snx_all[kxj] * csy_all[kyj] + csx_all[kxj] * sny_all[kyj] * sign_ky;
+
+          cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
+          sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
+          
+          aij = cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
+          
+          printf("*** aij for (%d,%d): %f *** \n",tag[i],j,aij);
+        }
+      }
+    }
+  }
   
   memory->destroy(displs);
   memory->destroy(recvcounts);
