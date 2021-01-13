@@ -516,11 +516,6 @@ void EwaldConp::eik_dot_r()
   // (k,0,0), (0,l,0), (0,0,m)
 
   for (ic = 0; ic < 3; ic++) {
-    
-    // skip h=(0,0) in case of EW2D 
-     
-    if (ic == nprd_dim) continue;
-    
     sqk = unitk[ic]*unitk[ic];
     if (sqk <= gsqmx) {
       cstr1 = 0.0;
@@ -775,7 +770,7 @@ void EwaldConp::coeffs()
 
   kcount = 0;
 
-  // (k,0,0), (0,l,0), (0,0,m)
+  // (k,0,0), (0,l,0), (0,0,m), however skip (0,0) in case os EW2D
   for (m = 1; m <= kmax; m++) {
     sqk = (m*unitk[0]) * (m*unitk[0]);
     if (sqk <= gsqmx && nprd_dim != 0) {
@@ -1552,7 +1547,7 @@ void EwaldConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 }
 
 /* ----------------------------------------------------------------------
-   computes infinite boundary term with EW2D (i.e. k = 0)
+   computes infinite boundary term with EW2D (i.e. k = 0).
 ------------------------------------------------------------------------- */
 
 void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
@@ -1562,156 +1557,270 @@ void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 }
 
 /* ----------------------------------------------------------------------
-   compute the Ewald long-range matrix for given list of tags
+   compute individual interactions between all pairs of atoms in group A 
+   and B. see lammps_gather_atoms_concat() on how all sn and cs have been 
+   obtained.
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
+void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B)
 { 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
- 
+
   int nlocal = atom->nlocal;
-  tagint *tag = atom->tag;
-  double **csx_local, **csy_local, **csz_local;
-  double **snx_local, **sny_local, **snz_local;
-  double **csx_glob, **csy_glob, **csz_glob;
-  double **snx_glob, **sny_glob, **snz_glob;
-  double **matrix_local;
-  int i,k,l,m,n,mabs,nabs,sign_m,sign_n;
-  bigint ii,j;
+  int *mask = atom->mask;
+
+  // gather ALL sn and cs on each proc
   
-  // gather only cs and sn of atoms in taglist
+  bigint natoms = atom->natoms;
+  double **csx,**csy,**csz,**snx,**sny,**snz;
+  double *csx_all,*csy_all,*csz_all;
+  double *snx_all,*sny_all,*snz_all;
   
-  memory->create(csx_local,kxmax+1,nmat,"ewald/conp:csx_local");
-  memory->create(csy_local,kymax+1,nmat,"ewald/conp:csy_local");
-  memory->create(csz_local,kzmax+1,nmat,"ewald/conp:csz_local");
-  memory->create(snx_local,kxmax+1,nmat,"ewald/conp:snx_local");
-  memory->create(sny_local,kymax+1,nmat,"ewald/conp:sny_local");
-  memory->create(snz_local,kzmax+1,nmat,"ewald/conp:snz_local");
+  memory->create(csx,nlocal,kxmax+1,"ewald/conp:csx");
+  memory->create(snx,nlocal,kxmax+1,"ewald/conp:snx");
+  memory->create(csy,nlocal,kymax+1,"ewald/conp:csy");
+  memory->create(sny,nlocal,kymax+1,"ewald/conp:sny");
+  memory->create(snz,nlocal,kzmax+1,"ewald/conp:snz");
+  memory->create(csz,nlocal,kzmax+1,"ewald/conp:csz");
   
-  size_t nbytes = sizeof(double) * nmat;
+  memory->create(csx_all,(kxmax+1)*natoms,"ewald/conp:csx_all");
+  memory->create(snx_all,(kxmax+1)*natoms,"ewald/conp:snx_all");
+  memory->create(csy_all,(kymax+1)*natoms,"ewald/conp:csy_all");
+  memory->create(sny_all,(kymax+1)*natoms,"ewald/conp:sny_all");
+  memory->create(csz_all,(kzmax+1)*natoms,"ewald/conp:csz_all");
+  memory->create(snz_all,(kzmax+1)*natoms,"ewald/conp:snz_all");
   
-  if (nbytes) {
-    for (k = 0; k < kcount; k++) {         
-      
-      // only positive m,n are required (see metalwalls)
-          
-      l = kxvecs[k];
-      m = abs(kyvecs[k]);
-      n = abs(kzvecs[k]);
-    
-      memset(&csx_local[l][0],0,nbytes);
-      memset(&snx_local[l][0],0,nbytes);
-      memset(&csy_local[m][0],0,nbytes);
-      memset(&sny_local[m][0],0,nbytes);
-      memset(&csz_local[n][0],0,nbytes);
-      memset(&snz_local[n][0],0,nbytes);
+  // copy sn and cn to new local arrays
+   
+  for (int i = 0; i < nlocal; i++) {
+    for (int k = 0; k <= kxmax; k++) {  
+      csx[i][k] = cs[k][0][i];
+      snx[i][k] = sn[k][0][i];
+    }
+    for (int k = 0; k <= kymax; k++) { 
+      csy[i][k] = cs[k][1][i];
+      sny[i][k] = sn[k][1][i];
+    }
+    for (int k = 0; k <= kzmax; k++) { 
+      csz[i][k] = cs[k][2][i];
+      snz[i][k] = sn[k][2][i];
     }
   }
-  
-  for (i = 0; i < nlocal; i++) {
-    for (j = 0; j < nmat; j++) {
-      if (tag[i] == mat2tag[j]) {
-        for (k = 0; k < kcount; k++) {  
-          l = kxvecs[k];
-          m = abs(kyvecs[k]);
-          n = abs(kzvecs[k]);
-          
-          csx_local[l][j] = cs[l][0][i];
-          snx_local[l][j] = sn[l][0][i];
-          csy_local[m][j] = cs[m][1][i];
-          sny_local[m][j] = sn[m][1][i];
-          csz_local[n][j] = cs[n][2][i];
-          snz_local[n][j] = sn[n][2][i];
-        }
-      }
-    }
-  }
-  
-  memory->create(csx_glob,kxmax+1,nmat,"ewald/conp:csx_glob");
-  memory->create(csy_glob,kymax+1,nmat,"ewald/conp:csy_glob");
-  memory->create(csz_glob,kzmax+1,nmat,"ewald/conp:csz_glob");
-  memory->create(snx_glob,kxmax+1,nmat,"ewald/conp:snx_glob");
-  memory->create(sny_glob,kymax+1,nmat,"ewald/conp:sny_glob");
-  memory->create(snz_glob,kzmax+1,nmat,"ewald/conp:snz_glob");
-  
-  MPI_Allreduce(&csx_local[0][0], &csx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(&csy_local[0][0], &csy_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(&csz_local[0][0], &csz_glob[0][0], (kzmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(&snx_local[0][0], &snx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(&sny_local[0][0], &sny_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(&snz_local[0][0], &snz_glob[0][0], (kzmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
-  
-  memory->destroy(csx_local);
-  memory->destroy(csy_local);
-  memory->destroy(csz_local);
-  memory->destroy(snx_local);
-  memory->destroy(sny_local);
-  memory->destroy(snz_local);
-  
-  memory->create(matrix_local,nmat,nmat,"ewald/conp:matrix_local");
 
-  double cos_kxky,sin_kxky,aij;
-  double cos_kxkykz_i,sin_kxkykz_i;
-  double cos_kxkykz_j,sin_kxkykz_j;
+  int nprocs = comm->nprocs;
   
-  for (k = 0; k < kcount; k++) {
-    for (i = 0; i < nlocal; i++) { 
-      for (ii = 0; ii < nmat; ii++) {
-        if (tag[i] == mat2tag[ii]) { 
-        
-          // take care of k-vector sign
-        
-          l = kxvecs[k];
-          m = kyvecs[k];
-          n = kzvecs[k];
-          
-          mabs = abs(m);
-          sign_m = (m > 0) - (m < 0);
-          
-          nabs = abs(n);
-          sign_n = (n > 0) - (n < 0);
-
-
-          cos_kxky = cs[l][0][i] * cs[mabs][1][i] - sn[l][0][i] * sn[mabs][1][i] * sign_m;
-          sin_kxky = sn[l][0][i] * cs[mabs][1][i] + cs[l][0][i] * sn[mabs][1][i] * sign_m;
-
-          cos_kxkykz_i = cos_kxky * cs[nabs][2][i] - sin_kxky * sn[nabs][2][i] * sign_n;
-          sin_kxkykz_i = sin_kxky * cs[nabs][2][i] + cos_kxky * sn[nabs][2][i] * sign_n;
-        
-          // matrix is symmetric, compute only lower triangular
-          
-          for (j = ii; j < nmat; j++) {
-          
-            cos_kxky = csx_glob[0][j] * csy_glob[0][j] - snx_glob[0][j] * sny_glob[0][j] * sign_m;
-            sin_kxky = snx_glob[0][j] * csy_glob[0][j] + csx_glob[0][j] * sny_glob[0][j] * sign_m;
-
-            cos_kxkykz_j = cos_kxky * csz_glob[0][j] - sin_kxky * snz_glob[0][j] * sign_n;
-            sin_kxkykz_j = sin_kxky * csz_glob[0][j] + cos_kxky * snz_glob[0][j] * sign_n;
-          
-            aij = 2.0*ug[k] * ( cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j );
-            
-            matrix[ii][j] += aij;
-            if (ii != j) 
-              matrix[j][ii] += aij;
-          }
-        }
-      }
-    }
-    if ((k+1) % 1000 == 0) printf("%d (%d/%d)\n",comm->me,k+1,kcount);
-  }  
+  int *recvcounts,*displs;
+  memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
+  memory->create(displs,nprocs,"ewald/conp:displs");
   
-  MPI_Allreduce(&matrix_local[0][0], &matrix[0][0], nmat*nmat, MPI_DOUBLE, MPI_SUM, world);
+  int n;
   
-  memory->destroy(matrix_local);
-  memory->destroy(csx_glob);
-  memory->destroy(csy_glob);
-  memory->destroy(csz_glob);
-  memory->destroy(snx_glob);
-  memory->destroy(sny_glob);
-  memory->destroy(snz_glob);
+  n = (kxmax+1)*nlocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(csx,n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(snx,n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+  n = (kymax+1)*nlocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(csy,n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(sny,n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+  n = (kzmax+1)*nlocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(csz,n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(snz,n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
+
+  int kx,ky,kz;
+  
+  
+  
+  memory->destroy(displs);
+  memory->destroy(recvcounts);
+  memory->destroy(csx_all);
+  memory->destroy(snx_all);
+  memory->destroy(csy_all);
+  memory->destroy(sny_all);
+  memory->destroy(csz_all);
+  memory->destroy(snz_all);
+  memory->destroy(csx);
+  memory->destroy(snx);
+  memory->destroy(csy);
+  memory->destroy(sny);
+  memory->destroy(csz);
+  memory->destroy(snz);
 }
+
+///* ----------------------------------------------------------------------
+//   compute the Ewald long-range matrix for given list of tags
+// ------------------------------------------------------------------------- */
+
+//void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
+//{ 
+//  if (slabflag && triclinic)
+//    error->all(FLERR,"Cannot (yet) use K-space slab "
+//               "correction with compute group/group for triclinic systems");
+// 
+//  int nlocal = atom->nlocal;
+//  tagint *tag = atom->tag;
+//  double **csx_local, **csy_local, **csz_local;
+//  double **snx_local, **sny_local, **snz_local;
+//  double **csx_glob, **csy_glob, **csz_glob;
+//  double **snx_glob, **sny_glob, **snz_glob;
+//  double **matrix_local;
+//  int i,k,l,m,n,mabs,nabs,sign_m,sign_n;
+//  bigint ii,j;
+//  
+//  // gather only cs and sn of atoms in taglist
+//  
+//  memory->create(csx_local,kxmax+1,nmat,"ewald/conp:csx_local");
+//  memory->create(csy_local,kymax+1,nmat,"ewald/conp:csy_local");
+//  memory->create(csz_local,kzmax+1,nmat,"ewald/conp:csz_local");
+//  memory->create(snx_local,kxmax+1,nmat,"ewald/conp:snx_local");
+//  memory->create(sny_local,kymax+1,nmat,"ewald/conp:sny_local");
+//  memory->create(snz_local,kzmax+1,nmat,"ewald/conp:snz_local");
+//  
+//  // set all local arrays to zero
+//  
+//  size_t nbytes = sizeof(double) * nmat;
+//  
+//  if (nbytes) {
+//    for (k = 0; k < kcount; k++) {         
+//      
+//      // only positive m,n are required (see metalwalls)
+//          
+//      l = kxvecs[k];
+//      m = abs(kyvecs[k]);
+//      n = abs(kzvecs[k]);
+//    
+//      memset(&csx_local[l][0],0,nbytes);
+//      memset(&snx_local[l][0],0,nbytes);
+//      memset(&csy_local[m][0],0,nbytes);
+//      memset(&sny_local[m][0],0,nbytes);
+//      memset(&csz_local[n][0],0,nbytes);
+//      memset(&snz_local[n][0],0,nbytes);
+//    }
+//  }
+//  
+//  // copy local sn and cn to taglist atoms
+//  
+//  for (i = 0; i < nlocal; i++) {
+//    for (j = 0; j < nmat; j++) {
+//      if (tag[i] == mat2tag[j]) {
+//        for (k = 0; k < kcount; k++) {  
+//          l = kxvecs[k];
+//          m = abs(kyvecs[k]);
+//          n = abs(kzvecs[k]);
+//          
+//          csx_local[l][j] = cs[l][0][i];
+//          snx_local[l][j] = sn[l][0][i];
+//          csy_local[m][j] = cs[m][1][i];
+//          sny_local[m][j] = sn[m][1][i];
+//          csz_local[n][j] = cs[n][2][i];
+//          snz_local[n][j] = sn[n][2][i];
+//        }
+//      }
+//    }
+//  }
+//  
+//  memory->create(csx_glob,kxmax+1,nmat,"ewald/conp:csx_glob");
+//  memory->create(csy_glob,kymax+1,nmat,"ewald/conp:csy_glob");
+//  memory->create(csz_glob,kzmax+1,nmat,"ewald/conp:csz_glob");
+//  memory->create(snx_glob,kxmax+1,nmat,"ewald/conp:snx_glob");
+//  memory->create(sny_glob,kymax+1,nmat,"ewald/conp:sny_glob");
+//  memory->create(snz_glob,kzmax+1,nmat,"ewald/conp:snz_glob");
+//  
+//  MPI_Allreduce(&csx_local[0][0], &csx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  MPI_Allreduce(&csy_local[0][0], &csy_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  MPI_Allreduce(&csz_local[0][0], &csz_glob[0][0], (kzmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  MPI_Allreduce(&snx_local[0][0], &snx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  MPI_Allreduce(&sny_local[0][0], &sny_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  MPI_Allreduce(&snz_local[0][0], &snz_glob[0][0], (kzmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  
+//  memory->destroy(csx_local);
+//  memory->destroy(csy_local);
+//  memory->destroy(csz_local);
+//  memory->destroy(snx_local);
+//  memory->destroy(sny_local);
+//  memory->destroy(snz_local);
+//  
+//  memory->create(matrix_local,nmat,nmat,"ewald/conp:matrix_local");
+//   
+//  double cos_kxky,sin_kxky,aij;
+//  double cos_kxkykz_i,sin_kxkykz_i;
+//  double cos_kxkykz_j,sin_kxkykz_j;
+//  for (k = 0; k < kcount; k++) {
+//    for (i = 0; i < nlocal; i++) { 
+//      for (ii = 0; ii < nmat; ii++) {
+//        if (tag[i] == mat2tag[ii]) { 
+//        
+//          // take care of k-vector sign
+//        
+//          l = kxvecs[k];
+//          m = kyvecs[k];
+//          n = kzvecs[k];
+//          
+//          mabs = abs(m);
+//          sign_m = (m > 0) - (m < 0);
+//          
+//          nabs = abs(n);
+//          sign_n = (n > 0) - (n < 0);
+
+
+//          cos_kxky = cs[l][0][i] * cs[mabs][1][i] - sn[l][0][i] * sn[mabs][1][i] * sign_m;
+//          sin_kxky = sn[l][0][i] * cs[mabs][1][i] + cs[l][0][i] * sn[mabs][1][i] * sign_m;
+
+//          cos_kxkykz_i = cos_kxky * cs[nabs][2][i] - sin_kxky * sn[nabs][2][i] * sign_n;
+//          sin_kxkykz_i = sin_kxky * cs[nabs][2][i] + cos_kxky * sn[nabs][2][i] * sign_n;
+//        
+//          // matrix is symmetric, compute only lower triangular
+//          
+//          for (j = ii; j < nmat; j++) {
+//          
+//            cos_kxky = csx_glob[0][j] * csy_glob[0][j] - snx_glob[0][j] * sny_glob[0][j] * sign_m;
+//            sin_kxky = snx_glob[0][j] * csy_glob[0][j] + csx_glob[0][j] * sny_glob[0][j] * sign_m;
+
+//            cos_kxkykz_j = cos_kxky * csz_glob[0][j] - sin_kxky * snz_glob[0][j] * sign_n;
+//            sin_kxkykz_j = sin_kxky * csz_glob[0][j] + cos_kxky * snz_glob[0][j] * sign_n;
+//          
+//            printf("%d on %d: %f %f %f %f\n", tag[i],comm->me,
+//                                            cos_kxkykz_i,
+//                                            sin_kxkykz_i,
+//                                            cos_kxkykz_j,
+//                                            sin_kxkykz_j,);
+//          
+//            aij = 2.0*ug[k] * ( cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j );
+//            
+//            matrix[ii][j] += aij;
+//            if (ii != j) 
+//              matrix[j][ii] += aij;
+//          }
+//        }
+//      }
+//    }
+//    if ((k+1) % 1000 == 0) printf("%d (%d/%d)\n",comm->me,k+1,kcount);
+//  }  
+//  
+//  MPI_Allreduce(&matrix_local[0][0], &matrix[0][0], nmat*nmat, MPI_DOUBLE, MPI_SUM, world);
+//  
+//  memory->destroy(matrix_local);
+//  memory->destroy(csx_glob);
+//  memory->destroy(csy_glob);
+//  memory->destroy(csz_glob);
+//  memory->destroy(snx_glob);
+//  memory->destroy(sny_glob);
+//  memory->destroy(snz_glob);
+//}
 
 /* ----------------------------------------------------------------------
    allocate group-group memory that depends on # of K-vectors

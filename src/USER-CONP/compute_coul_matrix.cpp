@@ -86,7 +86,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR,"Compute coul/matrix group ID does not exist"); 
   jgroupbit = group->bitmask[jgroup];
   
-  // should matrix be recalculated? TODO recalculate coulomb matrix
+  // TODO recalculate coulomb matrix every recalc_every
   
   recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
   eta = utils::numeric(FLERR,arg[5],false,lmp); // TODO infer from pair_style!
@@ -170,7 +170,8 @@ void ComputeCoulMatrix::init()
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
   
-  // TODO basically, we need just the cutsq from pair_style ...
+  // TODO just check if a coul pair_style is chosen, we need just the cutsq
+  // from pair_style and not pair->single as we do it here explicitly 
   
   if (pairflag && force->pair == nullptr) 
     error->all(FLERR,"No pair style defined for compute coul/matrix");
@@ -210,6 +211,13 @@ void ComputeCoulMatrix::init()
     neighbor->requests[irequest]->compute = 1;
     neighbor->requests[irequest]->occasional = 1;
   }  
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::setup()
+{
+  double **matrix;
   
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
@@ -226,13 +234,6 @@ void ComputeCoulMatrix::init()
   // this wo work I think the atom ids must be from 1,...,N and consecutive
   
   memory->create(gradQ_V,natoms,natoms,"coul/matrix:gradQ_V");
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::setup()
-{
-  double **matrix;
   
   // setting all entries of coulomb matrix to zero
   
@@ -253,10 +254,7 @@ void ComputeCoulMatrix::setup()
   
   MPI_Allreduce(&gradQ_V[0][0], &matrix[0][0], natoms*natoms, MPI_DOUBLE, MPI_SUM, world);
     
-  if (fp && comm->me == 0) {
-    fprintf(screen,"Writing coulomb matrix ...\n");
-    write_matrix(matrix);
-  }
+  if (fp && comm->me == 0) write_matrix(matrix);
   
   memory->destroy(matrix);
 }
@@ -282,7 +280,6 @@ void ComputeCoulMatrix::compute_array()
 
 void ComputeCoulMatrix::pair_contribution()
 { 
-  if (comm->me == 0) printf("  pair contributions ...\n");
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
   double r,rinv,rsq,grij,etarij,expm2,t,erfc,aij;
@@ -383,7 +380,6 @@ void ComputeCoulMatrix::pair_contribution()
 
 void ComputeCoulMatrix::self_contribution()
 { 
-  if (comm->me == 0) printf("  self contributions ...\n");
   const double selfint = -2.0/MY_PIS*g_ewald;
   const double preta = MY_SQRT2/MY_PIS;
   for (bigint i = 0; i < natoms; i++)
@@ -395,15 +391,14 @@ void ComputeCoulMatrix::self_contribution()
 
 void ComputeCoulMatrix::kspace_contribution()
 { 
-  if (comm->me == 0) printf("  k-space contributions ...\n");
-  kspace->compute_matrix(natoms,mat2tag,gradQ_V);
+  //kspace->compute_matrix(natoms,mat2tag,gradQ_V);
+  kspace->compute_matrix(groupbit, jgroupbit);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::kspace_correction()
 {
-  if (comm->me == 0) printf("  boundary contributions ...\n");
 
 }
 
