@@ -43,7 +43,7 @@ EwaldConp::EwaldConp(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
+  sfacim_B_all(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -56,7 +56,6 @@ EwaldConp::EwaldConp(LAMMPS *lmp) : KSpace(lmp),
   kxvecs = kyvecs = kzvecs = nullptr;
   
   nprd_dim = -1;
-  nprd_all = q_all = nullptr;
   
   ug = nullptr;
   eg = vg = nullptr;
@@ -87,10 +86,6 @@ EwaldConp::~EwaldConp()
   memory->destroy(ek);
   memory->destroy3d_offset(cs,-kmax_created);
   memory->destroy3d_offset(sn,-kmax_created);
-  if (slabflag == 1 && slab_volfactor == 1.0) {
-    memory->destroy(nprd_all);
-    memory->destroy(q_all);
-  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -330,17 +325,10 @@ void EwaldConp::setup()
     memory->destroy3d_offset(cs,-kmax_created);
     memory->destroy3d_offset(sn,-kmax_created);
     nmax = atom->nmax;
-    memory->create(ek,nmax,3,"ewald:ek");
-    memory->create3d_offset(cs,-kmax,kmax,3,nmax,"ewald:cs");
-    memory->create3d_offset(sn,-kmax,kmax,3,nmax,"ewald:sn");
+    memory->create(ek,nmax,3,"ewald/conp:ek");
+    memory->create3d_offset(cs,-kmax,kmax,3,nmax,"ewald/conp:cs");
+    memory->create3d_offset(sn,-kmax,kmax,3,nmax,"ewald/conp:sn");
     kmax_created = kmax;
-  }
-  
-  if (slabflag == 1 && slab_volfactor == 1.0) {
-    bigint natoms = atom->natoms; 
-    memory->create(nprd_all,natoms,"ewald:nprd_all");
-    memory->create(q_all,natoms,"ewald:nprd_all");
-    fetch_all();
   }
 
   // pre-compute Ewald coefficients
@@ -381,15 +369,7 @@ void EwaldConp::compute(int eflag, int vflag)
   // and fetch new z positions if necessary
 
   if (atom->natoms != natoms_original) {
-    qsum_qsq();
-    if (slabflag == 1 && slab_volfactor == 1.0) {
-      memory->destroy(nprd_all);
-      memory->destroy(q_all);
-      bigint natoms = atom->natoms; 
-      memory->create(nprd_all,natoms,"ewald:nprd_all");
-      memory->create(q_all,natoms,"ewald:nprd_all");
-      fetch_all(); 
-    }  
+    qsum_qsq(); 
     natoms_original = atom->natoms;
   }
 
@@ -404,9 +384,9 @@ void EwaldConp::compute(int eflag, int vflag)
     memory->destroy3d_offset(cs,-kmax_created);
     memory->destroy3d_offset(sn,-kmax_created);
     nmax = atom->nmax;
-    memory->create(ek,nmax,3,"ewald:ek");
-    memory->create3d_offset(cs,-kmax,kmax,3,nmax,"ewald:cs");
-    memory->create3d_offset(sn,-kmax,kmax,3,nmax,"ewald:sn");
+    memory->create(ek,nmax,3,"ewald/conp:ek");
+    memory->create3d_offset(cs,-kmax,kmax,3,nmax,"ewald/conp:cs");
+    memory->create3d_offset(sn,-kmax,kmax,3,nmax,"ewald/conp:sn");
     kmax_created = kmax;
   }
 
@@ -516,7 +496,7 @@ void EwaldConp::compute(int eflag, int vflag)
   // 2d slab correction
 
   if (slabflag == 1 && slab_volfactor > 1.0) slabcorr();
-  else if (slabflag == 1 && slab_volfactor == 1.0) ew2d();
+  else if (slabflag == 1 && slab_volfactor == 1.0) ew2dcorr();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1154,52 +1134,6 @@ void EwaldConp::coeffs_triclinic()
 }
 
 /* ----------------------------------------------------------------------
-   Get q and x,y or z positions of all atoms and store in arrays, x,y or 
-   z is determined by non-periodic dimension.
-   TODO it would be super useful if there would a more general function 
-     which fetches any global atom property list (int or double) and 
-     stores them in an array. something like 
-       fetch_global_iprop(int &prop) or
-       fetch_global_dprop(double &prop)
-------------------------------------------------------------------------- */
-
-void EwaldConp::fetch_all()
-{
-  int nprocs = comm->nprocs;
-  int nlocal = atom->nlocal;
-  double *q = atom->q; 
-  double **x = atom->x;
-  double *nprd_locals, *q_locals;
-  int *nlocal_list,*displs;
-  
-  memory->create(nlocal_list,nprocs,"ewald:nlocal_list");
-  memory->create(displs,nprocs,"ewald:displs");
-  
-  MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
- 
-  displs[0] = 0;
-  for (int i = 1; i < nprocs; ++i)
-    displs[i] = displs[i-1] + nlocal_list[i-1];
-  
-  // gather q and z positions
-  
-  memory->create(nprd_locals,nlocal,"ewald:nprd_locals");
-  memory->create(q_locals,nlocal,"ewald:q_locals");
-  for (int i = 0; i < nlocal; i++) {
-    q_locals[i] = q[i];
-    nprd_locals[i] = x[i][nprd_dim];
-  }
-  
-  MPI_Allgatherv(nprd_locals,nlocal,MPI_DOUBLE,nprd_all,nlocal_list,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(q_locals,nlocal,MPI_DOUBLE,q_all,nlocal_list,displs,MPI_DOUBLE,world);
-  
-  memory->destroy(nprd_locals);
-  memory->destroy(q_locals);
-  memory->destroy(nlocal_list);
-  memory->destroy(displs);
-}
-
-/* ----------------------------------------------------------------------
    allocate memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
@@ -1210,8 +1144,8 @@ void EwaldConp::allocate()
   kzvecs = new int[kmax3d];
 
   ug = new double[kmax3d];
-  memory->create(eg,kmax3d,3,"ewald:eg");
-  memory->create(vg,kmax3d,6,"ewald:vg");
+  memory->create(eg,kmax3d,3,"ewald/conp:eg");
+  memory->create(vg,kmax3d,6,"ewald/conp:vg");
 
   sfacrl = new double[kmax3d];
   sfacim = new double[kmax3d];
@@ -1311,13 +1245,18 @@ void EwaldConp::slabcorr()
    with MPI_allreduce like it is partly done in group/group.
 ------------------------------------------------------------------------- */
 
-void EwaldConp::ew2d()
+void EwaldConp::ew2dcorr()
 {
   double *q = atom->q;
   double **x = atom->x;
   double **f = atom->f;
   tagint *tag = atom->tag;
-  int nlocal = atom->nlocal;
+  int nlocal = atom->nlocal;  
+  bigint natoms = atom->natoms;
+  int nprocs = comm->nprocs;
+
+  int *recvcounts,*displs;
+  double *nprd, *nprd_all, *q_all;  
     
   const double g_ewald_inv = 1.0 / g_ewald;
   const double g_ewald_sq = g_ewald*g_ewald;
@@ -1326,6 +1265,30 @@ void EwaldConp::ew2d()
   const double efact = 2.0 * MY_PIS/area;
   const double ffact = qscale * MY_2PI/area;
   
+  // gather q and non-periodic positions on all procs
+  
+  memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
+  memory->create(displs,nprocs,"ewald/conp:displs");
+  memory->create(nprd,nprocs,"ewald/conp:nprd");
+  
+  MPI_Allgather(&nlocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
+ 
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++) {
+    displs[i] = displs[i-1] + recvcounts[i-1];
+    nprd[i] = x[i][nprd_dim];
+  }
+  
+  memory->create(nprd_all,natoms,"ewald/conp:nprd_all");
+  memory->create(q_all,natoms,"ewald/conp:q_all");
+
+  MPI_Allgatherv(q,nlocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(nprd,nlocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+  memory->destroy(nprd);
+  memory->destroy(recvcounts);
+  memory->destroy(displs);
+  
   // loop over ALL atom interactions
    
   int i,j;
@@ -1333,7 +1296,7 @@ void EwaldConp::ew2d()
   double e_keq0 = 0.0;
   for (i = 0; i < nlocal; i++) {
     pot_ij = 0.0;
-    for (j = 0; j < natoms_original; j++) {
+    for (j = 0; j < atom->natoms; j++) {
       
       dij = nprd_all[j] - x[i][nprd_dim];
       
@@ -1355,6 +1318,9 @@ void EwaldConp::ew2d()
     e_keq0 += q[i] * pot_ij;
     
   }
+  
+  memory->destroy(nprd_all);
+  memory->destroy(q_all);
   
   // sum local contributions; see eq. (20) in metalwalls ewald doc
   
@@ -1506,7 +1472,7 @@ void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
   if (slabflag == 1 && slab_volfactor > 1.0) 
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
   else if (slabflag == 1 && slab_volfactor == 1.0)
-    ew2d_groups(groupbit_A, groupbit_B, AA_flag);
+    ew2dcorr_groups(groupbit_A, groupbit_B, AA_flag);
 }
 
 /* ----------------------------------------------------------------------
@@ -1591,7 +1557,7 @@ void EwaldConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
    computes infinite boundary term with EW2D (i.e. k = 0)
 ------------------------------------------------------------------------- */
 
-void EwaldConp::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
+void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 {
   if (slabflag == 1 && slab_volfactor == 1.0) 
     error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
@@ -1619,12 +1585,12 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
   
   // gather only cs and sn of atoms in taglist
   
-  memory->create(csx_local,kxmax+1,nmat,"ewald:csx_local");
-  memory->create(csy_local,kymax+1,nmat,"ewald:csy_local");
-  memory->create(csz_local,kzmax+1,nmat,"ewald:csz_local");
-  memory->create(snx_local,kxmax+1,nmat,"ewald:snx_local");
-  memory->create(sny_local,kymax+1,nmat,"ewald:sny_local");
-  memory->create(snz_local,kzmax+1,nmat,"ewald:snz_local");
+  memory->create(csx_local,kxmax+1,nmat,"ewald/conp:csx_local");
+  memory->create(csy_local,kymax+1,nmat,"ewald/conp:csy_local");
+  memory->create(csz_local,kzmax+1,nmat,"ewald/conp:csz_local");
+  memory->create(snx_local,kxmax+1,nmat,"ewald/conp:snx_local");
+  memory->create(sny_local,kymax+1,nmat,"ewald/conp:sny_local");
+  memory->create(snz_local,kzmax+1,nmat,"ewald/conp:snz_local");
   
   size_t nbytes = sizeof(double) * nmat;
   
@@ -1665,12 +1631,12 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
     }
   }
   
-  memory->create(csx_glob,kxmax+1,nmat,"ewald:csx_glob");
-  memory->create(csy_glob,kymax+1,nmat,"ewald:csy_glob");
-  memory->create(csz_glob,kzmax+1,nmat,"ewald:csz_glob");
-  memory->create(snx_glob,kxmax+1,nmat,"ewald:snx_glob");
-  memory->create(sny_glob,kymax+1,nmat,"ewald:sny_glob");
-  memory->create(snz_glob,kzmax+1,nmat,"ewald:snz_glob");
+  memory->create(csx_glob,kxmax+1,nmat,"ewald/conp:csx_glob");
+  memory->create(csy_glob,kymax+1,nmat,"ewald/conp:csy_glob");
+  memory->create(csz_glob,kzmax+1,nmat,"ewald/conp:csz_glob");
+  memory->create(snx_glob,kxmax+1,nmat,"ewald/conp:snx_glob");
+  memory->create(sny_glob,kymax+1,nmat,"ewald/conp:sny_glob");
+  memory->create(snz_glob,kzmax+1,nmat,"ewald/conp:snz_glob");
   
   MPI_Allreduce(&csx_local[0][0], &csx_glob[0][0], (kxmax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
   MPI_Allreduce(&csy_local[0][0], &csy_glob[0][0], (kymax+1)*nmat, MPI_DOUBLE, MPI_SUM, world);
@@ -1686,7 +1652,7 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
   memory->destroy(sny_local);
   memory->destroy(snz_local);
   
-  memory->create(matrix_local,nmat,nmat,"ewald:matrix_local");
+  memory->create(matrix_local,nmat,nmat,"ewald/conp:matrix_local");
 
   double cos_kxky,sin_kxky,aij;
   double cos_kxkykz_i,sin_kxkykz_i;
@@ -1729,13 +1695,13 @@ void EwaldConp::compute_matrix(bigint nmat, tagint *mat2tag, double **matrix)
             aij = 2.0*ug[k] * ( cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j );
             
             matrix[ii][j] += aij;
-            if (tag[i] != mat2tag[j]) 
+            if (ii != j) 
               matrix[j][ii] += aij;
           }
         }
       }
     }
-    if ((k+1) % 1000 == 0) printf("(%d,%d) on %d\n", k+1,kcount,comm->me);
+    if ((k+1) % 1000 == 0) printf("%d (%d/%d)\n",comm->me,k+1,kcount);
   }  
   
   MPI_Allreduce(&matrix_local[0][0], &matrix[0][0], nmat*nmat, MPI_DOUBLE, MPI_SUM, world);
