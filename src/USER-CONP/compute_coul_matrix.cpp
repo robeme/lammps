@@ -281,7 +281,8 @@ void ComputeCoulMatrix::compute_array()
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::pair_contribution()
-{
+{ 
+  if (comm->me == 0) printf("  pair contributions ...\n");
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
   double r,rinv,rsq,grij,etarij,expm2,t,erfc,aij;
@@ -382,16 +383,19 @@ void ComputeCoulMatrix::pair_contribution()
 
 void ComputeCoulMatrix::self_contribution()
 { 
+  if (comm->me == 0) printf("  self contributions ...\n");
   const double selfint = -2.0/MY_PIS*g_ewald;
-  const double prefac = MY_SQRT2/MY_PIS;
+  const double preta = MY_SQRT2/MY_PIS;
   for (bigint i = 0; i < natoms; i++)
-    gradQ_V[i][i] += selfint + prefac*eta;
+    // TODO infer eta from pair_coeffs
+    gradQ_V[i][i] += selfint + preta*eta;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::kspace_contribution()
 { 
+  if (comm->me == 0) printf("  k-space contributions ...\n");
   kspace->compute_matrix(natoms,mat2tag,gradQ_V);
 }
 
@@ -399,6 +403,7 @@ void ComputeCoulMatrix::kspace_contribution()
 
 void ComputeCoulMatrix::kspace_correction()
 {
+  if (comm->me == 0) printf("  boundary contributions ...\n");
 
 }
 

@@ -50,7 +50,6 @@ class EwaldConp : public KSpace {
   int *kxvecs,*kyvecs,*kzvecs;
   int kxmax_orig,kymax_orig,kzmax_orig;
   int nprd_dim;
-  double *nprd_all, *q_all;
   double *ug;
   double **eg,**vg;
   double **ek;
@@ -69,8 +68,7 @@ class EwaldConp : public KSpace {
   virtual void allocate();
   void deallocate();
   void slabcorr();
-  void ew2d();
-  void fetch_all();
+  void ew2dcorr();
 
   // triclinic
 
@@ -81,7 +79,7 @@ class EwaldConp : public KSpace {
   // group-group interactions
 
   void slabcorr_groups(int,int,int);
-  void ew2d_groups(int,int,int);
+  void ew2dcorr_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
   
