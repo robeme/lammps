@@ -1241,8 +1241,6 @@ void EwaldConp::slabcorr()
 /* ----------------------------------------------------------------------
    Slab-geometry correction term (k=0) of EW2D. See Hu, JCTC 10:12 (2014)
    pp. 5254-5264 or metalwalls ewald and parallelization documentation.
-   TODO probably this could be also achieved without a global list and 
-   with MPI_allreduce like it is partly done in group/group.
 ------------------------------------------------------------------------- */
 
 void EwaldConp::ew2dcorr()
@@ -1317,8 +1315,6 @@ void EwaldConp::ew2dcorr()
     if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
     
     e_keq0 += q[i] * pot_ij;
-    
-    printf(" ekeq0 on %d: %f\n",comm->me,e_keq0);
   }
   
   memory->destroy(nprd_all);
