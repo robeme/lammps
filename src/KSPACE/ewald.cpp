@@ -43,7 +43,7 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   ek(nullptr), sfacrl(nullptr), sfacim(nullptr), sfacrl_all(nullptr), sfacim_all(nullptr),
   cs(nullptr), sn(nullptr), sfacrl_A(nullptr), sfacim_A(nullptr), sfacrl_A_all(nullptr),
   sfacim_A_all(nullptr), sfacrl_B(nullptr), sfacim_B(nullptr), sfacrl_B_all(nullptr),
-  sfacim_B_all(nullptr), nprd_all(nullptr), q_all(nullptr)
+  sfacim_B_all(nullptr)
 {
   group_allocate_flag = 0;
   kmax_created = 0;
@@ -54,10 +54,6 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
 
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
-  
-  nprd_dim = -1;
-  nprd_all = q_all = nullptr;
-  
   ug = nullptr;
   eg = vg = nullptr;
   sfacrl = sfacim = sfacrl_all = sfacim_all = nullptr;
@@ -87,10 +83,6 @@ Ewald::~Ewald()
   memory->destroy(ek);
   memory->destroy3d_offset(cs,-kmax_created);
   memory->destroy3d_offset(sn,-kmax_created);
-  if (slabflag == 1 && slab_volfactor == 1.0) {
-    memory->destroy(nprd_all);
-    memory->destroy(q_all);
-  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -100,6 +92,7 @@ void Ewald::init()
   if (comm->me == 0) utils::logmesg(lmp,"Ewald initialization ...\n");
 
   // error check
+
   triclinic_check();
   if (domain->dimension == 2)
     error->all(FLERR,"Cannot use Ewald with 2d simulation");
@@ -109,18 +102,12 @@ void Ewald::init()
   if (slabflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with Ewald");
   if (slabflag) {
-    if (slab_volfactor == 1.0) {
-      int ndim = 0;
-      if (domain->xperiodic != 1) { nprd_dim = 0; ndim++; }
-      if (domain->yperiodic != 1) { nprd_dim = 1; ndim++; }
-      if (domain->zperiodic != 1) { nprd_dim = 2; ndim++; }
-      if (ndim>1) error->all(FLERR,"Cannot use < 2 periodic boundaries with EW2D");
-    } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
+    if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR,"Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
       error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
-                 "and slab correction nor with EW2D");
+                 "and slab correction");
   }
 
   // compute two charge force
@@ -226,9 +213,6 @@ void Ewald::setup()
 
   double zprd_slab = zprd*slab_volfactor;
   volume = xprd * yprd * zprd_slab;
-  if (nprd_dim == 0) area = yprd * zprd;
-  if (nprd_dim == 1) area = xprd * zprd;
-  if (nprd_dim == 2) area = xprd * yprd;
 
   unitk[0] = 2.0*MY_PI/xprd;
   unitk[1] = 2.0*MY_PI/yprd;
@@ -335,13 +319,6 @@ void Ewald::setup()
     memory->create3d_offset(sn,-kmax,kmax,3,nmax,"ewald:sn");
     kmax_created = kmax;
   }
-  
-  if (slabflag == 1 && slab_volfactor == 1.0) {
-    bigint natoms = atom->natoms; 
-    memory->create(nprd_all,natoms,"ewald:nprd_all");
-    memory->create(q_all,natoms,"ewald:nprd_all");
-    fetch_all();
-  }
 
   // pre-compute Ewald coefficients
 
@@ -377,19 +354,10 @@ void Ewald::compute(int eflag, int vflag)
 
   ev_init(eflag,vflag);
 
-  // if atom count has changed, update qsum and qsqsum 
-  // and fetch new z positions if necessary
+  // if atom count has changed, update qsum and qsqsum
 
   if (atom->natoms != natoms_original) {
     qsum_qsq();
-    if (slabflag == 1 && slab_volfactor == 1.0) {
-      memory->destroy(nprd_all);
-      memory->destroy(q_all);
-      bigint natoms = atom->natoms; 
-      memory->create(nprd_all,natoms,"ewald:nprd_all");
-      memory->create(q_all,natoms,"ewald:nprd_all");
-      fetch_all(); 
-    }  
     natoms_original = atom->natoms;
   }
 
@@ -515,8 +483,7 @@ void Ewald::compute(int eflag, int vflag)
 
   // 2d slab correction
 
-  if (slabflag == 1 && slab_volfactor > 1.0) slabcorr();
-  else if (slabflag == 1 && slab_volfactor == 1.0) ew2d();
+  if (slabflag == 1) slabcorr();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -536,11 +503,6 @@ void Ewald::eik_dot_r()
   // (k,0,0), (0,l,0), (0,0,m)
 
   for (ic = 0; ic < 3; ic++) {
-    
-    // skip h=(0,0) in case of EW2D 
-     
-    if (ic == nprd_dim) continue;
-    
     sqk = unitk[ic]*unitk[ic];
     if (sqk <= gsqmx) {
       cstr1 = 0.0;
@@ -796,9 +758,10 @@ void Ewald::coeffs()
   kcount = 0;
 
   // (k,0,0), (0,l,0), (0,0,m)
+
   for (m = 1; m <= kmax; m++) {
     sqk = (m*unitk[0]) * (m*unitk[0]);
-    if (sqk <= gsqmx && nprd_dim != 0) {
+    if (sqk <= gsqmx) {
       kxvecs[kcount] = m;
       kyvecs[kcount] = 0;
       kzvecs[kcount] = 0;
@@ -816,7 +779,7 @@ void Ewald::coeffs()
       kcount++;
     }
     sqk = (m*unitk[1]) * (m*unitk[1]);
-    if (sqk <= gsqmx && nprd_dim != 1) {
+    if (sqk <= gsqmx) {
       kxvecs[kcount] = 0;
       kyvecs[kcount] = m;
       kzvecs[kcount] = 0;
@@ -834,7 +797,7 @@ void Ewald::coeffs()
       kcount++;
     }
     sqk = (m*unitk[2]) * (m*unitk[2]);
-    if (sqk <= gsqmx && nprd_dim != 2) {
+    if (sqk <= gsqmx) {
       kxvecs[kcount] = 0;
       kyvecs[kcount] = 0;
       kzvecs[kcount] = m;
@@ -1154,52 +1117,6 @@ void Ewald::coeffs_triclinic()
 }
 
 /* ----------------------------------------------------------------------
-   Get q and x,y or z positions of all atoms and store in arrays, x,y or 
-   z is determined by non-periodic dimension.
-   TODO it would be super useful if there would a more general function 
-     which fetches any global atom property list (int or double) and 
-     stores them in an array. something like 
-       fetch_global_iprop(int &prop) or
-       fetch_global_dprop(double &prop)
-------------------------------------------------------------------------- */
-
-void Ewald::fetch_all()
-{
-  int nprocs = comm->nprocs;
-  int nlocal = atom->nlocal;
-  double *q = atom->q; 
-  double **x = atom->x;
-  double *nprd_locals, *q_locals;
-  int *nlocal_list,*displs;
-  
-  memory->create(nlocal_list,nprocs,"ewald:nlocal_list");
-  memory->create(displs,nprocs,"ewald:displs");
-  
-  MPI_Allgather(&nlocal,1,MPI_INT,nlocal_list,1,MPI_INT,world);
- 
-  displs[0] = 0;
-  for (int i = 1; i < nprocs; ++i)
-    displs[i] = displs[i-1] + nlocal_list[i-1];
-  
-  // gather q and z positions
-  
-  memory->create(nprd_locals,nlocal,"ewald:nprd_locals");
-  memory->create(q_locals,nlocal,"ewald:q_locals");
-  for (int i = 0; i < nlocal; i++) {
-    q_locals[i] = q[i];
-    nprd_locals[i] = x[i][nprd_dim];
-  }
-  
-  MPI_Allgatherv(nprd_locals,nlocal,MPI_DOUBLE,nprd_all,nlocal_list,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(q_locals,nlocal,MPI_DOUBLE,q_all,nlocal_list,displs,MPI_DOUBLE,world);
-  
-  memory->destroy(nprd_locals);
-  memory->destroy(q_locals);
-  memory->destroy(nlocal_list);
-  memory->destroy(displs);
-}
-
-/* ----------------------------------------------------------------------
    allocate memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
@@ -1305,65 +1222,6 @@ void Ewald::slabcorr()
 }
 
 /* ----------------------------------------------------------------------
-   Slab-geometry correction term (k=0) of EW2D. See Hu, JCTC 10:12 (2014)
-   pp. 5254-5264 or metalwalls ewald and parallelization documentation.
-   TODO probably this could be also achieved without a global list and 
-   with MPI_allreduce like it is partly done in group/group.
-------------------------------------------------------------------------- */
-
-void Ewald::ew2d()
-{
-  double *q = atom->q;
-  double **x = atom->x;
-  double **f = atom->f;
-  tagint *tag = atom->tag;
-  int nlocal = atom->nlocal;
-    
-  const double g_ewald_inv = 1.0 / g_ewald;
-  const double g_ewald_sq = g_ewald*g_ewald;
-  
-  const double qscale = qqrd2e * scale;
-  const double efact = 2.0 * MY_PIS/area;
-  const double ffact = qscale * MY_2PI/area;
-  
-  // loop over ALL atom interactions
-   
-  int i,j;
-  double pot_ij, aij, dij, e_keq0_all;
-  double e_keq0 = 0.0;
-  for (i = 0; i < nlocal; i++) {
-    pot_ij = 0.0;
-    for (j = 0; j < natoms_original; j++) {
-      
-      dij = nprd_all[j] - x[i][nprd_dim];
-      
-      // resembles (aij) matrix component in constant potential
-      aij = efact * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
-                         MY_PIS * dij * erf( dij * g_ewald ) );
-      // coulomb potential; see eq. (4) in metalwalls parallelization doc
-      pot_ij += q_all[j] * aij;
-      
-      // add on force corrections
-      
-      f[i][nprd_dim] -= ffact * q[i]*q_all[j] * erf( g_ewald*dij );
-    }
-    
-    // per-atom energy; see eq. (20) in metalwalls ewald doc
-
-    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
-    
-    e_keq0 += q[i] * pot_ij;
-    
-  }
-  
-  // sum local contributions; see eq. (20) in metalwalls ewald doc
-  
-  MPI_Allreduce(&e_keq0_all,&e_keq0,1,MPI_DOUBLE,MPI_SUM,world);
-  
-  if (eflag_global) energy -= qscale * e_keq0_all * 0.5;
-}
-
-/* ----------------------------------------------------------------------
    memory usage of local arrays
 ------------------------------------------------------------------------- */
 
@@ -1387,9 +1245,6 @@ double Ewald::memory_usage()
 
 void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 {
-
-  // TODO actually, I think with EW2D it's possible
-  
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
@@ -1415,7 +1270,7 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
     sfacrl_A[k] = 0.0;
     sfacim_A[k] = 0.0;
     sfacrl_A_all[k] = 0.0;
-    sfacim_A_all[k] = 0.0;
+    sfacim_A_all[k] = 0;
 
     // group B
 
@@ -1506,10 +1361,8 @@ void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 
   // 2d slab correction
 
-  if (slabflag == 1 && slab_volfactor > 1.0) 
+  if (slabflag == 1)
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
-  else if (slabflag == 1 && slab_volfactor == 1.0)
-    ew2d_groups(groupbit_A, groupbit_B, AA_flag);
 }
 
 /* ----------------------------------------------------------------------
@@ -1588,16 +1441,6 @@ void Ewald::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 
   const double ffact = qscale * (-4.0*MY_PI/volume);
   f2group[2] += ffact * (qsum_A*dipole_B - qsum_B*dipole_A);
-}
-
-/* ----------------------------------------------------------------------
-   computes infinite boundary term with EW2D (i.e. k = 0)
-------------------------------------------------------------------------- */
-
-void Ewald::ew2d_groups(int groupbit_A, int groupbit_B, int AA_flag)
-{
-  if (slabflag == 1 && slab_volfactor == 1.0) 
-    error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
 }
 
 /* ----------------------------------------------------------------------
