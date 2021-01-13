@@ -1257,27 +1257,22 @@ void EwaldConp::ew2dcorr()
 
   int *recvcounts,*displs;
   double *nprd, *nprd_all, *q_all;  
-    
-  const double g_ewald_inv = 1.0 / g_ewald;
-  const double g_ewald_sq = g_ewald*g_ewald;
-  
-  const double qscale = qqrd2e * scale;
-  const double efact = 2.0 * MY_PIS/area;
-  const double ffact = qscale * MY_2PI/area;
   
   // gather q and non-periodic positions on all procs
   
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
-  memory->create(nprd,nprocs,"ewald/conp:nprd");
   
   MPI_Allgather(&nlocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
  
   displs[0] = 0;
-  for (int i = 1; i < nprocs; i++) {
+  for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
+  
+  memory->create(nprd,nlocal,"ewald/conp:nprd");
+  
+  for (int i = 0; i < nlocal; i++)
     nprd[i] = x[i][nprd_dim];
-  }
   
   memory->create(nprd_all,natoms,"ewald/conp:nprd_all");
   memory->create(q_all,natoms,"ewald/conp:q_all");
@@ -1289,14 +1284,20 @@ void EwaldConp::ew2dcorr()
   memory->destroy(recvcounts);
   memory->destroy(displs);
   
-  // loop over ALL atom interactions
+  const double g_ewald_inv = 1.0 / g_ewald;
+  const double g_ewald_sq = g_ewald*g_ewald;
+  const double qscale = qqrd2e * scale;
+  const double efact = 2.0 * MY_PIS/area;
+  const double ffact = qscale * MY_2PI/area;
    
-  int i,j;
   double pot_ij, aij, dij, e_keq0_all;
+  
+  // loop over ALL atom interactions
+  
   double e_keq0 = 0.0;
-  for (i = 0; i < nlocal; i++) {
+  for (int i = 0; i < nlocal; i++) {
     pot_ij = 0.0;
-    for (j = 0; j < atom->natoms; j++) {
+    for (bigint j = 0; j < natoms; j++) {
       
       dij = nprd_all[j] - x[i][nprd_dim];
       
@@ -1316,7 +1317,6 @@ void EwaldConp::ew2dcorr()
     if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
     
     e_keq0 += q[i] * pot_ij;
-    
   }
   
   memory->destroy(nprd_all);
@@ -1324,8 +1324,8 @@ void EwaldConp::ew2dcorr()
   
   // sum local contributions; see eq. (20) in metalwalls ewald doc
   
-  MPI_Allreduce(&e_keq0_all,&e_keq0,1,MPI_DOUBLE,MPI_SUM,world);
-  
+  MPI_Allreduce(&e_keq0,&e_keq0_all,1,MPI_DOUBLE,MPI_SUM,world);
+
   if (eflag_global) energy -= qscale * e_keq0_all * 0.5;
 }
 
