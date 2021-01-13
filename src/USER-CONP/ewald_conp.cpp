@@ -1317,6 +1317,8 @@ void EwaldConp::ew2dcorr()
     if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
     
     e_keq0 += q[i] * pot_ij;
+    
+    printf(" ekeq0 on %d: %f\n",comm->me,e_keq0);
   }
   
   memory->destroy(nprd_all);

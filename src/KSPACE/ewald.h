@@ -39,14 +39,12 @@ class Ewald : public KSpace {
  protected:
   int kxmax,kymax,kzmax;
   int kcount,kmax,kmax3d,kmax_created;
-  double gsqmx,volume,area;
+  double gsqmx,volume;
   int nmax;
 
   double unitk[3];
   int *kxvecs,*kyvecs,*kzvecs;
   int kxmax_orig,kymax_orig,kzmax_orig;
-  int nprd_dim;
-  double *nprd_all, *q_all;
   double *ug;
   double **eg, **vg;
   double **ek;
@@ -65,8 +63,6 @@ class Ewald : public KSpace {
   virtual void allocate();
   void deallocate();
   void slabcorr();
-  void ew2d();
-  void fetch_all();
 
   // triclinic
 
@@ -76,11 +72,9 @@ class Ewald : public KSpace {
 
   // group-group interactions
 
-  void slabcorr_groups(int, int, int);
-  void ew2d_groups(int,int,int);
+  void slabcorr_groups(int,int,int);
   void allocate_groups();
   void deallocate_groups();
- 
 };
 
 }    // namespace LAMMPS_NS
