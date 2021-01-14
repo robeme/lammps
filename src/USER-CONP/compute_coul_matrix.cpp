@@ -359,8 +359,6 @@ void ComputeCoulMatrix::pair_contribution()
         
         // no need for if (i!=j) since i is not in jlist
         
-        if (tag[i] == tag[j]) printf(" *** uh oh on %d ***\n", comm->me);
-        
         gradQ_V[mpos[i]][mpos[j]] += aij;
         gradQ_V[mpos[j]][mpos[i]] += aij;
       }
