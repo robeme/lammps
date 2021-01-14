@@ -1562,7 +1562,7 @@ void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
    obtained.
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, double **matrix)
+void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, double **matrix)
 { 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
@@ -1668,7 +1668,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
   // create matrix indexing for j atoms; resulting list is sorted by rank of process
   // and according to csx_all, snx_all, etc.
   
-  bigint *jpos, *jpos_local;
+  bigint *jmat, *jmat_local;
     
   int *ndispls;
   memory->create(ndispls,nprocs,"ewald/conp:ndispls");
@@ -1677,14 +1677,14 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
     for (i = 1; i < nprocs; i++)
       ndispls[i] = ndispls[i-1] + recvcounts[i-1];
   
-  memory->create(jpos_local,ngrouplocal,"ewald/conp:jpos_local");    
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");    
   bigint count = 0;  
   for (i = 0; i < nlocal; i++)
-    if (ipos[i] != -1) jpos_local[count++] = ipos[i];
+    if (imat[i] != -1) jmat_local[count++] = imat[i];
   
-  memory->create(jpos,ngroup,"ewald/conp:jpos");    
-  MPI_Allgatherv(jpos_local,ngrouplocal,MPI_LMP_BIGINT,jpos,recvcounts,ndispls,MPI_LMP_BIGINT,world);
-  memory->destroy(jpos_local);
+  memory->create(jmat,ngroup,"ewald/conp:jmat");    
+  MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,ndispls,MPI_LMP_BIGINT,world);
+  memory->destroy(jmat_local);
   memory->destroy(ndispls);
   
   int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
@@ -1696,9 +1696,9 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
 
     if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
          
-      // matrix is symmetric, use ipos to skip interactions
+      // matrix is symmetric, use imat to skip interactions
       
-      for (int j = ipos[i]; j < ngroup; j++) {
+      for (int j = imat[i]; j < ngroup; j++) {
         
         aij = 0.0;
         
@@ -1738,14 +1738,14 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
           aij += 2.0*ug[k] * (cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j);
         }
         
-        matrix[ipos[i]][jpos[j]] += aij;
-        if (ipos[i] != j) matrix[jpos[j]][ipos[i]] += aij;
+        matrix[imat[i]][jmat[j]] += aij;
+        if (imat[i] != j) matrix[jmat[j]][imat[i]] += aij;
       }
     }
     if ((i+1) % 100 == 0) printf("%d (%d/%d)\n",comm->me,i+1,nlocal);
   }
   
-  memory->destroy(jpos);
+  memory->destroy(jmat);
   memory->destroy(displs);
   memory->destroy(recvcounts);
   memory->destroy(csx_all);
