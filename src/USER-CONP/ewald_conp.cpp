@@ -1670,30 +1670,33 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
   
   // aij for each atom pair in groups
 
-  for (int k = 0; k < kcount; k++) {
-    kx = kxvecs[k];
-    ky = kyvecs[k];
-    kz = kzvecs[k];
-    
-    kyabs = abs(ky);
-    sign_ky = (ky > 0) - (ky < 0);
-    
-    kzabs = abs(kz);
-    sign_kz = (kz > 0) - (kz < 0);
+  for (int i = 0; i < nlocal; i++) {
 
-    for (int i = 0; i < nlocal; i++) {
-
-      if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
+    if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
+         
+      // matrix is symmetric, use ipos to skip interactions
       
-        cos_kxky = cs[kx][0][i] * cs[kyabs][1][i] - sn[kx][0][i] * sn[kyabs][1][i] * sign_ky;
-        sin_kxky = sn[kx][0][i] * cs[kyabs][1][i] + cs[kx][0][i] * sn[kyabs][1][i] * sign_ky;
+      for (int j = ipos[i]; j < ngroup; j++) {
+        
+        aij = 0.0;
+        
+        for (int k = 0; k < kcount; k++) {
+        
+          kx = kxvecs[k];
+          ky = kyvecs[k];
+          kz = kzvecs[k];
+          
+          kyabs = abs(ky);
+          sign_ky = (ky > 0) - (ky < 0);
+          
+          kzabs = abs(kz);
+          sign_kz = (kz > 0) - (kz < 0);
+          
+          cos_kxky = cs[kx][0][i] * cs[kyabs][1][i] - sn[kx][0][i] * sn[kyabs][1][i] * sign_ky;
+          sin_kxky = sn[kx][0][i] * cs[kyabs][1][i] + cs[kx][0][i] * sn[kyabs][1][i] * sign_ky;
 
-        cos_kxkykz_i = cos_kxky * cs[kzabs][2][i] - sin_kxky * sn[kzabs][2][i] * sign_kz;
-        sin_kxkykz_i = sin_kxky * cs[kzabs][2][i] + cos_kxky * sn[kzabs][2][i] * sign_kz;
-        
-        // matrix is symmetric, use ipos to skip interactions
-        
-        for (int j = ipos[i]; j < ngroup; j++) {
+          cos_kxkykz_i = cos_kxky * cs[kzabs][2][i] - sin_kxky * sn[kzabs][2][i] * sign_kz;
+          sin_kxkykz_i = sin_kxky * cs[kzabs][2][i] + cos_kxky * sn[kzabs][2][i] * sign_kz;
           
           // global indexing  csx_all[kx][j] -> csx_all[kx+j*(kxmax+1)]
           // local  indexing  csx[kx][i]     -> csx_all[i+k*ngrouplocal+displs[0][comm->me]]]
@@ -1708,14 +1711,14 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
           cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
           sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
           
-          aij = cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
-          
-          //matrix[ipos[i]][j] += aij;
-          //if (ipos[i] != j) matrix[j][ipos[i]] += aij;
+          aij += cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
         }
+        
+        matrix[ipos[i]][j] += aij;
+        if (ipos[i] != j) matrix[j][ipos[i]] += aij;
       }
     }
-    if (k % 100 == 0) printf("%d (%d/%d)\n",comm->me,k,kcount);
+    printf("%d (%d/%d)\n",comm->me,i+1,nlocal);
   }
   
   memory->destroy(displs);
