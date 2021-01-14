@@ -39,7 +39,7 @@ class ComputeCoulMatrix : public Compute {
  private:
   char *group2;
   int jgroup,jgroupbit,othergroupbit;
-  bigint jgroupnum, igroupnum, natoms;
+  bigint jgroupnum, igroupnum, ngroup;
   int recalc_every;
   double **cutsq,**gradQ_V;
   double g_ewald,eta;
