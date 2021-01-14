@@ -162,6 +162,8 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
   memory->destroy(mat2tag);
   memory->destroy(gradQ_V);
   
+  if (assigned) memory->destroy(mpos);
+  
   if (fp && comm->me == 0) fclose(fp);
 }
 
@@ -252,13 +254,9 @@ void ComputeCoulMatrix::setup()
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
   
-  memory->create(matrix,natoms,natoms,"coul/matrix:matrix");
-  
-  MPI_Allreduce(&gradQ_V[0][0], &matrix[0][0], natoms*natoms, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[0][0], natoms*natoms, MPI_DOUBLE, MPI_SUM, world);
     
-  if (fp && comm->me == 0) write_matrix(matrix);
-  
-  memory->destroy(matrix);
+  if (fp && comm->me == 0) write_matrix(gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
