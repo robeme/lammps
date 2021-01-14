@@ -1562,7 +1562,7 @@ void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
    obtained.
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
+void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, double **matrix)
 { 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
@@ -1683,7 +1683,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
 
     for (int i = 0; i < nlocal; i++) {
 
-      if (mask[i] & groupbit_A) {
+      if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
       
         cos_kxky = cs[kx][0][i] * cs[kyabs][1][i] - sn[kx][0][i] * sn[kyabs][1][i] * sign_ky;
         sin_kxky = sn[kx][0][i] * cs[kyabs][1][i] + cs[kx][0][i] * sn[kyabs][1][i] * sign_ky;
@@ -1693,9 +1693,10 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
         
         // matrix is symmetric, use ipos to skip interactions
         
-        for (int j = 0; j < ngroup; j++) {
+        for (int j = ipos[i]; j < ngroup; j++) {
           
-          // array indexing conversion [kx+j*(kxmax+1)] -> [kx][j]
+          // global indexing  csx_all[kx][j] -> csx_all[kx+j*(kxmax+1)]
+          // local  indexing  csx[kx][i]     -> csx_all[i+k*ngrouplocal+displs[0][comm->me]]]
           
           kxj = kx+j*(kxmax+1);
           kyj = kyabs+j*(kymax+1);
@@ -1708,9 +1709,13 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
           sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
           
           aij = cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
+          
+          matrix[ipos[i]][j] += aij;
+          if (ipos[i] != j) matrix[j][ipos[i]] += aij;
         }
       }
     }
+    if (k % 100 == 0) printf("%d (%d/%d)\n",comm->me,k,kcount);
   }
   
   memory->destroy(displs);
