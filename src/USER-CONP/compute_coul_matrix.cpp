@@ -518,7 +518,7 @@ void ComputeCoulMatrix::matrix_assignment()
 
   // for safety local non-matrix atoms have matrix index -1
   
-  size_t nbytes = sizeof(bigint) * nlocal;
+  size_t nbytes = sizeof(bigint) * nmax;
   if (nbytes)
     memset(mpos,-1,nbytes);
   
