@@ -221,6 +221,9 @@ void ComputeCoulMatrix::init()
 
 void ComputeCoulMatrix::setup()
 {
+  // TODO could be useful to assign homogenously all atoms in both groups to 
+  // all procs for calculating matrix to distribute evenly the workload
+  
   double **matrix;
   
   igroupnum = group->count(igroup);
