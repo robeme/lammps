@@ -1710,8 +1710,8 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
           
           aij = cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
           
-          matrix[ipos[i]][j] += aij;
-          if (ipos[i] != j) matrix[j][ipos[i]] += aij;
+          //matrix[ipos[i]][j] += aij;
+          //if (ipos[i] != j) matrix[j][ipos[i]] += aij;
         }
       }
     }
