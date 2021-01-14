@@ -52,7 +52,7 @@ enum{OFF,INTER,INTRA};
 
 ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  fp(nullptr), group2(nullptr), gradQ_V(nullptr)
+  fp(nullptr), group2(nullptr), gradQ_V(nullptr), mpos(nullptr)
 {
   if (narg < 4) error->all(FLERR,"Illegal compute coul/matrix command");
   
@@ -64,6 +64,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   
   fp = nullptr;
   gradQ_V = nullptr;
+  mpos = nullptr;
 
   pairflag = 1;
   kspaceflag = 1; 
@@ -72,6 +73,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   gaussians = 1;
   recalc_every = 0; 
   overwrite = 1;
+  assigned = 0;
   
   g_ewald = 0.0;
   
@@ -391,8 +393,7 @@ void ComputeCoulMatrix::self_contribution()
 
 void ComputeCoulMatrix::kspace_contribution()
 { 
-  //kspace->compute_matrix(natoms,mat2tag,gradQ_V);
-  kspace->compute_matrix(groupbit, jgroupbit, gradQ_V);
+  kspace->compute_matrix(groupbit, jgroupbit, mpos, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -442,27 +443,25 @@ void ComputeCoulMatrix::reallocate()
 
 /* ---------------------------------------------------------------------- 
    looks up to which proc each atom in each group belongs and creates a
-   sorted array which assigns a tag to a matrix position. entries are 
-   sorted: first group A then group B. need to be so complex here b/c 
-   atom tags might not be be consecutive or sorted in any way. TODO 
-   there's probably a much simpler way to infer a list of tags in each 
-   group but I can't find it in the group class ... 
+   local array which locates the position of each local atom in the global 
+   matrix. entries are sorted: first A then B. need to be so complex here
+   b/c atom tags might not be be consecutive or sorted in any way. 
 ------------------------------------------------------------------------- */  
 
 void ComputeCoulMatrix::matrix_assignment()
 {
-  // assign matrix indices to global tags and local matrix position
+  // assign local matrix indices to local atoms on each proc
   
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
   int nprocs = comm->nprocs;  
   tagint *tag = atom->tag;
+  
   tagint *itaglist, *itaglist_local;
   tagint *jtaglist, *jtaglist_local;
-  
   int igroupnum_local, jgroupnum_local;
-  
-  int *igroupnum_list, *jgroupnum_list, *idispls, *jdispls;
+  int *igroupnum_list, *jgroupnum_list;
+  int *idispls, *jdispls;
   
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -510,6 +509,26 @@ void ComputeCoulMatrix::matrix_assignment()
   MPI_Allgatherv(jtaglist_local,jgroupnum_local,MPI_LMP_TAGINT,
                  jtaglist,jgroupnum_list,jdispls,MPI_LMP_TAGINT,world);
   
+  // if local matrix assignment already created, recreate
+  
+  if (assigned) {
+    memory->destroy(mpos);
+    memory->create(mpos,nlocal,"coul/matrix:mpos");
+  } else memory->create(mpos,nlocal,"coul/matrix:mpos");
+  
+  assigned = 1;
+
+  // set all local non-matrix values to -1
+  
+  size_t nbytes = sizeof(bigint) * nlocal;
+  if (nbytes)
+    memset(mpos,-1,nbytes);
+  
+  // sort itaglist and jtaglist
+  
+  std::sort(itaglist, itaglist + igroupnum);
+  std::sort(jtaglist, jtaglist + igroupnum);
+  
   memory->destroy(igroupnum_list);
   memory->destroy(jgroupnum_list);
   memory->destroy(idispls);
@@ -523,6 +542,14 @@ void ComputeCoulMatrix::matrix_assignment()
     mat2tag[i] = itaglist[i];
   for (bigint i = 0; i < jgroupnum; i++)
     mat2tag[igroupnum+i] = jtaglist[i];
+  
+  // create local array indexing global matrix
+    
+  int num = 0;
+  for (int i = 0; i < igroupnum+jgroupnum; i++)
+    for (int ii = 0; ii < nlocal; ii++)
+      if (mat2tag[i] == tag[ii])
+        mpos[ii] = num++;
   
   memory->destroy(itaglist);
   memory->destroy(jtaglist);

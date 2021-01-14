@@ -34,7 +34,7 @@ class ComputeCoulMatrix : public Compute {
   void compute_array();
   
  protected:
-  tagint *mat2tag; // stores tag of matrix position
+  tagint *mat2tag;                                  // stores tag of matrix position
 
  private:
   char *group2;
@@ -44,7 +44,8 @@ class ComputeCoulMatrix : public Compute {
   double **cutsq,**gradQ_V;
   double g_ewald,eta;
   int pairflag,kspaceflag,boundaryflag,selfflag;
-  int overwrite,gaussians;
+  int overwrite,gaussians,assigned;
+  bigint *mpos;                                     // locally stored matrix index of each atom
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
