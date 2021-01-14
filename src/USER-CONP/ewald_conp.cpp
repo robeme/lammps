@@ -1665,31 +1665,25 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
 //          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+displs[0][m]]);   
 //  fclose(pFile);
 
-  // create matrix indexing for j atoms; resulting list is sorted according to csx_all, ...
+  // create matrix indexing for j atoms; resulting list is sorted by rank of process
+  // and according to csx_all, snx_all, etc.
   
   bigint *jpos, *jpos_local;
     
-  // need to know number of local group atoms  
-    
-  int ngroup_local = 0;
-  for (i = 0; i < nlocal; i++) 
-    if (mask[i] & groupbit_A || mask[i] & groupbit_B) 
-      ngroup_local++;
-  
   int *ndispls;
   memory->create(ndispls,nprocs,"ewald/conp:ndispls");
-  MPI_Allgather(&ngroup_local,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  MPI_Allgather(&ngrouplocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
   ndispls[0] = 0;
     for (i = 1; i < nprocs; i++)
       ndispls[i] = ndispls[i-1] + recvcounts[i-1];
   
-  memory->create(jpos_local,ngroup_local,"ewald/conp:jpos_local");    
+  memory->create(jpos_local,ngrouplocal,"ewald/conp:jpos_local");    
   bigint count = 0;  
   for (i = 0; i < nlocal; i++)
     if (ipos[i] != -1) jpos_local[count++] = ipos[i];
   
   memory->create(jpos,ngroup,"ewald/conp:jpos");    
-  MPI_Allgatherv(jpos_local,ngroup_local,MPI_LMP_BIGINT,jpos,recvcounts,ndispls,MPI_LMP_BIGINT,world);
+  MPI_Allgatherv(jpos_local,ngrouplocal,MPI_LMP_BIGINT,jpos,recvcounts,ndispls,MPI_LMP_BIGINT,world);
   memory->destroy(jpos_local);
   memory->destroy(ndispls);
   
@@ -1728,8 +1722,8 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
           cos_kxkykz_i = cos_kxky * cs[kzabs][2][i] - sin_kxky * sn[kzabs][2][i] * sign_kz;
           sin_kxkykz_i = sin_kxky * cs[kzabs][2][i] + cos_kxky * sn[kzabs][2][i] * sign_kz;
           
-          // global indexing  csx_all[kx][j]         ->        csx_all[kx+j*(kxmax+1)]
-          // local  indexing  cs_idim[k_idim][i]     -> csx_all[i+k*ngrouplocal+displs[idim][comm->me]]]
+          // global indexing  csx_all[kx][j]     <>        csx_all[kx+j*(kxmax+1)]
+          // local  indexing  cs_idim[k_idim][i] <> csx_all[i+k*ngrouplocal+displs[idim][comm->me]]]
           
           kxj = kx+j*(kxmax+1);
           kyj = kyabs+j*(kymax+1);
@@ -1741,7 +1735,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
           cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
           sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
           
-          aij += cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
+          aij += 2.0*ug[k] * (cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j);
         }
         
         matrix[ipos[i]][jpos[j]] += aij;
