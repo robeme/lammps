@@ -373,13 +373,13 @@ void ComputeCoulMatrix::self_contribution()
   int nlocal = atom->nlocal;
   int *mask = atom->mask;
 
-  const double selfint = -2.0/MY_PIS*g_ewald;
+  const double selfint = 2.0/MY_PIS*g_ewald;
   const double preta = MY_SQRT2/MY_PIS;
   
   // TODO infer eta from pair_coeffs
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit || mask[i] & jgroupbit)
-      gradQ_V[mpos[i]][mpos[i]] += selfint + preta*eta; 
+      gradQ_V[mpos[i]][mpos[i]] += preta*eta - selfint; 
 }
 
 
