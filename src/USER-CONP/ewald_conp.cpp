@@ -1739,7 +1739,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, dou
         }
         
         matrix[imat[i]][jmat[j]] += aij;
-        if (imat[i] != j) matrix[jmat[j]][imat[i]] += aij;
+        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
     if ((i+1) % 100 == 0) printf("(%d/%d) on %d\n",comm->me,i+1,nlocal);
