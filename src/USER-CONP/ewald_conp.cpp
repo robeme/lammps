@@ -1628,42 +1628,47 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
   }
 
   int nprocs = comm->nprocs;
-  
-  int *recvcounts,*displs;
-  memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
-  memory->create(displs,nprocs,"ewald/conp:displs");
-  
-  int n;
-  
-  n = (kxmax+1)*ngrouplocal;
-  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
-  displs[0] = 0;
-  for (int i = 1; i < nprocs; i++)
-    displs[i] = displs[i-1] + recvcounts[i-1];
-  MPI_Allgatherv(&csx[0][0],n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(&snx[0][0],n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
-  
-  n = (kymax+1)*ngrouplocal;
-  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
-  displs[0] = 0;
-  for (int i = 1; i < nprocs; i++)
-    displs[i] = displs[i-1] + recvcounts[i-1];
-  MPI_Allgatherv(&csy[0][0],n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(&sny[0][0],n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
-  
-  n = (kzmax+1)*ngrouplocal;
-  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
-  displs[0] = 0;
-  for (int i = 1; i < nprocs; i++)
-    displs[i] = displs[i-1] + recvcounts[i-1];
-  MPI_Allgatherv(&csz[0][0],n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(&snz[0][0],n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
+  int n[3];
+  int *recvcounts,**displs;
 
+  memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
+  memory->create(displs,3,nprocs,"ewald/conp:displs");
   
+  for (int idim = 0; idim < 3; idim++) {
+    
+    n[idim] = (kxmax+1)*ngrouplocal;
+    
+    MPI_Allgather(&n[idim],1,MPI_INT,recvcounts,1,MPI_INT,world);
+    
+    displs[idim][0] = 0;
+    for (int i = 1; i < nprocs; i++)
+      displs[idim][i] = displs[idim][i-1] + recvcounts[i-1];
+      
+    MPI_Allgatherv(&csx[0][0],n[idim],MPI_DOUBLE,csx_all,recvcounts,displs[idim],MPI_DOUBLE,world);
+    MPI_Allgatherv(&snx[0][0],n[idim],MPI_DOUBLE,snx_all,recvcounts,displs[idim],MPI_DOUBLE,world);
+    MPI_Allgatherv(&csy[0][0],n[idim],MPI_DOUBLE,csy_all,recvcounts,displs[idim],MPI_DOUBLE,world);
+    MPI_Allgatherv(&sny[0][0],n[idim],MPI_DOUBLE,sny_all,recvcounts,displs[idim],MPI_DOUBLE,world);
+    MPI_Allgatherv(&csz[0][0],n[idim],MPI_DOUBLE,csz_all,recvcounts,displs[idim],MPI_DOUBLE,world);
+    MPI_Allgatherv(&snz[0][0],n[idim],MPI_DOUBLE,snz_all,recvcounts,displs[idim],MPI_DOUBLE,world);
+  }
+  
+//  // consistency check between local global arrays
+
+//  FILE *pFile;
+//  char fn[12];
+//  sprintf(fn,"k.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (k = 0; k < kxmax+1; k++)
+//        for (i = 0; i < ngrouplocal; i++) 
+//          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+displs[0][m]]);   
+//  fclose(pFile);
+
   int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
   double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
   
-  // aij between each atom in groups
+  // aij for each atom pair in groups
 
   for (int k = 0; k < kcount; k++) {
     kx = kxvecs[k];
@@ -1686,7 +1691,12 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
         cos_kxkykz_i = cos_kxky * cs[kzabs][2][i] - sin_kxky * sn[kzabs][2][i] * sign_kz;
         sin_kxkykz_i = sin_kxky * cs[kzabs][2][i] + cos_kxky * sn[kzabs][2][i] * sign_kz;
         
+        // matrix is symmetric, use ipos to skip interactions
+        
         for (int j = 0; j < ngroup; j++) {
+          
+          // array indexing conversion [kx+j*(kxmax+1)] -> [kx][j]
+          
           kxj = kx+j*(kxmax+1);
           kyj = kyabs+j*(kymax+1);
           kzj = kzabs+j*(kzmax+1);
@@ -1698,8 +1708,6 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, double **matrix)
           sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
           
           aij = cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j;
-          
-          printf("*** aij for (%d,%d): %f *** \n",tag[i],j,aij);
         }
       }
     }
