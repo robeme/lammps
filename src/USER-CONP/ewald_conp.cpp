@@ -1668,7 +1668,9 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
   int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
   double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
   
-  // aij for each atom pair in groups
+  // aij for each atom pair in groups; first loop over i,j then over k to reduce memory access
+
+  // TODO implment matrix "blocks" for each proc as done in metalwalls
 
   for (int i = 0; i < nlocal; i++) {
 
@@ -1718,7 +1720,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
         if (ipos[i] != j) matrix[j][ipos[i]] += aij;
       }
     }
-    printf("%d (%d/%d)\n",comm->me,i+1,nlocal);
+    if ((i+1) % 100 == 0) printf("%d (%d/%d)\n",comm->me,i+1,nlocal);
   }
   
   memory->destroy(displs);
