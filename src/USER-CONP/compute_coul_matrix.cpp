@@ -93,8 +93,6 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
   eta = utils::numeric(FLERR,arg[5],false,lmp); // TODO infer from pair_style!
 
-  eta = eta*eta/sqrt(2.0*eta*eta); // see mw ewald theory eq. (29)-(30)
-
   int iarg = 6;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
@@ -297,7 +295,7 @@ void ComputeCoulMatrix::pair_contribution()
   tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
   
-  double etaij = 0.0;
+  double etaij = eta*eta/sqrt(2.0*eta*eta); // see mw ewald theory eq. (29)-(30)
   
   // invoke half neighbor list (will copy or build if necessary)
   
@@ -353,7 +351,7 @@ void ComputeCoulMatrix::pair_contribution()
         
           if (gaussians) {
             // TODO infer eta from coeffs of pair coul/long/gauss
-            etarij = eta * r;
+            etarij = etaij * r;
             expm2 = exp(-etarij*etarij);
             t = 1.0 / (1.0 + EWALD_P*etarij);
             erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
