@@ -1742,8 +1742,9 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, dou
         if (imat[i] != j) matrix[jmat[j]][imat[i]] += aij;
       }
     }
-    if ((i+1) % 100 == 0) printf("%d (%d/%d)\n",comm->me,i+1,nlocal);
+    if ((i+1) % 100 == 0) printf("(%d/%d) on %d\n",comm->me,i+1,nlocal);
   }
+  printf("%d finished!\n",comm->me);
   
   memory->destroy(jmat);
   memory->destroy(displs);

@@ -93,6 +93,8 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
   recalc_every = utils::inumeric(FLERR,arg[4],false,lmp);
   eta = utils::numeric(FLERR,arg[5],false,lmp); // TODO infer from pair_style!
 
+  eta = eta*eta/sqrt(2.0*eta*eta); // see mw ewald theory eq. (29)-(30)
+
   int iarg = 6;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
