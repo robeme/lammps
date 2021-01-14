@@ -1670,8 +1670,6 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
   
   // aij for each atom pair in groups; first loop over i,j then over k to reduce memory access
 
-  // TODO implment matrix "blocks" for each proc as done in metalwalls
-
   for (int i = 0; i < nlocal; i++) {
 
     if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
@@ -1693,6 +1691,8 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *ipos, dou
           
           kzabs = abs(kz);
           sign_kz = (kz > 0) - (kz < 0);
+          
+          // TODO blocking approach from metalwalls? pre-compute and store local cos_kxkykz_i and sin_kxkykz_i?
           
           cos_kxky = cs[kx][0][i] * cs[kyabs][1][i] - sn[kx][0][i] * sn[kyabs][1][i] * sign_ky;
           sin_kxky = sn[kx][0][i] * cs[kyabs][1][i] + cs[kx][0][i] * sn[kyabs][1][i] * sign_ky;
