@@ -392,7 +392,7 @@ void ComputeCoulMatrix::write_matrix(double **matrix)
   fprintf(fp,"# matrix\n");
   for (bigint i = 0; i < ngroup; i++) {
     for (bigint j = 0; j < ngroup; j++) {
-      fprintf(fp, "%.3f ", matrix[i][j]);
+      fprintf(fp, "%E ", matrix[i][j]);
     }
     fprintf(fp,"\n");
   }
