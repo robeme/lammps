@@ -140,8 +140,8 @@ class KSpace : protected Pointers {
   
   // USER-CONP package
   
-  virtual void compute_matrix(int, int, bigint *, double **) {};
-  virtual void compute_matrix_corr(int, int, bigint *, double **) {};
+  virtual void compute_matrix(bigint *, double **) {};
+  virtual void compute_matrix_corr(bigint *, double **) {};
 
 /* ----------------------------------------------------------------------
    compute gamma for MSM and pair styles

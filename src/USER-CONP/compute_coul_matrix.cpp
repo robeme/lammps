@@ -270,10 +270,8 @@ void ComputeCoulMatrix::compute_array()
 {
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
-  if (kspaceflag) 
-    kspace->compute_matrix(groupbit, jgroupbit, mpos, gradQ_V);
-  if (boundaryflag) 
-    kspace->compute_matrix_corr(groupbit, jgroupbit, mpos, gradQ_V);
+  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
+  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */

@@ -1607,7 +1607,7 @@ void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
    obtained.
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, double **matrix)
+void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 { 
   int nlocal = atom->nlocal;
   tagint *tag = atom->tag;
@@ -1623,9 +1623,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, dou
   
   bigint ngrouplocal = 0;
   bigint ngroup;
-  for (i = 0; i < nlocal; i++)
-    if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B))
-      ngrouplocal++;
+  for (i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++;
       
   // how many atoms do we have in total in groups    
       
@@ -1651,21 +1649,20 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, dou
   
   j = 0;
   for (i = 0; i < nlocal; i++) {
-    if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B)) {
-      for (k = 0; k <= kxmax; k++) {  
-        csx[k][j] = cs[k][0][i];
-        snx[k][j] = sn[k][0][i];
-      }
-      for (k = 0; k <= kymax; k++) { 
-        csy[k][j] = cs[k][1][i];
-        sny[k][j] = sn[k][1][i];
-      }
-      for (k = 0; k <= kzmax; k++) { 
-        csz[k][j] = cs[k][2][i];
-        snz[k][j] = sn[k][2][i];
-      }
-      j++;
+    if (imat[i] < 0) continue;
+    for (k = 0; k <= kxmax; k++) {  
+      csx[k][j] = cs[k][0][i];
+      snx[k][j] = sn[k][0][i];
     }
+    for (k = 0; k <= kymax; k++) { 
+      csy[k][j] = cs[k][1][i];
+      sny[k][j] = sn[k][1][i];
+    }
+    for (k = 0; k <= kzmax; k++) { 
+      csz[k][j] = cs[k][2][i];
+      snz[k][j] = sn[k][2][i];
+    }
+    j++;
   }
 
   int nprocs = comm->nprocs;
@@ -1736,7 +1733,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, dou
 
   for (int i = 0; i < nlocal; i++) {
 
-    if (!(mask[i] & groupbit_A || mask[i] & groupbit_B)) continue;
+    if (imat[i] < 0) continue;
          
     // matrix is symmetric, use imat to skip interactions
     
@@ -1811,7 +1808,7 @@ void EwaldConp::compute_matrix(int groupbit_A, int groupbit_B, bigint *imat, dou
    obtained. TODO decide between EW3DC and EW2D
  ------------------------------------------------------------------------- */
 
-void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat, double **matrix)
+void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
 { 
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
@@ -1834,9 +1831,7 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
   
   bigint ngrouplocal = 0;
   bigint ngroup;
-  for (int i = 0; i < nlocal; i++)
-    if ((mask[i] & groupbit_A) || (mask[i] & groupbit_B))
-      ngrouplocal++;
+  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++;
       
   // how many atoms do we have in total in groups    
       
@@ -1889,7 +1884,7 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
     double aij;
     for (int i = 0; i < nlocal; i++) {
       
-      if (!(mask[i] & groupbit_A || mask[i] & groupbit_B)) continue;
+      if (imat[i] < 0) continue;
       
       // matrix is symmetric
     
@@ -1918,12 +1913,12 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
     // gather q and non-periodic positions of subset from all procs
     
     count = 0;  
-    for (int i = 0; i < nlocal; i++)
-      if (imat[i] != -1) {
-        nprd_local[count] = x[i][nprd_dim];
-        q_local[count] = q[i];
-        count++;
-      }
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) continue;
+      nprd_local[count] = x[i][nprd_dim];
+      q_local[count] = q[i];
+      count++;
+    }
       
     MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
     MPI_Allgatherv(q_local,ngrouplocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
@@ -1941,13 +1936,15 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
     
     for (int i = 0; i < nlocal; i++) {
       
-      if (!(mask[i] & groupbit_A || mask[i] & groupbit_B)) continue;
+      if (imat[i] < 0) continue;
       
       // matrix is symmetric
     
       for (bigint j = imat[i]; j < ngroup; j++) {
         
         dij = nprd_all[j] - x[i][nprd_dim];
+        
+        if (j == imat[i]) printf("%f on %d\n",dij,comm->me);
         
         // resembles (aij) matrix component in constant potential
         aij = prefac * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
