@@ -476,28 +476,23 @@ void ComputeCoulMatrix::matrix_assignment()
   
   assigned = 1;
 
-  // for safety local non-matrix atoms have matrix index -1
+  // local+ghost non-matrix atoms are -1 in mpos
   
   size_t nbytes = sizeof(bigint) * nmax;
   if (nbytes)
     memset(mpos,-1,nbytes);
-  
-  // sort itaglist and jtaglist
-  
-  std::sort(itaglist, itaglist + igroupnum);
-  std::sort(jtaglist, jtaglist + jgroupnum);
-  
+
   // store which tag represents value in matrix
   
   for (bigint i = 0; i < igroupnum; i++)
     mat2tag[i] = itaglist[i];
   for (bigint j = 0; j < jgroupnum; j++)
     mat2tag[igroupnum+j] = jtaglist[j];
-  
+
   // create global matrix indices for local+ghost atoms
     
-  for (int i = 0; i < nmax; i++)
-    for (bigint ii = 0; ii < ngroup; ii++)
+  for (bigint ii = 0; ii < ngroup; ii++)
+    for (int i = 0; i < nmax; i++)
       if (mat2tag[ii] == tag[i])
         mpos[i] = ii;
   

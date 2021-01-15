@@ -1747,26 +1747,22 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
         ky = kyvecs[k];
         kz = kzvecs[k];
         
-        kyabs = abs(ky);
-        sign_ky = (ky > 0) - (ky < 0);
-        
-        kzabs = abs(kz);
-        sign_kz = (kz > 0) - (kz < 0);
-        
         // TODO blocking approach from metalwalls? pre-compute and store local cos_kxkykz_i and sin_kxkykz_i?
         
-        cos_kxky = cs[kx][0][i] * cs[kyabs][1][i] - sn[kx][0][i] * sn[kyabs][1][i] * sign_ky;
-        sin_kxky = sn[kx][0][i] * cs[kyabs][1][i] + cs[kx][0][i] * sn[kyabs][1][i] * sign_ky;
+        cos_kxky = cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
+        sin_kxky = sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
 
-        cos_kxkykz_i = cos_kxky * cs[kzabs][2][i] - sin_kxky * sn[kzabs][2][i] * sign_kz;
-        sin_kxkykz_i = sin_kxky * cs[kzabs][2][i] + cos_kxky * sn[kzabs][2][i] * sign_kz;
+        cos_kxkykz_i = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
+        sin_kxkykz_i = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
         
         // global indexing  csx_all[kx][j]     <>        csx_all[kx+j*(kxmax+1)]
         // local  indexing  cs_idim[k_idim][i] <> csx_all[i+k*ngrouplocal+ndispls[idim][comm->me]]]
         
         kxj = kx+j*(kxmax+1);
-        kyj = kyabs+j*(kymax+1);
-        kzj = kzabs+j*(kzmax+1);
+        kyj = abs(ky)+j*(kymax+1);
+        kzj = abs(kz)+j*(kzmax+1);
+        sign_ky = (ky > 0) - (ky < 0);
+        sign_kz = (kz > 0) - (kz < 0);
       
         cos_kxky = csx_all[kxj] * csy_all[kyj] - snx_all[kxj] * sny_all[kyj] * sign_ky;
         sin_kxky = snx_all[kxj] * csy_all[kyj] + csx_all[kxj] * sny_all[kyj] * sign_ky;
@@ -1943,8 +1939,6 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
       for (bigint j = imat[i]; j < ngroup; j++) {
         
         dij = nprd_all[j] - x[i][nprd_dim];
-        
-        if (j == imat[i]) printf("%f on %d\n",dij,comm->me);
         
         // resembles (aij) matrix component in constant potential
         aij = prefac * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
