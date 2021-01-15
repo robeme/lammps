@@ -45,7 +45,7 @@ class ComputeCoulMatrix : public Compute {
   double g_ewald,eta;
   int pairflag,kspaceflag,boundaryflag,selfflag;
   int overwrite,gaussians,assigned;
-  bigint *mpos;                                     // locally stored matrix index of each atom
+  bigint *mpos;                                     // locally stored matrix index of each local+ghost atom
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
@@ -55,12 +55,11 @@ class ComputeCoulMatrix : public Compute {
   long filepos;
   
   void matrix_assignment();
-  void reallocate();
   void pair_contribution();
   void self_contribution();
-  void kspace_contribution();
-  void kspace_correction();
   void write_matrix(double **);
+  void allocate();
+  void deallocate();
 };
 
 }

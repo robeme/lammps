@@ -146,7 +146,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg) :
 
   if (fp && comm->me == 0) {
     clearerr(fp);
-    fprintf(fp,"# coulomb matrix for constant potential\n");
+    fprintf(fp,"# Constant potential coulomb matrix\n");
     if (ferror(fp))
       error->one(FLERR,"Error writing file header");
     filepos = ftell(fp);
@@ -159,8 +159,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix()
 {
   delete [] group2;
   
-  memory->destroy(mat2tag);
-  memory->destroy(gradQ_V);
+  deallocate();
   
   if (assigned) memory->destroy(mpos);
   
@@ -173,29 +172,28 @@ void ComputeCoulMatrix::init()
 {
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
-  
-  // TODO just check if a coul pair_style is chosen, we need just the cutsq
-  // from pair_style and not pair->single as we do it here explicitly 
-  
-  if (pairflag && force->pair == nullptr) 
-    error->all(FLERR,"No pair style defined for compute coul/matrix");
-  if (force->pair_match("^hybrid",0) == nullptr
-      && force->pair->single_enable == 0)
-    error->all(FLERR,"Pair style does not support compute coul/matrix");
 
   // error if Kspace style does not compute coul/matrix interactions
 
-  if (kspaceflag && force->kspace == nullptr)
+  if ((boundaryflag || kspaceflag) && force->kspace == nullptr)
     error->all(FLERR,"No Kspace style defined for compute coul/matrix");
+  
+  // TODO need another flag since we don't use compute_group_group()
   if (kspaceflag && force->kspace->group_group_enable == 0)
     error->all(FLERR,"Kspace style does not support compute coul/matrix");
 
+  // check if coul pair style is active, no need for single() since done explicitly
+  
   if (pairflag) {
+    int itmp;
+    double *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+    if (p_cutoff == nullptr)
+      error->all(FLERR,"compute coul/matrix is incompatible with Pair style");
     pair = force->pair;
     cutsq = force->pair->cutsq;
   } else pair = nullptr;
 
-  if (kspaceflag) {
+  if (boundaryflag || kspaceflag) {
     kspace = force->kspace;
     g_ewald = force->kspace->g_ewald;
   } else kspace = nullptr;
@@ -221,26 +219,22 @@ void ComputeCoulMatrix::init()
 
 void ComputeCoulMatrix::setup()
 {
-  // TODO could be useful to assign homogenously all atoms in both groups to 
-  // all procs for calculating matrix to distribute evenly the workload
-  
-  double **matrix;
-  
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   ngroup = igroupnum+jgroupnum;
   
-  memory->create(mat2tag,ngroup,"coul/matrix:mat2tag");
-  
-  // assign atom tags to matrix locations and vice versa
-  
-  matrix_assignment(); 
-  
+  // TODO could be useful to assign homogenously all atoms in both groups to 
+  // all procs for calculating matrix to distribute evenly the workload
+
   // TODO would be nicer to have a local matrix and gather it later
   // to reduce a little bit the memory consumption ... However, for 
   // this wo work I think the atom ids must be from 1,...,N and consecutive
   
-  memory->create(gradQ_V,ngroup,ngroup,"coul/matrix:gradQ_V");
+  allocate();
+  
+  // assign atom tags to matrix locations and vice versa
+  
+  matrix_assignment(); 
   
   // setting all entries of coulomb matrix to zero
   
@@ -257,7 +251,8 @@ void ComputeCoulMatrix::setup()
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
   
-  MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[0][0], ngroup*ngroup, MPI_DOUBLE, MPI_SUM, world);
+  for (int i = 0; i < ngroup; i++)
+    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM, world);
     
   if (fp && comm->me == 0) write_matrix(gradQ_V);
 }
@@ -275,8 +270,10 @@ void ComputeCoulMatrix::compute_array()
 {
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
-  if (kspaceflag) kspace_contribution(); 
-  if (boundaryflag) kspace_correction();
+  if (kspaceflag) 
+    kspace->compute_matrix(groupbit, jgroupbit, mpos, gradQ_V);
+  if (boundaryflag) 
+    kspace->compute_matrix_corr(groupbit, jgroupbit, mpos, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -339,7 +336,7 @@ void ComputeCoulMatrix::pair_contribution()
         r = sqrt(rsq);
         rinv = 1.0 / r;
         aij = rinv;
-        if (kspaceflag) {
+        if (kspaceflag || boundaryflag) {
           grij = g_ewald * r;
           expm2 = exp(-grij*grij);
           t = 1.0 / (1.0 + EWALD_P*grij);
@@ -385,26 +382,11 @@ void ComputeCoulMatrix::self_contribution()
       gradQ_V[mpos[i]][mpos[i]] += preta*eta - selfint; 
 }
 
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::kspace_contribution()
-{ 
-  kspace->compute_matrix(groupbit, jgroupbit, mpos, gradQ_V);
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::kspace_correction()
-{
-
-}
-
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::write_matrix(double **matrix)
 { 
-  fprintf(fp,"# matrix -> atom id\n");
+  fprintf(fp,"# atoms\n");
   for (bigint i = 0; i < ngroup; i++)
     fprintf(fp,"%d ", mat2tag[i]);
   fprintf(fp,"\n");  
@@ -416,26 +398,6 @@ void ComputeCoulMatrix::write_matrix(double **matrix)
     }
     fprintf(fp,"\n");
   }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::reallocate()
-{ 
-  bigint igroupnum, jgroupnum, ngroup;
-  
-  igroupnum = group->count(igroup);
-  jgroupnum = group->count(jgroup);
-  ngroup = igroupnum+jgroupnum;
-  
-  memory->destroy(mat2tag);
-  memory->destroy(gradQ_V);
-  memory->create(gradQ_V,ngroup,ngroup,"coul/matrix:gradQ_V");
-  memory->create(mat2tag,ngroup,"coul/matrix:mat2tag");
-  
-  // since atom number has changed, reassign atoms to matrix
-  
-  matrix_assignment(); 
 }
 
 /* ---------------------------------------------------------------------- 
@@ -549,4 +511,24 @@ void ComputeCoulMatrix::matrix_assignment()
   memory->destroy(jtaglist_local);
   memory->destroy(itaglist);
   memory->destroy(jtaglist);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::allocate()
+{ 
+  memory->create(mat2tag,ngroup,"coul/matrix:mat2tag");
+  gradQ_V = new double*[ngroup];
+  for (bigint i = 0; i < ngroup; i++)
+    gradQ_V[i] = new double[ngroup];
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::deallocate()
+{ 
+  memory->destroy(mat2tag);
+  for (bigint i = 0; i < ngroup; i++)
+    delete [] gradQ_V[i];
+  delete [] gradQ_V;
 }
