@@ -1896,7 +1896,11 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
       // matrix is symmetric
     
       for (bigint j = imat[i]; j < ngroup; j++) {
+      
         aij = prefac * x[i][nprd_dim]*dipole_all;
+      
+        matrix[imat[i]][jmat[j]] += aij;
+        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
   
@@ -1904,11 +1908,11 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
   
     // use EW2D infinite boundary correction
   
-    double *nprd, *nprd_all;
-    double *qlocal, *q_all;
+    double *nprd_local, *nprd_all;
+    double *q_local, *q_all;
     
-    memory->create(nprd,ngrouplocal,"ewald/conp:nprd");
-    memory->create(qlocal,ngrouplocal,"ewald/conp:qlocal");
+    memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
+    memory->create(q_local,ngrouplocal,"ewald/conp:q_local");
     
     memory->create(nprd_all,ngroup,"ewald/conp:nprd_all");
     memory->create(q_all,ngroup,"ewald/conp:q_all");  
@@ -1918,16 +1922,16 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
     count = 0;  
     for (int i = 0; i < nlocal; i++)
       if (imat[i] != -1) {
-        nprd[count] = x[i][nprd_dim];
-        qlocal[count] = q[i];
+        nprd_local[count] = x[i][nprd_dim];
+        q_local[count] = q[i];
         count++;
       }
       
-    MPI_Allgatherv(nprd,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
-    MPI_Allgatherv(qlocal,ngrouplocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
+    MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
+    MPI_Allgatherv(q_local,ngrouplocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
     
-    memory->destroy(nprd);
-    memory->destroy(qlocal);
+    memory->destroy(nprd_local);
+    memory->destroy(q_local);
     
     const double g_ewald_inv = 1.0 / g_ewald;
     const double g_ewald_sq = g_ewald*g_ewald;
