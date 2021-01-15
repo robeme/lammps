@@ -1866,8 +1866,6 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
   
   memory->destroy(jmat_local);
-  memory->destroy(recvcounts);
-  memory->destroy(displs);
   
   if (slabflag == 1 && slab_volfactor > 1.0) {
     
@@ -1964,5 +1962,7 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
     memory->destroy(q_all);
   }
   
+  memory->destroy(recvcounts);
+  memory->destroy(displs);
   memory->destroy(jmat);
 }
