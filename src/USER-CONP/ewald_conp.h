@@ -39,6 +39,7 @@ class EwaldConp : public KSpace {
   // k-space part of coulomb matrix computation 
   
   void compute_matrix(int, int, bigint *, double **);
+  void compute_matrix_corr(int, int, bigint *, double **);
 
  protected:
   int kxmax,kymax,kzmax;

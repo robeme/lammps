@@ -125,8 +125,7 @@ class KSpace : protected Pointers {
   virtual void setup_grid() {};
   virtual void compute(int, int) = 0;
   virtual void compute_group_group(int, int, int) {};
-  virtual void compute_matrix(int, int, bigint *, double **) {};
-
+  
   virtual void pack_forward_grid(int, void *, int, int *) {};
   virtual void unpack_forward_grid(int, void *, int, int *) {};
   virtual void pack_reverse_grid(int, void *, int, int *) {};
@@ -138,6 +137,11 @@ class KSpace : protected Pointers {
 
   virtual int modify_param(int, char **) {return 0;}
   virtual double memory_usage() {return 0.0;}
+  
+  // USER-CONP package
+  
+  virtual void compute_matrix(int, int, bigint *, double **) {};
+  virtual void compute_matrix_corr(int, int, bigint *, double **) {};
 
 /* ----------------------------------------------------------------------
    compute gamma for MSM and pair styles
