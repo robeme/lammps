@@ -1685,20 +1685,20 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   n[0] = (kxmax+1)*ngrouplocal;
   n[1] = (kymax+1)*ngrouplocal;
   n[2] = (kzmax+1)*ngrouplocal;
+  
   for (int idim = 0; idim < 3; idim++) {
     MPI_Allgather(&n[idim],1,MPI_INT,recvcounts,1,MPI_INT,world);
-    
     ndispls[idim][0] = 0;
     for (i = 1; i < nprocs; i++)
       ndispls[idim][i] = ndispls[idim][i-1] + recvcounts[i-1];
-      
-    MPI_Allgatherv(&csx[0][0],n[idim],MPI_DOUBLE,csx_all,recvcounts,ndispls[idim],MPI_DOUBLE,world);
-    MPI_Allgatherv(&snx[0][0],n[idim],MPI_DOUBLE,snx_all,recvcounts,ndispls[idim],MPI_DOUBLE,world);
-    MPI_Allgatherv(&csy[0][0],n[idim],MPI_DOUBLE,csy_all,recvcounts,ndispls[idim],MPI_DOUBLE,world);
-    MPI_Allgatherv(&sny[0][0],n[idim],MPI_DOUBLE,sny_all,recvcounts,ndispls[idim],MPI_DOUBLE,world);
-    MPI_Allgatherv(&csz[0][0],n[idim],MPI_DOUBLE,csz_all,recvcounts,ndispls[idim],MPI_DOUBLE,world);
-    MPI_Allgatherv(&snz[0][0],n[idim],MPI_DOUBLE,snz_all,recvcounts,ndispls[idim],MPI_DOUBLE,world);
   }
+      
+  MPI_Allgatherv(&csx[0][0],n[0],MPI_DOUBLE,csx_all,recvcounts,ndispls[0],MPI_DOUBLE,world);
+  MPI_Allgatherv(&snx[0][0],n[0],MPI_DOUBLE,snx_all,recvcounts,ndispls[0],MPI_DOUBLE,world);
+  MPI_Allgatherv(&csy[0][0],n[1],MPI_DOUBLE,csy_all,recvcounts,ndispls[1],MPI_DOUBLE,world);
+  MPI_Allgatherv(&sny[0][0],n[1],MPI_DOUBLE,sny_all,recvcounts,ndispls[1],MPI_DOUBLE,world);
+  MPI_Allgatherv(&csz[0][0],n[2],MPI_DOUBLE,csz_all,recvcounts,ndispls[2],MPI_DOUBLE,world);
+  MPI_Allgatherv(&snz[0][0],n[2],MPI_DOUBLE,snz_all,recvcounts,ndispls[2],MPI_DOUBLE,world);
   
   // consistency check between local global arrays
 
