@@ -1633,39 +1633,40 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 
   // gather only subset of sn and cs on each proc
   
-  memory->create(csx,kxmax+1,ngrouplocal,"ewald/conp:csx");
-  memory->create(snx,kxmax+1,ngrouplocal,"ewald/conp:snx");
-  memory->create(csy,kymax+1,ngrouplocal,"ewald/conp:csy");
-  memory->create(sny,kymax+1,ngrouplocal,"ewald/conp:sny");
-  memory->create(snz,kzmax+1,ngrouplocal,"ewald/conp:snz");
-  memory->create(csz,kzmax+1,ngrouplocal,"ewald/conp:csz");
+  memory->create(csx,kmax+1,ngrouplocal,"ewald/conp:csx");
+  memory->create(snx,kmax+1,ngrouplocal,"ewald/conp:snx");
+  memory->create(csy,kmax+1,ngrouplocal,"ewald/conp:csy");
+  memory->create(sny,kmax+1,ngrouplocal,"ewald/conp:sny");
+  memory->create(snz,kmax+1,ngrouplocal,"ewald/conp:snz");
+  memory->create(csz,kmax+1,ngrouplocal,"ewald/conp:csz");
   
-  memory->create(csx_all,(kxmax+1)*ngroup,"ewald/conp:csx_all");
-  memory->create(snx_all,(kxmax+1)*ngroup,"ewald/conp:snx_all");
-  memory->create(csy_all,(kymax+1)*ngroup,"ewald/conp:csy_all");
-  memory->create(sny_all,(kymax+1)*ngroup,"ewald/conp:sny_all");
-  memory->create(csz_all,(kzmax+1)*ngroup,"ewald/conp:csz_all");
-  memory->create(snz_all,(kzmax+1)*ngroup,"ewald/conp:snz_all");
+  memory->create(csx_all,(kmax+1)*ngroup,"ewald/conp:csx_all");
+  memory->create(snx_all,(kmax+1)*ngroup,"ewald/conp:snx_all");
+  memory->create(csy_all,(kmax+1)*ngroup,"ewald/conp:csy_all");
+  memory->create(sny_all,(kmax+1)*ngroup,"ewald/conp:sny_all");
+  memory->create(csz_all,(kmax+1)*ngroup,"ewald/conp:csz_all");
+  memory->create(snz_all,(kmax+1)*ngroup,"ewald/conp:snz_all");
   
   memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");    
   
   // copy sn and cn to new local arrays 
   
+  int kx,ky,kz;
+  
   j = 0;
   for (i = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
     
-    for (k = 0; k <= kxmax+1; k++) {  
-      csx[k][j] = cs[k][0][i];
-      snx[k][j] = sn[k][0][i];
-    }
-    for (k = 0; k <= kymax+1; k++) { 
-      csy[k][j] = cs[k][1][i];
-      sny[k][j] = sn[k][1][i];
-    }
-    for (k = 0; k <= kzmax+1; k++) { 
-      csz[k][j] = cs[k][2][i];
-      snz[k][j] = sn[k][2][i];
+    for (k = 0; k < kcount; k++) {
+      kx = kxvecs[k];
+      ky = abs(kyvecs[k]);
+      kz = abs(kzvecs[k]);  
+      csx[kx][j] = cs[kx][0][i];
+      snx[kx][j] = sn[kx][0][i];
+      csy[ky][j] = cs[ky][1][i];
+      sny[ky][j] = sn[ky][1][i];
+      csz[kz][j] = cs[kz][2][i];
+      snz[kz][j] = sn[kz][2][i];
     }
     
     // ... and keep track of the matrix index
@@ -1682,9 +1683,9 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(ndispls,3,nprocs,"ewald/conp:ndispls");
   
-  n[0] = (kxmax+1)*ngrouplocal;
-  n[1] = (kymax+1)*ngrouplocal;
-  n[2] = (kzmax+1)*ngrouplocal;
+  n[0] = (kmax+1)*ngrouplocal;
+  n[1] = (kmax+1)*ngrouplocal;
+  n[2] = (kmax+1)*ngrouplocal;
   
   for (int idim = 0; idim < 3; idim++) {
     MPI_Allgather(&n[idim],1,MPI_INT,recvcounts,1,MPI_INT,world);
@@ -1727,7 +1728,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   memory->destroy(jmat_local);
   memory->destroy(displs);
   
-  int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
+  int kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
   double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
   
   // aij for each atom pair in groups; first loop over i,j then over k to reduce memory access
@@ -1747,7 +1748,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
         kx = kxvecs[k];
         ky = kyvecs[k];
         kz = kzvecs[k];
-        
+   
         // TODO blocking approach from metalwalls? pre-compute and store local cos_kxkykz_i and sin_kxkykz_i?
         
         cos_kxky = cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
