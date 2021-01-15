@@ -1823,6 +1823,8 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   double **f = atom->f; 
   double *q = atom->q;
   
+  double *nprd_local, *nprd_all;
+  
  // how many local group atoms owns each proc?
   
   bigint ngrouplocal = 0;
@@ -1838,95 +1840,63 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
   
-  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");  
-  
   MPI_Allgather(&ngrouplocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
   
   displs[0] = 0;
     for (int i = 1; i < nprocs; i++)
       displs[i] = displs[i-1] + recvcounts[i-1];
   
+  memory->create(jmat,ngroup,"ewald/conp:jmat");    
+  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all"); 
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local"); 
+  memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
+  
   // jmat compatible to nprd_all; sorted by rank of proc
   
   bigint count = 0;  
   for (int i = 0; i < nlocal; i++)
     if (imat[i] != -1) jmat_local[count++] = imat[i];
-    
-  memory->create(jmat,ngroup,"ewald/conp:jmat");    
+  
+  // gather non-periodic positions of subset from all procs  
+  count = 0;  
+  for (int i = 0; i < nlocal; i++)
+    if (imat[i] > -1) nprd_local[count++] = x[i][nprd_dim];  
     
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
+  MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
   
   memory->destroy(jmat_local);
+  memory->destroy(nprd_local);
+    
+  double aij;
   
   if (slabflag == 1 && slab_volfactor > 1.0) {
     
     // use EW3DC slab correction on subset
-   
-    double zprd = domain->zprd;
-
-    double dipole = 0.0;
-    for (int i = 0; i < nlocal; i++) 
-      if (imat[i] > -1) dipole += q[i]*x[i][nprd_dim];
-
-    // sum local contributions to get global dipole moment
-
-    double dipole_all;
-    MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
-
-    // compute corrections
 
     const double prefac = MY_4PI/volume;
     
-    double aij;
     for (int i = 0; i < nlocal; i++) {
       
       if (imat[i] < 0) continue;
       
-      // matrix is symmetric
+      // matrix is not(!) symmetric
     
-      for (bigint j = imat[i]; j < ngroup; j++) {
-      
-        aij = prefac * x[i][nprd_dim]*dipole_all;
-      
+      for (bigint j = 0; j < ngroup; j++) {
+        aij = prefac * x[i][nprd_dim]*nprd_all[j];
         matrix[imat[i]][jmat[j]] += aij;
-        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
   
   } else {
   
     // use EW2D infinite boundary correction
-  
-    double *nprd_local, *nprd_all;
-    double *q_local, *q_all;
-    
-    memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
-    memory->create(q_local,ngrouplocal,"ewald/conp:q_local");
-    
-    memory->create(nprd_all,ngroup,"ewald/conp:nprd_all");
-    memory->create(q_all,ngroup,"ewald/conp:q_all");  
-      
-    // gather q and non-periodic positions of subset from all procs
-    
-    count = 0;  
-    for (int i = 0; i < nlocal; i++) {
-      if (imat[i] < 0) continue;
-      nprd_local[count] = x[i][nprd_dim];
-      q_local[count] = q[i];
-      count++;
-    }
-      
-    MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
-    MPI_Allgatherv(q_local,ngrouplocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
-    
-    memory->destroy(nprd_local);
-    memory->destroy(q_local);
     
     const double g_ewald_inv = 1.0 / g_ewald;
     const double g_ewald_sq = g_ewald*g_ewald;
     const double prefac = 2.0 * MY_PIS/area;
      
-    double aij, dij;
+    double dij;
     
     // loop over ALL atom interactions in subset
     
@@ -1948,11 +1918,8 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
         if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
       }
     }
-    
-    memory->destroy(nprd_all);
-    memory->destroy(q_all);
   }
-  
+  memory->destroy(nprd_all);
   memory->destroy(recvcounts);
   memory->destroy(displs);
   memory->destroy(jmat);
