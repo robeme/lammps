@@ -1616,6 +1616,8 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   double **csx,**csy,**csz,**snx,**sny,**snz;
   double *csx_all,*csy_all,*csz_all;
   double *snx_all,*sny_all,*snz_all;
+    
+  bigint *jmat, *jmat_local;
 
   int i,j,k;
 
@@ -1645,11 +1647,14 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   memory->create(csz_all,(kzmax+1)*ngroup,"ewald/conp:csz_all");
   memory->create(snz_all,(kzmax+1)*ngroup,"ewald/conp:snz_all");
   
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");    
+  
   // copy sn and cn to new local arrays 
   
   j = 0;
   for (i = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
+    
     for (k = 0; k <= kxmax; k++) {  
       csx[k][j] = cs[k][0][i];
       snx[k][j] = sn[k][0][i];
@@ -1662,6 +1667,11 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
       csz[k][j] = cs[k][2][i];
       snz[k][j] = sn[k][2][i];
     }
+    
+    // ... and keep track of the matrix index
+    
+    jmat_local[j] = imat[i];
+    
     j++;
   }
 
@@ -1672,10 +1682,10 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(ndispls,3,nprocs,"ewald/conp:ndispls");
   
+  n[0] = (kxmax+1)*ngrouplocal;
+  n[1] = (kymax+1)*ngrouplocal;
+  n[2] = (kzmax+1)*ngrouplocal;
   for (int idim = 0; idim < 3; idim++) {
-    
-    n[idim] = (kxmax+1)*ngrouplocal;
-    
     MPI_Allgather(&n[idim],1,MPI_INT,recvcounts,1,MPI_INT,world);
     
     ndispls[idim][0] = 0;
@@ -1703,9 +1713,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 //          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+ndispls[0][m]]);   
 //  fclose(pFile);
 
-  // create matrix indexing for j atoms
-  
-  bigint *jmat, *jmat_local;
+  // create global matrix indexing for j atoms
     
   int *displs;
   memory->create(displs,nprocs,"ewald/conp:displs");
@@ -1713,14 +1721,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   displs[0] = 0;
     for (i = 1; i < nprocs; i++)
       displs[i] = displs[i-1] + recvcounts[i-1];
-  
-  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");    
-  bigint count = 0;  
-  for (i = 0; i < nlocal; i++)
-    if (imat[i] != -1) jmat_local[count++] = imat[i];
-  
-    // jmat compatible to csx_all, ... ; sorted by rank of proc
-  
+ 
   memory->create(jmat,ngroup,"ewald/conp:jmat");    
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
   memory->destroy(jmat_local);
@@ -1825,17 +1826,35 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   
   double *nprd_local, *nprd_all;
   
- // how many local group atoms owns each proc?
-  
+  // how many local and total atoms in groups    
   bigint ngrouplocal = 0;
   bigint ngroup;
-  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++;
-      
-  // how many atoms do we have in total in groups    
-      
+  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++; 
+  
   MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_LMP_BIGINT,MPI_SUM,world);
-
-  // create matrix indexing for j atoms
+  
+  memory->create(jmat,ngroup,"ewald/conp:jmat");    
+  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all"); 
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local"); 
+  memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
+  
+  int j = 0;  
+  for (int i = 0; i < nlocal; i++) {
+    
+    if (imat[i] < 0) continue;
+    
+    // gather non-periodic positions of groups
+    
+    nprd_local[j] = x[i][nprd_dim];  
+    
+    // ... and keep track of matrix index
+   
+    jmat_local[j] = imat[i];
+    
+    j++;
+  }
+  
+  // create matrix indexing for j atoms and gather all nprd positions
   
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
@@ -1845,22 +1864,6 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   displs[0] = 0;
     for (int i = 1; i < nprocs; i++)
       displs[i] = displs[i-1] + recvcounts[i-1];
-  
-  memory->create(jmat,ngroup,"ewald/conp:jmat");    
-  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all"); 
-  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local"); 
-  memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
-  
-  // jmat compatible to nprd_all; sorted by rank of proc
-  
-  bigint count = 0;  
-  for (int i = 0; i < nlocal; i++)
-    if (imat[i] != -1) jmat_local[count++] = imat[i];
-  
-  // gather non-periodic positions of subset from all procs  
-  count = 0;  
-  for (int i = 0; i < nlocal; i++)
-    if (imat[i] > -1) nprd_local[count++] = x[i][nprd_dim];  
     
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
   MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
@@ -1874,17 +1877,20 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
     
     // use EW3DC slab correction on subset
 
-    const double prefac = MY_4PI/volume;
+    const double prefac = MY_4PI/(domain->xprd * domain->yprd * domain->zprd);
     
     for (int i = 0; i < nlocal; i++) {
       
       if (imat[i] < 0) continue;
       
-      // matrix is not(!) symmetric
+      // matrix is symmetric
     
-      for (bigint j = 0; j < ngroup; j++) {
+      for (bigint j = imat[i]; j < ngroup; j++) {
+        
         aij = prefac * x[i][nprd_dim]*nprd_all[j];
+        
         matrix[imat[i]][jmat[j]] += aij;
+        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
   
