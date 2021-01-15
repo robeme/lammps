@@ -1655,15 +1655,15 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   for (i = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
     
-    for (k = 0; k <= kxmax; k++) {  
+    for (k = 0; k <= kxmax+1; k++) {  
       csx[k][j] = cs[k][0][i];
       snx[k][j] = sn[k][0][i];
     }
-    for (k = 0; k <= kymax; k++) { 
+    for (k = 0; k <= kymax+1; k++) { 
       csy[k][j] = cs[k][1][i];
       sny[k][j] = sn[k][1][i];
     }
-    for (k = 0; k <= kzmax; k++) { 
+    for (k = 0; k <= kzmax+1; k++) { 
       csz[k][j] = cs[k][2][i];
       snz[k][j] = sn[k][2][i];
     }
@@ -1743,7 +1743,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
       aij = 0.0;
       
       for (int k = 0; k < kcount; k++) {
-      
+        
         kx = kxvecs[k];
         ky = kyvecs[k];
         kz = kzvecs[k];
