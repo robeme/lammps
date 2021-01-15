@@ -1830,10 +1830,7 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
   double **f = atom->f; 
   double *q = atom->q;
   
-  double *nprd, *nprd_all;
-  double *qlocal, *q_all;  
-
-  // how many local group atoms owns each proc?
+ // how many local group atoms owns each proc?
   
   bigint ngrouplocal = 0;
   bigint ngroup;
@@ -1851,12 +1848,6 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
   memory->create(displs,nprocs,"ewald/conp:displs");
   
   memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");  
-  memory->create(nprd,ngrouplocal,"ewald/conp:nprd");
-  memory->create(qlocal,ngrouplocal,"ewald/conp:qlocal");
-  
-  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all");
-  memory->create(q_all,ngroup,"ewald/conp:q_all");  
-  memory->create(jmat,ngroup,"ewald/conp:jmat");    
   
   MPI_Allgather(&ngrouplocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
   
@@ -1870,55 +1861,104 @@ void EwaldConp::compute_matrix_corr(int groupbit_A, int groupbit_B, bigint *imat
   for (int i = 0; i < nlocal; i++)
     if (imat[i] != -1) jmat_local[count++] = imat[i];
     
+  memory->create(jmat,ngroup,"ewald/conp:jmat");    
+    
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
-    
-  // gather q and non-periodic positions of subset from all procs
   
-  count = 0;  
-  for (int i = 0; i < nlocal; i++)
-    if (imat[i] != -1) {
-      nprd[count] = x[i][nprd_dim];
-      qlocal[count] = q[i];
-      count++;
-    }
-    
-  MPI_Allgatherv(nprd,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
-  MPI_Allgatherv(qlocal,ngrouplocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
-  
-  memory->destroy(nprd);
-  memory->destroy(qlocal);
   memory->destroy(jmat_local);
   memory->destroy(recvcounts);
   memory->destroy(displs);
   
-  const double g_ewald_inv = 1.0 / g_ewald;
-  const double g_ewald_sq = g_ewald*g_ewald;
-  const double prefac = 2.0 * MY_PIS/area;
+  if (slabflag == 1 && slab_volfactor > 1.0) {
+    
+    // use EW3DC slab correction on subset
    
-  double aij, dij;
-  
-  // loop over ALL atom interactions in subset
-  
-  for (int i = 0; i < nlocal; i++) {
+    double zprd = domain->zprd;
+
+    double dipole = 0.0;
+    for (int i = 0; i < nlocal; i++) 
+      if (imat[i] > -1) dipole += q[i]*x[i][nprd_dim];
+
+    // sum local contributions to get global dipole moment
+
+    double dipole_all;
+    MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+
+    // compute corrections
+
+    const double prefac = MY_4PI/volume;
     
-    if (!(mask[i] & groupbit_A || mask[i] & groupbit_B)) continue;
+    double aij;
+    for (int i = 0; i < nlocal; i++) {
+      
+      if (!(mask[i] & groupbit_A || mask[i] & groupbit_B)) continue;
+      
+      // matrix is symmetric
     
-    // matrix is symmetric
-  
-    for (bigint j = imat[i]; j < ngroup; j++) {
-      
-      dij = nprd_all[j] - x[i][nprd_dim];
-      
-      // resembles (aij) matrix component in constant potential
-      aij = prefac * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
-                         MY_PIS * dij * erf( dij * g_ewald ) );
-      
-      matrix[imat[i]][jmat[j]] -= aij;
-      if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
+      for (bigint j = imat[i]; j < ngroup; j++) {
+        aij = prefac * x[i][nprd_dim]*dipole_all;
+      }
     }
+  
+  } else {
+  
+    // use EW2D infinite boundary correction
+  
+    double *nprd, *nprd_all;
+    double *qlocal, *q_all;
+    
+    memory->create(nprd,ngrouplocal,"ewald/conp:nprd");
+    memory->create(qlocal,ngrouplocal,"ewald/conp:qlocal");
+    
+    memory->create(nprd_all,ngroup,"ewald/conp:nprd_all");
+    memory->create(q_all,ngroup,"ewald/conp:q_all");  
+      
+    // gather q and non-periodic positions of subset from all procs
+    
+    count = 0;  
+    for (int i = 0; i < nlocal; i++)
+      if (imat[i] != -1) {
+        nprd[count] = x[i][nprd_dim];
+        qlocal[count] = q[i];
+        count++;
+      }
+      
+    MPI_Allgatherv(nprd,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
+    MPI_Allgatherv(qlocal,ngrouplocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
+    
+    memory->destroy(nprd);
+    memory->destroy(qlocal);
+    
+    const double g_ewald_inv = 1.0 / g_ewald;
+    const double g_ewald_sq = g_ewald*g_ewald;
+    const double prefac = 2.0 * MY_PIS/area;
+     
+    double aij, dij;
+    
+    // loop over ALL atom interactions in subset
+    
+    for (int i = 0; i < nlocal; i++) {
+      
+      if (!(mask[i] & groupbit_A || mask[i] & groupbit_B)) continue;
+      
+      // matrix is symmetric
+    
+      for (bigint j = imat[i]; j < ngroup; j++) {
+        
+        dij = nprd_all[j] - x[i][nprd_dim];
+        
+        // resembles (aij) matrix component in constant potential
+        aij = prefac * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
+                           MY_PIS * dij * erf( dij * g_ewald ) );
+        
+        matrix[imat[i]][jmat[j]] -= aij;
+        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
+      }
+    }
+    
+    memory->destroy(nprd_all);
+    memory->destroy(q_all);
   }
   
-  memory->destroy(nprd_all);
-  memory->destroy(q_all);
   memory->destroy(jmat);
 }
