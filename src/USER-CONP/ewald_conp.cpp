@@ -1612,94 +1612,114 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   int nlocal = atom->nlocal;
   tagint *tag = atom->tag;
   int *mask = atom->mask;
+  int nprocs = comm->nprocs;
   
   double **csx,**csy,**csz,**snx,**sny,**snz;
   double *csx_all,*csy_all,*csz_all;
   double *snx_all,*sny_all,*snz_all;
     
   bigint *jmat, *jmat_local;
-
-  int i,j,k;
-
-  // how many local group atoms owns each proc?
   
-  bigint ngrouplocal = 0;
   bigint ngroup;
-  for (i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++;
-      
-  // how many atoms do we have in total in groups    
-      
-  MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_LMP_BIGINT,MPI_SUM,world);
+  int  ngrouplocal;
 
-  // gather only subset of sn and cs on each proc
+  // how many local group atoms owns each proc and how many in total    
   
-  memory->create(csx,kmax+1,ngrouplocal,"ewald/conp:csx");
-  memory->create(snx,kmax+1,ngrouplocal,"ewald/conp:snx");
-  memory->create(csy,kmax+1,ngrouplocal,"ewald/conp:csy");
-  memory->create(sny,kmax+1,ngrouplocal,"ewald/conp:sny");
-  memory->create(snz,kmax+1,ngrouplocal,"ewald/conp:snz");
-  memory->create(csz,kmax+1,ngrouplocal,"ewald/conp:csz");
+  ngrouplocal = 0;
+  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++;
+      
+  MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_INT,MPI_SUM,world);
+
+  // gather only subset of local sn and cs on each proc
   
-  memory->create(csx_all,(kmax+1)*ngroup,"ewald/conp:csx_all");
-  memory->create(snx_all,(kmax+1)*ngroup,"ewald/conp:snx_all");
-  memory->create(csy_all,(kmax+1)*ngroup,"ewald/conp:csy_all");
-  memory->create(sny_all,(kmax+1)*ngroup,"ewald/conp:sny_all");
-  memory->create(csz_all,(kmax+1)*ngroup,"ewald/conp:csz_all");
-  memory->create(snz_all,(kmax+1)*ngroup,"ewald/conp:snz_all");
+  memory->create(csx,kxmax+1,ngrouplocal,"ewald/conp:csx");
+  memory->create(snx,kxmax+1,ngrouplocal,"ewald/conp:snx");
+  memory->create(csy,kymax+1,ngrouplocal,"ewald/conp:csy");
+  memory->create(sny,kymax+1,ngrouplocal,"ewald/conp:sny");
+  memory->create(snz,kzmax+1,ngrouplocal,"ewald/conp:snz");
+  memory->create(csz,kzmax+1,ngrouplocal,"ewald/conp:csz");
+    
+  memory->create(csx_all,(kxmax+1)*ngroup,"ewald/conp:csx_all");
+  memory->create(snx_all,(kxmax+1)*ngroup,"ewald/conp:snx_all");
+  memory->create(csy_all,(kymax+1)*ngroup,"ewald/conp:csy_all");
+  memory->create(sny_all,(kymax+1)*ngroup,"ewald/conp:sny_all");
+  memory->create(csz_all,(kzmax+1)*ngroup,"ewald/conp:csz_all");
+  memory->create(snz_all,(kzmax+1)*ngroup,"ewald/conp:snz_all");
   
-  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");    
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");  
   
-  // copy sn and cn to new local arrays 
+  // copy subsets of local sn and cn to new local group arrays 
+  // beeing as memory efficient as one can possibly be ...
   
-  int kx,ky,kz;
-  
-  j = 0;
-  for (i = 0; i < nlocal; i++) {
+  ngrouplocal = 0;
+  for (int i = 0; i < nlocal; i++) {
+    
     if (imat[i] < 0) continue;
     
-    for (k = 0; k < kcount; k++) {
-      kx = kxvecs[k];
-      ky = abs(kyvecs[k]);
-      kz = abs(kzvecs[k]);  
-      csx[kx][j] = cs[kx][0][i];
-      snx[kx][j] = sn[kx][0][i];
-      csy[ky][j] = cs[ky][1][i];
-      sny[ky][j] = sn[ky][1][i];
-      csz[kz][j] = cs[kz][2][i];
-      snz[kz][j] = sn[kz][2][i];
+    for (int k = 0; k <= kxmax; k++) {
+      csx[k][ngrouplocal] = cs[k][0][i];
+      snx[k][ngrouplocal] = sn[k][0][i];
+    } for (int k = 0; k <= kymax; k++) {  
+      csy[k][ngrouplocal] = cs[k][1][i];
+      sny[k][ngrouplocal] = sn[k][1][i];
+    } for (int k = 0; k <= kzmax; k++) {
+      csz[k][ngrouplocal] = cs[k][2][i];
+      snz[k][ngrouplocal] = sn[k][2][i];
     }
     
-    // ... and keep track of the matrix index
+    // ... and keep track of matrix index
     
-    jmat_local[j] = imat[i];
+    jmat_local[ngrouplocal] = imat[i];
     
-    j++;
+    ngrouplocal++;
   }
 
-  int nprocs = comm->nprocs;
-  int n[3];
-  int *recvcounts,**ndispls;
+  int *recvcounts, *displs; // allgather requires int for displs but content might overflow!
 
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
-  memory->create(ndispls,3,nprocs,"ewald/conp:ndispls");
+  memory->create(displs,nprocs,"ewald/conp:displs");
+  memory->create(jmat,ngroup,"ewald/conp:jmat");  
   
-  n[0] = (kmax+1)*ngrouplocal;
-  n[1] = (kmax+1)*ngrouplocal;
-  n[2] = (kmax+1)*ngrouplocal;
+  int n;
   
-  for (int idim = 0; idim < 3; idim++) {
-    MPI_Allgather(&n[idim],1,MPI_INT,recvcounts,1,MPI_INT,world);
-    ndispls[idim][0] = 0;
-    for (i = 1; i < nprocs; i++)
-      ndispls[idim][i] = ndispls[idim][i-1] + recvcounts[i-1];
-  }
-      
-  MPI_Allgatherv(&csx[0][0],n[0],MPI_DOUBLE,csx_all,recvcounts,ndispls[0],MPI_DOUBLE,world);
-  MPI_Allgatherv(&snx[0][0],n[0],MPI_DOUBLE,snx_all,recvcounts,ndispls[0],MPI_DOUBLE,world);
-  MPI_Allgatherv(&csy[0][0],n[1],MPI_DOUBLE,csy_all,recvcounts,ndispls[1],MPI_DOUBLE,world);
-  MPI_Allgatherv(&sny[0][0],n[1],MPI_DOUBLE,sny_all,recvcounts,ndispls[1],MPI_DOUBLE,world);
-  MPI_Allgatherv(&csz[0][0],n[2],MPI_DOUBLE,csz_all,recvcounts,ndispls[2],MPI_DOUBLE,world);
-  MPI_Allgatherv(&snz[0][0],n[2],MPI_DOUBLE,snz_all,recvcounts,ndispls[2],MPI_DOUBLE,world);
+  // gather subsets global cs and sn
+  
+  n = (kxmax+1)*ngrouplocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(&csx[0][0],n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&snx[0][0],n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+  n = (kymax+1)*ngrouplocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(&csy[0][0],n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&sny[0][0],n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+  n = (kzmax+1)*ngrouplocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(&csz[0][0],n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
+  MPI_Allgatherv(&snz[0][0],n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+  // gather subsets global matrix indexing   
+  
+  n = ngrouplocal;
+  MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1];
+  MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
+  
+  memory->destroy(jmat_local);
+  memory->destroy(displs);
+  memory->destroy(recvcounts);
   
   // consistency check between local global arrays
 
@@ -1714,21 +1734,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 //          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+ndispls[0][m]]);   
 //  fclose(pFile);
 
-  // create global matrix indexing for j atoms
-    
-  int *displs;
-  memory->create(displs,nprocs,"ewald/conp:displs");
-  MPI_Allgather(&ngrouplocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
-  displs[0] = 0;
-    for (i = 1; i < nprocs; i++)
-      displs[i] = displs[i-1] + recvcounts[i-1];
- 
-  memory->create(jmat,ngroup,"ewald/conp:jmat");    
-  MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
-  memory->destroy(jmat_local);
-  memory->destroy(displs);
-  
-  int kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
+  int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
   double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
   
   // aij for each atom pair in groups; first loop over i,j then over k to reduce memory access
@@ -1748,8 +1754,6 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
         kx = kxvecs[k];
         ky = kyvecs[k];
         kz = kzvecs[k];
-   
-        // TODO blocking approach from metalwalls? pre-compute and store local cos_kxkykz_i and sin_kxkykz_i?
         
         cos_kxky = cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
         sin_kxky = sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
@@ -1781,11 +1785,8 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
       
     if ((i+1) % 100 == 0) printf("(%d/%d) on %d\n",i+1,nlocal,comm->me);
   }
-  printf("%d finished!\n",comm->me);
   
   memory->destroy(jmat);
-  memory->destroy(ndispls);
-  memory->destroy(recvcounts);
   memory->destroy(csx_all);
   memory->destroy(snx_all);
   memory->destroy(csy_all);
@@ -1803,7 +1804,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 /* ----------------------------------------------------------------------
    compute individual corrections between all pairs of atoms in group A 
    and B. see lammps_gather_atoms_concat() on how all sn and cs have been 
-   obtained. TODO decide between EW3DC and EW2D
+   obtained. 
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
@@ -1816,8 +1817,6 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   int nlocal = atom->nlocal;
   int *mask = atom->mask;
   
-  int *recvcounts,*displs;
-  
   tagint *tag = atom->tag;
   bigint *jmat, *jmat_local;
 
@@ -1827,48 +1826,50 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   
   double *nprd_local, *nprd_all;
   
-  // how many local and total atoms in groups    
-  bigint ngrouplocal = 0;
+  // how many local and total group atoms?
+   
+  int ngrouplocal;
   bigint ngroup;
-  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++; 
   
-  MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_LMP_BIGINT,MPI_SUM,world);
+  ngrouplocal = 0;
+  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++; 
+  MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_INT,MPI_SUM,world);
   
   memory->create(jmat,ngroup,"ewald/conp:jmat");    
-  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all"); 
   memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local"); 
+  
+  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all"); 
   memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
   
-  int j = 0;  
+  ngrouplocal = 0;
   for (int i = 0; i < nlocal; i++) {
     
     if (imat[i] < 0) continue;
     
     // gather non-periodic positions of groups
     
-    nprd_local[j] = x[i][nprd_dim];  
+    nprd_local[ngrouplocal] = x[i][nprd_dim];  
     
     // ... and keep track of matrix index
    
-    jmat_local[j] = imat[i];
+    jmat_local[ngrouplocal] = imat[i];
     
-    j++;
+    ngrouplocal++;
   }
   
-  // create matrix indexing for j atoms and gather all nprd positions
+  // gather matrix indexing and subsets nprd positions
+  
+  int *recvcounts,*displs;
   
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
   
   MPI_Allgather(&ngrouplocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
-  
   displs[0] = 0;
-    for (int i = 1; i < nprocs; i++)
-      displs[i] = displs[i-1] + recvcounts[i-1];
-    
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i-1] + recvcounts[i-1]; 
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
   MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
-  
   memory->destroy(jmat_local);
   memory->destroy(nprd_local);
     
@@ -1878,7 +1879,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
     
     // use EW3DC slab correction on subset
 
-    const double prefac = MY_4PI/(domain->xprd * domain->yprd * domain->zprd);
+    const double prefac = MY_4PI/volume;
     
     for (int i = 0; i < nlocal; i++) {
       
@@ -1926,6 +1927,9 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
       }
     }
   }
+  
+  printf(" *** %d done *** \n", comm->me); 
+  
   memory->destroy(nprd_all);
   memory->destroy(recvcounts);
   memory->destroy(displs);
