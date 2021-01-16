@@ -1626,7 +1626,9 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   // how many local group atoms owns each proc and how many in total    
   
   ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++;
+  for (int i = 0; i < nlocal; i++) 
+    if (imat[i] > -1 || atom->map(tag[i]) < 0) 
+      ngrouplocal++;
       
   MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_INT,MPI_SUM,world);
 
@@ -1654,7 +1656,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   ngrouplocal = 0;
   for (int i = 0; i < nlocal; i++) {
     
-    if (imat[i] < 0) continue;
+    if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
     
     for (int k = 0; k <= kxmax; k++) {
       csx[k][ngrouplocal] = cs[k][0][i];
@@ -1741,7 +1743,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 
   for (int i = 0; i < nlocal; i++) {
 
-    if (imat[i] < 0) continue;
+    if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
          
     // matrix is symmetric, use imat to skip interactions
     
@@ -1832,7 +1834,9 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   bigint ngroup;
   
   ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) if (imat[i] > -1) ngrouplocal++; 
+  for (int i = 0; i < nlocal; i++) 
+    if (imat[i] > -1 || atom->map(tag[i]) < 0) 
+      ngrouplocal++; 
   MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_INT,MPI_SUM,world);
   
   memory->create(jmat,ngroup,"ewald/conp:jmat");    
@@ -1844,7 +1848,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   ngrouplocal = 0;
   for (int i = 0; i < nlocal; i++) {
     
-    if (imat[i] < 0) continue;
+    if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
     
     // gather non-periodic positions of groups
     
@@ -1875,7 +1879,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
     
   double aij;
   
-  if (slabflag == 1 && slab_volfactor > 1.0) {
+  if (slab_volfactor > 1.0) {
     
     // use EW3DC slab correction on subset
 
@@ -1883,7 +1887,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
     
     for (int i = 0; i < nlocal; i++) {
       
-      if (imat[i] < 0) continue;
+      if (imat[i] < 0 ||  atom->map(tag[i]) < 0) continue;
       
       // matrix is symmetric
     
@@ -1910,12 +1914,14 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
     
     for (int i = 0; i < nlocal; i++) {
       
-      if (imat[i] < 0) continue;
+      if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
       
       // matrix is symmetric
     
       for (bigint j = imat[i]; j < ngroup; j++) {
-        
+      
+        //printf(" *** %d/%d on %d *** \n",i,j,comm->me);  
+    
         dij = nprd_all[j] - x[i][nprd_dim];
         
         // resembles (aij) matrix component in constant potential
