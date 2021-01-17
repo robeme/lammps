@@ -54,9 +54,9 @@ EwaldConp::EwaldConp(LAMMPS *lmp) : KSpace(lmp),
 
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
-  
+
   nprd_dim = -1;
-  
+
   ug = nullptr;
   eg = vg = nullptr;
   sfacrl = sfacim = sfacrl_all = sfacim_all = nullptr;
@@ -365,11 +365,11 @@ void EwaldConp::compute(int eflag, int vflag)
 
   ev_init(eflag,vflag);
 
-  // if atom count has changed, update qsum and qsqsum 
+  // if atom count has changed, update qsum and qsqsum
   // and fetch new z positions if necessary
 
   if (atom->natoms != natoms_original) {
-    qsum_qsq(); 
+    qsum_qsq();
     natoms_original = atom->natoms;
   }
 
@@ -1244,82 +1244,82 @@ void EwaldConp::ew2dcorr()
   double **x = atom->x;
   double **f = atom->f;
   tagint *tag = atom->tag;
-  int nlocal = atom->nlocal;  
+  int nlocal = atom->nlocal;
   bigint natoms = atom->natoms;
   int nprocs = comm->nprocs;
 
   int *recvcounts,*displs;
-  double *nprd, *nprd_all, *q_all;  
-  
+  double *nprd, *nprd_all, *q_all;
+
   // gather q and non-periodic positions on all procs
-  
+
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
-  
+
   MPI_Allgather(&nlocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
- 
+
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
-  
+
   memory->create(nprd,nlocal,"ewald/conp:nprd");
-  
+
   for (int i = 0; i < nlocal; i++)
     nprd[i] = x[i][nprd_dim];
-  
+
   memory->create(nprd_all,natoms,"ewald/conp:nprd_all");
   memory->create(q_all,natoms,"ewald/conp:q_all");
 
   MPI_Allgatherv(q,nlocal,MPI_DOUBLE,q_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(nprd,nlocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
-  
+
   memory->destroy(nprd);
   memory->destroy(recvcounts);
   memory->destroy(displs);
-  
+
   const double g_ewald_inv = 1.0 / g_ewald;
   const double g_ewald_sq = g_ewald*g_ewald;
   const double qscale = qqrd2e * scale;
   const double efact = 2.0 * MY_PIS/area;
   const double ffact = qscale * MY_2PI/area;
-   
+
   double pot_ij, aij, dij, e_keq0_all;
-  
+
   // loop over ALL atom interactions
-  
+
   double e_keq0 = 0.0;
   for (int i = 0; i < nlocal; i++) {
-    
+
     pot_ij = 0.0;
-    
+
     // TODO check if we are double counting the interactions here?
     for (bigint j = 0; j < natoms; j++) {
-      
+
       dij = nprd_all[j] - x[i][nprd_dim];
-      
+
       // resembles (aij) matrix component in constant potential
-      aij = efact * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
+      aij = efact * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv +
                          MY_PIS * dij * erf( dij * g_ewald ) );
       // coulomb potential; see eq. (4) in metalwalls parallelization doc
       pot_ij += q_all[j] * aij;
-      
+
       // add on force corrections
-      
+
       f[i][nprd_dim] -= ffact * q[i]*q_all[j] * erf( g_ewald*dij );
     }
-    
+
     // per-atom energy; see eq. (20) in metalwalls ewald doc
 
     if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
-    
+
     e_keq0 += q[i] * pot_ij;
   }
-  
+
   memory->destroy(nprd_all);
   memory->destroy(q_all);
-  
+
   // sum local contributions; see eq. (20) in metalwalls ewald doc
-  
+
   MPI_Allreduce(&e_keq0,&e_keq0_all,1,MPI_DOUBLE,MPI_SUM,world);
 
   if (eflag_global) energy -= qscale * e_keq0_all * 0.5;
@@ -1348,7 +1348,7 @@ double EwaldConp::memory_usage()
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
-{ 
+{
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute group/group for triclinic systems");
@@ -1465,7 +1465,7 @@ void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 
   // 2d slab correction
 
-  if (slabflag == 1 && slab_volfactor > 1.0) 
+  if (slabflag == 1 && slab_volfactor > 1.0)
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
   else if (slabflag == 1 && slab_volfactor == 1.0)
     ew2dcorr_groups(groupbit_A, groupbit_B, AA_flag);
@@ -1597,82 +1597,82 @@ void EwaldConp::deallocate_groups()
 
 void EwaldConp::ew2dcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 {
-  if (slabflag == 1 && slab_volfactor == 1.0) 
+  if (slabflag == 1 && slab_volfactor == 1.0)
     error->all(FLERR,"Cannot (yet) use EW2D correction with compute group/group");
 }
 
 /* ----------------------------------------------------------------------
-   compute individual interactions between all pairs of atoms in group A 
-   and B. see lammps_gather_atoms_concat() on how all sn and cs have been 
+   compute individual interactions between all pairs of atoms in group A
+   and B. see lammps_gather_atoms_concat() on how all sn and cs have been
    obtained.
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix(bigint *imat, double **matrix)
-{ 
+{
   int nlocal = atom->nlocal;
   tagint *tag = atom->tag;
   int *mask = atom->mask;
   int nprocs = comm->nprocs;
-  
+
   double **csx,**csy,**csz,**snx,**sny,**snz;
   double *csx_all,*csy_all,*csz_all;
   double *snx_all,*sny_all,*snz_all;
-    
+
   bigint *jmat, *jmat_local;
-  
+
   bigint ngroup;
   int  ngrouplocal;
 
-  // how many local group atoms owns each proc and how many in total    
-  
+  // how many local group atoms owns each proc and how many in total
+
   ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) 
-    if (imat[i] > -1 || atom->map(tag[i]) < 0) 
+  for (int i = 0; i < nlocal; i++)
+    if (imat[i] > -1)
       ngrouplocal++;
-      
+
   MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_INT,MPI_SUM,world);
 
   // gather only subset of local sn and cs on each proc
-  
+
   memory->create(csx,kxmax+1,ngrouplocal,"ewald/conp:csx");
   memory->create(snx,kxmax+1,ngrouplocal,"ewald/conp:snx");
   memory->create(csy,kymax+1,ngrouplocal,"ewald/conp:csy");
   memory->create(sny,kymax+1,ngrouplocal,"ewald/conp:sny");
   memory->create(snz,kzmax+1,ngrouplocal,"ewald/conp:snz");
   memory->create(csz,kzmax+1,ngrouplocal,"ewald/conp:csz");
-    
+
   memory->create(csx_all,(kxmax+1)*ngroup,"ewald/conp:csx_all");
   memory->create(snx_all,(kxmax+1)*ngroup,"ewald/conp:snx_all");
   memory->create(csy_all,(kymax+1)*ngroup,"ewald/conp:csy_all");
   memory->create(sny_all,(kymax+1)*ngroup,"ewald/conp:sny_all");
   memory->create(csz_all,(kzmax+1)*ngroup,"ewald/conp:csz_all");
   memory->create(snz_all,(kzmax+1)*ngroup,"ewald/conp:snz_all");
-  
-  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");  
-  
-  // copy subsets of local sn and cn to new local group arrays 
+
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");
+
+  // copy subsets of local sn and cn to new local group arrays
   // beeing as memory efficient as one can possibly be ...
-  
+
   ngrouplocal = 0;
   for (int i = 0; i < nlocal; i++) {
-    
-    if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
-    
+
+    if (imat[i] < 0) continue;
+
     for (int k = 0; k <= kxmax; k++) {
       csx[k][ngrouplocal] = cs[k][0][i];
       snx[k][ngrouplocal] = sn[k][0][i];
-    } for (int k = 0; k <= kymax; k++) {  
+    } for (int k = 0; k <= kymax; k++) {
       csy[k][ngrouplocal] = cs[k][1][i];
       sny[k][ngrouplocal] = sn[k][1][i];
     } for (int k = 0; k <= kzmax; k++) {
       csz[k][ngrouplocal] = cs[k][2][i];
       snz[k][ngrouplocal] = sn[k][2][i];
     }
-    
+
     // ... and keep track of matrix index
-    
+
     jmat_local[ngrouplocal] = imat[i];
-    
+
     ngrouplocal++;
   }
 
@@ -1680,12 +1680,12 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
-  memory->create(jmat,ngroup,"ewald/conp:jmat");  
-  
+  memory->create(jmat,ngroup,"ewald/conp:jmat");
+
   int n;
-  
+
   // gather subsets global cs and sn
-  
+
   n = (kxmax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
@@ -1693,7 +1693,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(&csx[0][0],n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(&snx[0][0],n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
-  
+
   n = (kymax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
@@ -1701,7 +1701,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(&csy[0][0],n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(&sny[0][0],n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
-  
+
   n = (kzmax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
@@ -1709,20 +1709,20 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(&csz[0][0],n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(&snz[0][0],n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
-  
-  // gather subsets global matrix indexing   
-  
+
+  // gather subsets global matrix indexing
+
   n = ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
-  
+
   memory->destroy(jmat_local);
   memory->destroy(displs);
   memory->destroy(recvcounts);
-  
+
   // consistency check between local global arrays
 
 //  FILE *pFile;
@@ -1732,62 +1732,66 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 //  for (int m = 0; m < nprocs; m++)
 //    if (comm->me == m)
 //      for (k = 0; k < kxmax+1; k++)
-//        for (i = 0; i < ngrouplocal; i++) 
-//          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+ndispls[0][m]]);   
+//        for (i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+ndispls[0][m]]);
 //  fclose(pFile);
 
   int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
   double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
-  
+
   // aij for each atom pair in groups; first loop over i,j then over k to reduce memory access
 
   for (int i = 0; i < nlocal; i++) {
 
-    if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
-         
-    // matrix is symmetric, use imat to skip interactions
-    
-    for (bigint j = imat[i]; j < ngroup; j++) {
-      
+    if (imat[i] < 0) continue;
+
+    for (bigint j = 0; j < ngroup; j++) {
+
       aij = 0.0;
-      
+
+      // matrix is symmetric, skip upper triangular matrix
+
+      if (jmat[j] > imat[i]) continue;
+
       for (int k = 0; k < kcount; k++) {
-        
+
+        // use local sn and cs for simplicity
+
         kx = kxvecs[k];
         ky = kyvecs[k];
         kz = kzvecs[k];
-        
+
         cos_kxky = cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
         sin_kxky = sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
 
         cos_kxkykz_i = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
         sin_kxkykz_i = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
-        
+
         // global indexing  csx_all[kx][j]     <>        csx_all[kx+j*(kxmax+1)]
-        // local  indexing  cs_idim[k_idim][i] <> csx_all[i+k*ngrouplocal+ndispls[idim][comm->me]]]
-        
+        // local  indexing  cs_idim[k_idim][i] <> csx_all[i+k*ngrouplocal+displs[comm->me]]]
+
         kxj = kx+j*(kxmax+1);
         kyj = abs(ky)+j*(kymax+1);
         kzj = abs(kz)+j*(kzmax+1);
         sign_ky = (ky > 0) - (ky < 0);
         sign_kz = (kz > 0) - (kz < 0);
-      
+
         cos_kxky = csx_all[kxj] * csy_all[kyj] - snx_all[kxj] * sny_all[kyj] * sign_ky;
         sin_kxky = snx_all[kxj] * csy_all[kyj] + csx_all[kxj] * sny_all[kyj] * sign_ky;
 
         cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
         sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
-        
+
         aij += 2.0*ug[k] * (cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j);
       }
-      
+
       matrix[imat[i]][jmat[j]] += aij;
       if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
     }
-      
+
     if ((i+1) % 100 == 0) printf("(%d/%d) on %d\n",i+1,nlocal,comm->me);
   }
-  
+
   memory->destroy(jmat);
   memory->destroy(csx_all);
   memory->destroy(snx_all);
@@ -1804,13 +1808,13 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 }
 
 /* ----------------------------------------------------------------------
-   compute individual corrections between all pairs of atoms in group A 
-   and B. see lammps_gather_atoms_concat() on how all sn and cs have been 
-   obtained. 
+   compute individual corrections between all pairs of atoms in group A
+   and B. see lammps_gather_atoms_concat() on how all sn and cs have been
+   obtained.
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
-{ 
+{
   if (slabflag && triclinic)
     error->all(FLERR,"Cannot (yet) use K-space slab "
                "correction with compute coul/matrix for triclinic systems");
@@ -1818,124 +1822,126 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix)
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
   int *mask = atom->mask;
-  
+
   tagint *tag = atom->tag;
   bigint *jmat, *jmat_local;
 
   double **x = atom->x;
-  double **f = atom->f; 
+  double **f = atom->f;
   double *q = atom->q;
-  
+
   double *nprd_local, *nprd_all;
-  
+
   // how many local and total group atoms?
-   
+
   int ngrouplocal;
   bigint ngroup;
-  
+
   ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) 
-    if (imat[i] > -1 || atom->map(tag[i]) < 0) 
-      ngrouplocal++; 
+  for (int i = 0; i < nlocal; i++)
+    if (imat[i] > -1)
+      ngrouplocal++;
   MPI_Allreduce(&ngrouplocal,&ngroup,1,MPI_INT,MPI_SUM,world);
-  
-  memory->create(jmat,ngroup,"ewald/conp:jmat");    
-  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local"); 
-  
-  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all"); 
+
+  memory->create(jmat,ngroup,"ewald/conp:jmat");
+  memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");
+
+  memory->create(nprd_all,ngroup,"ewald/conp:nprd_all");
   memory->create(nprd_local,ngrouplocal,"ewald/conp:nprd_local");
-  
+
   ngrouplocal = 0;
   for (int i = 0; i < nlocal; i++) {
-    
-    if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
-    
+
+    if (imat[i] < 0) continue;
+
     // gather non-periodic positions of groups
-    
-    nprd_local[ngrouplocal] = x[i][nprd_dim];  
-    
+
+    nprd_local[ngrouplocal] = x[i][nprd_dim];
+
     // ... and keep track of matrix index
-   
+
     jmat_local[ngrouplocal] = imat[i];
-    
+
     ngrouplocal++;
   }
-  
+
   // gather matrix indexing and subsets nprd positions
-  
+
   int *recvcounts,*displs;
-  
+
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
-  
+
   MPI_Allgather(&ngrouplocal,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
-    displs[i] = displs[i-1] + recvcounts[i-1]; 
+    displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
   MPI_Allgatherv(nprd_local,ngrouplocal,MPI_DOUBLE,nprd_all,recvcounts,displs,MPI_DOUBLE,world);
   memory->destroy(jmat_local);
   memory->destroy(nprd_local);
-    
+
   double aij;
-  
+
   if (slab_volfactor > 1.0) {
-    
+
     // use EW3DC slab correction on subset
 
     const double prefac = MY_4PI/volume;
-    
+
     for (int i = 0; i < nlocal; i++) {
-      
-      if (imat[i] < 0 ||  atom->map(tag[i]) < 0) continue;
-      
-      // matrix is symmetric
-    
-      for (bigint j = imat[i]; j < ngroup; j++) {
-        
+
+      if (imat[i] < 0) continue;
+
+      for (bigint j = 0; j < ngroup; j++) {
+
+        // matrix is symmetric
+
+        if (jmat[j] > imat[i]) continue;
+
         aij = prefac * x[i][nprd_dim]*nprd_all[j];
-        
+
         matrix[imat[i]][jmat[j]] += aij;
         if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
-  
+
   } else {
-  
+
     // use EW2D infinite boundary correction
-    
+
     const double g_ewald_inv = 1.0 / g_ewald;
     const double g_ewald_sq = g_ewald*g_ewald;
     const double prefac = 2.0 * MY_PIS/area;
-     
+
     double dij;
-    
+
     // loop over ALL atom interactions in subset
-    
+
     for (int i = 0; i < nlocal; i++) {
-      
-      if (imat[i] < 0 || atom->map(tag[i]) < 0) continue;
-      
-      // matrix is symmetric
-    
-      for (bigint j = imat[i]; j < ngroup; j++) {
-      
-        //printf(" *** %d/%d on %d *** \n",i,j,comm->me);  
-    
+
+      if (imat[i] < 0) continue;
+
+      for (bigint j = 0; j < ngroup; j++) {
+
+        // matrix is symmetric
+
+        if (jmat[j] > imat[i]) continue;
+
         dij = nprd_all[j] - x[i][nprd_dim];
-        
+
         // resembles (aij) matrix component in constant potential
-        aij = prefac * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv + 
+        aij = prefac * ( exp( -dij*dij * g_ewald_sq ) * g_ewald_inv +
                            MY_PIS * dij * erf( dij * g_ewald ) );
-        
+
         matrix[imat[i]][jmat[j]] -= aij;
         if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
       }
     }
   }
-  
-  printf(" *** %d done *** \n", comm->me); 
-  
+
+  printf(" *** %d done *** \n", comm->me);
+
   memory->destroy(nprd_all);
   memory->destroy(recvcounts);
   memory->destroy(displs);
