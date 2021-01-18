@@ -286,6 +286,9 @@ void ComputeCoulMatrix::pair_contribution()
   double **x = atom->x;
   int *type = atom->type;
   int *mask = atom->mask;
+  tagint *tag = atom->tag;
+  
+  bigint jpos;
   
   double etaij = eta*eta/sqrt(2.0*eta*eta); // see mw ewald theory eq. (29)-(30)
   
@@ -313,9 +316,9 @@ void ComputeCoulMatrix::pair_contribution()
     jlist = firstneigh[i];
     jnum = numneigh[i];
 
-    // real-space part of matrix is symmetric, start from jj == ii
+    // real-space part of matrix is symmetric
 
-    for (int jj = ii; jj < jnum; jj++) {
+    for (int jj = 0; jj < jnum; jj++) {
       int j = jlist[jj];
       j &= NEIGHMASK;
       // skip if atom J is not in either group
@@ -352,10 +355,14 @@ void ComputeCoulMatrix::pair_contribution()
           }
         }
         
-        // no need for if (i!=j) since i is not in jlist
+        // TODO we don't assign ghost atoms to matrix positions - which would
+        // be a non-trivial task in matrix_assignment() - so I'm using this rather
+        // slow approach here... It seems that lammps stores also tags of ghost atoms 
+        for (jpos = 0; jpos < ngroup; jpos++)
+          if (mat2tag[jpos] == tag[j]) break;
         
-        gradQ_V[mpos[i]][mpos[j]] += aij;
-        gradQ_V[mpos[j]][mpos[i]] += aij;
+        gradQ_V[mpos[i]][jpos] += aij;
+        gradQ_V[jpos][mpos[i]] += aij;
       }
     }
   }
@@ -408,7 +415,6 @@ void ComputeCoulMatrix::matrix_assignment()
   
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-  int nmax = atom->nmax;
   int nprocs = comm->nprocs;  
   tagint *tag = atom->tag;
   
@@ -464,18 +470,23 @@ void ComputeCoulMatrix::matrix_assignment()
   MPI_Allgatherv(jtaglist_local,jgroupnum_local,MPI_LMP_TAGINT,
                  jtaglist,jgroupnum_list,jdispls,MPI_LMP_TAGINT,world);
   
+  // sort individual group taglists, first igroup than jgroup
+  
+  std::sort(itaglist, itaglist + igroupnum);
+  std::sort(jtaglist, jtaglist + jgroupnum);
+  
   // if local+ghost matrix assignment already created, recreate
   
   if (assigned) {
     memory->destroy(mpos);
-    memory->create(mpos,nmax,"coul/matrix:mpos");
-  } else memory->create(mpos,nmax,"coul/matrix:mpos");
+    memory->create(mpos,ngroup,"coul/matrix:mpos");
+  } else memory->create(mpos,ngroup,"coul/matrix:mpos");
   
   assigned = 1;
 
   // local+ghost non-matrix atoms are -1 in mpos
   
-  size_t nbytes = sizeof(bigint) * nmax;
+  size_t nbytes = sizeof(bigint) * ngroup;
   if (nbytes)
     memset(mpos,-1,nbytes);
 
@@ -489,7 +500,7 @@ void ComputeCoulMatrix::matrix_assignment()
   // create global matrix indices for local+ghost atoms
     
   for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nmax; i++)
+    for (int i = 0; i < nlocal; i++)
       if (mat2tag[ii] == tag[i])
         mpos[i] = ii;
   
