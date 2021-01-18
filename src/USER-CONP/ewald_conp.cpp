@@ -1621,7 +1621,10 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   bigint *jmat, *jmat_local;
 
   bigint ngroup;
-  int  ngrouplocal;
+  
+  // TODO throw error if ngroup exceeds unsigned integer, guess no computer can handle a matrix that big!
+  
+  int ngrouplocal;
 
   // how many local group atoms owns each proc and how many in total
 
@@ -1641,12 +1644,12 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   memory->create(snz,kzmax+1,ngrouplocal,"ewald/conp:snz");
   memory->create(csz,kzmax+1,ngrouplocal,"ewald/conp:csz");
 
-  memory->create(csx_all,(kxmax+1)*ngroup,"ewald/conp:csx_all");
-  memory->create(snx_all,(kxmax+1)*ngroup,"ewald/conp:snx_all");
-  memory->create(csy_all,(kymax+1)*ngroup,"ewald/conp:csy_all");
-  memory->create(sny_all,(kymax+1)*ngroup,"ewald/conp:sny_all");
-  memory->create(csz_all,(kzmax+1)*ngroup,"ewald/conp:csz_all");
-  memory->create(snz_all,(kzmax+1)*ngroup,"ewald/conp:snz_all");
+  memory->create(csx_all,((bigint) kxmax+1)*ngroup,"ewald/conp:csx_all");
+  memory->create(snx_all,((bigint) kxmax+1)*ngroup,"ewald/conp:snx_all");
+  memory->create(csy_all,((bigint) kymax+1)*ngroup,"ewald/conp:csy_all");
+  memory->create(sny_all,((bigint) kymax+1)*ngroup,"ewald/conp:sny_all");
+  memory->create(csz_all,((bigint) kzmax+1)*ngroup,"ewald/conp:csz_all");
+  memory->create(snz_all,((bigint) kzmax+1)*ngroup,"ewald/conp:snz_all");
 
   memory->create(jmat_local,ngrouplocal,"ewald/conp:jmat_local");
 
@@ -1676,13 +1679,13 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
     ngrouplocal++;
   }
 
-  int *recvcounts, *displs; // allgather requires int for displs but content might overflow!
+  int *recvcounts, *displs; // allgather requires int for displs but displs might overflow!
 
   memory->create(recvcounts,nprocs,"ewald/conp:recvcounts");
   memory->create(displs,nprocs,"ewald/conp:displs");
   memory->create(jmat,ngroup,"ewald/conp:jmat");
 
-  int n;
+  int n; // TODO check if kxmax*ngrouplocal, etc. overflows n! but typically kxmax, etc. is small
 
   // gather subsets global cs and sn
 
@@ -1694,6 +1697,29 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   MPI_Allgatherv(&csx[0][0],n,MPI_DOUBLE,csx_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(&snx[0][0],n,MPI_DOUBLE,snx_all,recvcounts,displs,MPI_DOUBLE,world);
 
+  // consistency check between local global arrays
+
+  FILE *pFile;
+  char fn[12];
+
+//  sprintf(fn,"cos_kx.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (int k = 0; k < kxmax+1; k++)
+//        for (int i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+displs[m]]);
+//  fclose(pFile);
+//  
+//  sprintf(fn,"sin_kx.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (int k = 0; k < kxmax+1; k++)
+//        for (int i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",snx[k][i],snx_all[i+k*ngrouplocal+displs[m]]);
+//  fclose(pFile);
+
   n = (kymax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
   displs[0] = 0;
@@ -1701,6 +1727,24 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(&csy[0][0],n,MPI_DOUBLE,csy_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(&sny[0][0],n,MPI_DOUBLE,sny_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+//  sprintf(fn,"cos_ky.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (int k = 0; k < kymax+1; k++)
+//        for (int i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",csy[k][i],csy_all[i+k*ngrouplocal+displs[m]]);
+//  fclose(pFile);
+//  
+//  sprintf(fn,"sin_ky.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (int k = 0; k < kymax+1; k++)
+//        for (int i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",sny[k][i],sny_all[i+k*ngrouplocal+displs[m]]);
+//  fclose(pFile);
 
   n = (kzmax+1)*ngrouplocal;
   MPI_Allgather(&n,1,MPI_INT,recvcounts,1,MPI_INT,world);
@@ -1709,6 +1753,24 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(&csz[0][0],n,MPI_DOUBLE,csz_all,recvcounts,displs,MPI_DOUBLE,world);
   MPI_Allgatherv(&snz[0][0],n,MPI_DOUBLE,snz_all,recvcounts,displs,MPI_DOUBLE,world);
+  
+//  sprintf(fn,"cos_kz.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (int k = 0; k < kzmax+1; k++)
+//        for (int i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",csz[k][i],csz_all[i+k*ngrouplocal+displs[m]]);
+//  fclose(pFile);
+//  
+//  sprintf(fn,"sin_kz.%d",comm->me);
+//  pFile = fopen(fn,"w");
+//  for (int m = 0; m < nprocs; m++)
+//    if (comm->me == m)
+//      for (int k = 0; k < kzmax+1; k++)
+//        for (int i = 0; i < ngrouplocal; i++)
+//          fprintf(pFile,"%f %f\n",snz[k][i],snz_all[i+k*ngrouplocal+displs[m]]);
+//  fclose(pFile);
 
   // gather subsets global matrix indexing
 
@@ -1718,83 +1780,98 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i-1] + recvcounts[i-1];
   MPI_Allgatherv(jmat_local,ngrouplocal,MPI_LMP_BIGINT,jmat,recvcounts,displs,MPI_LMP_BIGINT,world);
+  
+  
+  if (comm->me == 0) {
+    sprintf(fn,"cos_kx.all");
+    pFile = fopen(fn,"w");
+    for (bigint k = 0; k < ngroup * ( (bigint) kxmax+1); k++) {
+      fprintf(pFile,"%f\n",csx_all[k]);
+    }
+    fclose(pFile);
+  }
+
+  sprintf(fn,"cos_kx.%d",comm->me);
+  pFile = fopen(fn,"w");
+  int j;
+  for (int i = 0; i < nlocal; i++) {
+    if (imat[i] < 0) continue;
+    j = 5;
+    if (imat[i] == jmat[j]) {
+      for (int k = 0; k < kxmax+1; k++) {
+        fprintf(pFile,"%f\n",
+          cs[k][0][i]);
+      }
+    }
+  }
+  fclose(pFile);  
+
 
   memory->destroy(jmat_local);
   memory->destroy(displs);
   memory->destroy(recvcounts);
-
-  // consistency check between local global arrays
-
-//  FILE *pFile;
-//  char fn[12];
-//  sprintf(fn,"k.%d",comm->me);
-//  pFile = fopen(fn,"w");
-//  for (int m = 0; m < nprocs; m++)
-//    if (comm->me == m)
-//      for (k = 0; k < kxmax+1; k++)
-//        for (i = 0; i < ngrouplocal; i++)
-//          fprintf(pFile,"%f %f\n",csx[k][i],csx_all[i+k*ngrouplocal+ndispls[0][m]]);
-//  fclose(pFile);
 
   int kx,ky,kz,kxj,kyj,kzj,kyabs,kzabs,sign_ky,sign_kz;
   double aij,cos_kxky,sin_kxky,cos_kxkykz_i,sin_kxkykz_i,cos_kxkykz_j,sin_kxkykz_j;
 
   // aij for each atom pair in groups; first loop over i,j then over k to reduce memory access
 
-  for (int i = 0; i < nlocal; i++) {
+//  for (int i = 0; i < nlocal; i++) {
 
-    if (imat[i] < 0) continue;
+//    if (imat[i] < 0) continue;
 
-    for (bigint j = 0; j < ngroup; j++) {
+//    for (bigint j = 0; j < ngroup; j++) {
 
-      // matrix is symmetric, skip upper triangular matrix
+//      // matrix is symmetric, skip upper triangular matrix
 
-      if (jmat[j] > imat[i]) continue;
+//      if (jmat[j] > imat[i]) continue;
 
-      aij = 0.0;
+//      aij = 0.0;
 
-      for (int k = 0; k < kcount; k++) {
+//      for (int k = 0; k < kcount; k++) {
 
-        // use local sn and cs for simplicity
+//        // local  indexing  cs[k_idim][idim][i]       <>  csx_all[i+k*ngrouplocal+displs[comm->me]]]
 
-        // local  indexing  cs[k_idim][idim[i]       <>  csx_all[i+k*ngrouplocal+displs[comm->me]]]
+//        // anyway, use local sn and cs for simplicity
 
-        kx = kxvecs[k];
-        ky = kyvecs[k];
-        kz = kzvecs[k];
+//        kx = kxvecs[k];
+//        ky = kyvecs[k];
+//        kz = kzvecs[k];
+//        sign_ky = (ky > 0) - (ky < 0);
+//        sign_kz = (kz > 0) - (kz < 0);
 
-        cos_kxky = cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
-        sin_kxky = sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
+//        cos_kxky = cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
+//        sin_kxky = sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
 
-        cos_kxkykz_i = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
-        sin_kxkykz_i = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
+//        cos_kxkykz_i = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
+//        sin_kxkykz_i = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
 
-        // global indexing  csx_all[kx+j*(kxmax+1)]  <>  csx_all[kx][j]  
+//        // global indexing  csx_all[kx+j*(kxmax+1)]  <>  csx_all[kx][j]  
 
-        kxj = kx+j*(kxmax+1);
-        kyj = abs(ky)+j*(kymax+1);
-        kzj = abs(kz)+j*(kzmax+1);
-        sign_ky = (ky > 0) - (ky < 0);
-        sign_kz = (kz > 0) - (kz < 0);
+//        kxj = kx+j*(kxmax+1);
+//        kyj = abs(ky)+j*(kymax+1);
+//        kzj = abs(kz)+j*(kzmax+1);
 
-        cos_kxky = csx_all[kxj] * csy_all[kyj] - snx_all[kxj] * sny_all[kyj] * sign_ky;
-        sin_kxky = snx_all[kxj] * csy_all[kyj] + csx_all[kxj] * sny_all[kyj] * sign_ky;
+//        cos_kxky = csx_all[kxj] * csy_all[kyj] - snx_all[kxj] * sny_all[kyj] * sign_ky;
+//        sin_kxky = snx_all[kxj] * csy_all[kyj] + csx_all[kxj] * sny_all[kyj] * sign_ky;
 
-        cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
-        sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
+//        cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
+//        sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
 
-        if (imat[i] == jmat[j] && (cos_kxkykz_j != cos_kxkykz_i || sin_kxkykz_j != sin_kxkykz_i)) 
-          printf(" *** problem on %d! *** \n",comm->me);
+////        if (imat[i] == jmat[j] && cs[kx][0][i] != csx_all[kxj]) 
+////          printf(" *** problem on %d for (%d,%d) with kx=%d: %f != %f *** \n",
+////            comm->me,imat[i],jmat[j],kx,
+////            cs[kx][0][i],csx_all[kxj]);
 
-        aij += 2.0*ug[k] * (cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j);
-      }
+//        aij += 2.0*ug[k] * (cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j);
+//      }
 
-      matrix[imat[i]][jmat[j]] += aij;
-      if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
-    }
+//      matrix[imat[i]][jmat[j]] += aij;
+//      if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
+//    }
 
-    if ((i+1) % 100 == 0) printf("(%d/%d) on %d\n",i+1,nlocal,comm->me);
-  }
+//    if ((i+1) % 100 == 0) printf("(%d/%d) on %d\n",i+1,nlocal,comm->me);
+//  }
 
   memory->destroy(jmat);
   memory->destroy(csx_all);
