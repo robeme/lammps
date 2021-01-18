@@ -1747,15 +1747,17 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 
     for (bigint j = 0; j < ngroup; j++) {
 
-      aij = 0.0;
-
       // matrix is symmetric, skip upper triangular matrix
 
       if (jmat[j] > imat[i]) continue;
 
+      aij = 0.0;
+
       for (int k = 0; k < kcount; k++) {
 
         // use local sn and cs for simplicity
+
+        // local  indexing  cs[k_idim][idim[i]       <>  csx_all[i+k*ngrouplocal+displs[comm->me]]]
 
         kx = kxvecs[k];
         ky = kyvecs[k];
@@ -1767,8 +1769,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
         cos_kxkykz_i = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
         sin_kxkykz_i = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
 
-        // global indexing  csx_all[kx][j]     <>        csx_all[kx+j*(kxmax+1)]
-        // local  indexing  cs_idim[k_idim][i] <> csx_all[i+k*ngrouplocal+displs[comm->me]]]
+        // global indexing  csx_all[kx+j*(kxmax+1)]  <>  csx_all[kx][j]  
 
         kxj = kx+j*(kxmax+1);
         kyj = abs(ky)+j*(kymax+1);
@@ -1781,6 +1782,9 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix)
 
         cos_kxkykz_j = cos_kxky * csz_all[kzj] - sin_kxky * snz_all[kzj] * sign_kz;
         sin_kxkykz_j = sin_kxky * csz_all[kzj] + cos_kxky * snz_all[kzj] * sign_kz;
+
+        if (imat[i] == jmat[j] && (cos_kxkykz_j != cos_kxkykz_i || sin_kxkykz_j != sin_kxkykz_i)) 
+          printf(" *** problem on %d! *** \n",comm->me);
 
         aij += 2.0*ug[k] * (cos_kxkykz_i*cos_kxkykz_j + sin_kxkykz_i*sin_kxkykz_j);
       }
