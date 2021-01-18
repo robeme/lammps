@@ -278,17 +278,14 @@ void ComputeCoulMatrix::compute_array()
 
 void ComputeCoulMatrix::pair_contribution()
 { 
-  int i,j,ii,jj,inum,jnum,itype,jtype;
+  int inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz;
   double r,rinv,rsq,grij,etarij,expm2,t,erfc,aij;
   int *ilist,*jlist,*numneigh,**firstneigh;
 
   double **x = atom->x;
-  tagint *molecule = atom->molecule;
   int *type = atom->type;
   int *mask = atom->mask;
-  tagint *tag = atom->tag;
-  int nlocal = atom->nlocal;
   
   double etaij = eta*eta/sqrt(2.0*eta*eta); // see mw ewald theory eq. (29)-(30)
   
@@ -304,8 +301,8 @@ void ComputeCoulMatrix::pair_contribution()
   // loop over neighbors of my atoms
   // skip if I,J are not in 2 groups
 
-  for (ii = 0; ii < inum; ii++) {
-    i = ilist[ii];
+  for (int ii = 0; ii < inum; ii++) {
+    int i = ilist[ii];
     // skip if atom I is not in either group
     if (!(mask[i] & groupbit || mask[i] & jgroupbit)) continue;
 
@@ -318,8 +315,8 @@ void ComputeCoulMatrix::pair_contribution()
 
     // real-space part of matrix is symmetric, start from jj == ii
 
-    for (jj = jj; jj < jnum; jj++) {
-      j = jlist[jj];
+    for (int jj = ii; jj < jnum; jj++) {
+      int j = jlist[jj];
       j &= NEIGHMASK;
       // skip if atom J is not in either group
       if (!(mask[j] & groupbit || mask[j] & jgroupbit)) continue;
