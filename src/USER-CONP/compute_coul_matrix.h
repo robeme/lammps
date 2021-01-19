@@ -42,6 +42,7 @@ class ComputeCoulMatrix : public Compute {
   bigint jgroupnum, igroupnum, ngroup;
   int recalc_every;
   double **cutsq, **gradQ_V;
+  double *b_vec;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag, selfflag;
   int overwrite, gaussians, assigned;
@@ -57,9 +58,10 @@ class ComputeCoulMatrix : public Compute {
   void matrix_assignment();
   void pair_contribution();
   void self_contribution();
-  void write_matrix(double **);
+  void write_matrix(FILE *, double **);
   void allocate();
   void deallocate();
+  double calc_erfc(double);
 };
 
 }  // namespace LAMMPS_NS
