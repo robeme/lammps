@@ -430,12 +430,7 @@ void ComputeCoulMatrix::matrix_assignment() {
   int nlocal = atom->nlocal;
   int nprocs = comm->nprocs;
   tagint *tag = atom->tag;
-
-  tagint *itaglist, *itaglist_local;
-  tagint *jtaglist, *jtaglist_local;
   int igroupnum_local, jgroupnum_local;
-  int *igroupnum_list, *jgroupnum_list;
-  int *idispls, *jdispls;
 
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -447,15 +442,15 @@ void ComputeCoulMatrix::matrix_assignment() {
       jgroupnum_local++;
   }
 
-  memory->create(idispls, nprocs, "coul/matrix:idispls");
-  memory->create(jdispls, nprocs, "coul/matrix:jdispls");
-  memory->create(igroupnum_list, nprocs, "coul/matrix:ilist");
-  memory->create(jgroupnum_list, nprocs, "coul/matrix:jlist");
+  std::vector<int> idispls(nprocs);
+  std::vector<int> jdispls(nprocs);
+  std::vector<int> igroupnum_list(nprocs);
+  std::vector<int> jgroupnum_list(nprocs);
 
-  MPI_Allgather(&igroupnum_local, 1, MPI_INT, igroupnum_list, 1, MPI_INT,
-                world);
-  MPI_Allgather(&jgroupnum_local, 1, MPI_INT, jgroupnum_list, 1, MPI_INT,
-                world);
+  MPI_Allgather(&igroupnum_local, 1, MPI_INT, &igroupnum_list.front(), 1,
+                MPI_INT, world);
+  MPI_Allgather(&jgroupnum_local, 1, MPI_INT, &jgroupnum_list.front(), 1,
+                MPI_INT, world);
 
   idispls[0] = jdispls[0] = 0;
   for (int i = 1; i < nprocs; i++) {
@@ -463,8 +458,8 @@ void ComputeCoulMatrix::matrix_assignment() {
     jdispls[i] = jdispls[i - 1] + jgroupnum_list[i - 1];
   }
 
-  memory->create(itaglist_local, igroupnum_local, "coul/matrix:itaglist_local");
-  memory->create(jtaglist_local, jgroupnum_local, "coul/matrix:jtaglist_local");
+  std::vector<int> itaglist_local(igroupnum_local);
+  std::vector<int> jtaglist_local(jgroupnum_local);
 
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -477,33 +472,33 @@ void ComputeCoulMatrix::matrix_assignment() {
     }
   }
 
-  memory->create(itaglist, igroupnum, "coul/matrix:itaglist");
-  memory->create(jtaglist, jgroupnum, "coul/matrix:jtaglist");
+  std::vector<int> itaglist(igroupnum);
+  std::vector<int> jtaglist(jgroupnum);
 
-  MPI_Allgatherv(itaglist_local, igroupnum_local, MPI_LMP_TAGINT, itaglist,
-                 igroupnum_list, idispls, MPI_LMP_TAGINT, world);
-  MPI_Allgatherv(jtaglist_local, jgroupnum_local, MPI_LMP_TAGINT, jtaglist,
-                 jgroupnum_list, jdispls, MPI_LMP_TAGINT, world);
+  MPI_Allgatherv(&itaglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
+                 &itaglist.front(), &igroupnum_list.front(), &idispls.front(),
+                 MPI_LMP_TAGINT, world);
+  MPI_Allgatherv(&jtaglist_local.front(), jgroupnum_local, MPI_LMP_TAGINT,
+                 &jtaglist.front(), &jgroupnum_list.front(), &jdispls.front(),
+                 MPI_LMP_TAGINT, world);
 
   // sort individual group taglists, first igroup than jgroup
 
-  std::sort(itaglist, itaglist + igroupnum);
-  std::sort(jtaglist, jtaglist + jgroupnum);
+  std::sort(itaglist.begin(), itaglist.end());
+  std::sort(jtaglist.begin(), jtaglist.end());
 
   // if local+ghost matrix assignment already created, recreate
 
-  if (assigned) {
-    memory->destroy(mpos);
-    memory->create(mpos, ngroup, "coul/matrix:mpos");
-  } else
-    memory->create(mpos, ngroup, "coul/matrix:mpos");
+  if (assigned) memory->destroy(mpos);
+  memory->create(mpos, nlocal, "coul/matrix:mpos");
 
   assigned = 1;
 
   // local+ghost non-matrix atoms are -1 in mpos
 
-  size_t nbytes = sizeof(bigint) * ngroup;
-  if (nbytes) memset(mpos, -1, nbytes);
+  for (int i = 0; i < nlocal; i++) {
+    mpos[i] = -1;
+  }
 
   // store which tag represents value in matrix
 
@@ -511,19 +506,13 @@ void ComputeCoulMatrix::matrix_assignment() {
   for (bigint j = 0; j < jgroupnum; j++) mat2tag[igroupnum + j] = jtaglist[j];
 
   // create global matrix indices for local+ghost atoms
-
-  for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nlocal; i++)
-      if (mat2tag[ii] == tag[i]) mpos[i] = ii;
-
-  memory->destroy(igroupnum_list);
-  memory->destroy(jgroupnum_list);
-  memory->destroy(idispls);
-  memory->destroy(jdispls);
-  memory->destroy(itaglist_local);
-  memory->destroy(jtaglist_local);
-  memory->destroy(itaglist);
-  memory->destroy(jtaglist);
+  for (bigint ii = 0; ii < ngroup; ii++) {
+    for (int i = 0; i < nlocal; i++) {
+      if (mat2tag[ii] == tag[i]) {
+        mpos[i] = ii;
+      }
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------- */
