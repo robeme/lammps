@@ -269,9 +269,9 @@ void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr)
 void ComputeCoulMatrix::compute_array()
 {
   if (pairflag) pair_contribution();
-  if (selfflag) self_contribution();
-  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
-  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
+//  if (selfflag) self_contribution();
+//  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
+//  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -284,9 +284,11 @@ void ComputeCoulMatrix::pair_contribution()
   int *ilist,*jlist,*numneigh,**firstneigh;
 
   double **x = atom->x;
+  tagint *tag = atom->tag;
   int *type = atom->type;
   int *mask = atom->mask;
-  tagint *tag = atom->tag;
+  int nlocal = atom->nlocal;
+  int newton_pair = force->newton_pair;
   
   bigint jpos;
   
@@ -334,6 +336,9 @@ void ComputeCoulMatrix::pair_contribution()
         r = sqrt(rsq);
         rinv = 1.0 / r;
         aij = rinv;
+        
+        // kspace solver?
+        
         if (kspaceflag || boundaryflag) {
           grij = g_ewald * r;
           expm2 = exp(-grij*grij);
@@ -341,18 +346,18 @@ void ComputeCoulMatrix::pair_contribution()
           erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
           
           aij *= erfc;
-          
-          // real-space gaussians?
+        }
         
-          if (gaussians) {
-            // TODO infer eta from coeffs of pair coul/long/gauss
-            etarij = etaij * r;
-            expm2 = exp(-etarij*etarij);
-            t = 1.0 / (1.0 + EWALD_P*etarij);
-            erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
-            
-            aij -= erfc*rinv;
-          }
+        // real-space gaussians?
+      
+        if (gaussians) {
+          // TODO infer eta from coeffs of pair coul/long/gauss
+          etarij = etaij * r;
+          expm2 = exp(-etarij*etarij);
+          t = 1.0 / (1.0 + EWALD_P*etarij);
+          erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
+          
+          aij -= erfc*rinv;
         }
         
         // TODO we don't assign ghost atoms to matrix positions - which would
@@ -361,8 +366,15 @@ void ComputeCoulMatrix::pair_contribution()
         for (jpos = 0; jpos < ngroup; jpos++)
           if (mat2tag[jpos] == tag[j]) break;
         
-        gradQ_V[mpos[i]][jpos] += aij;
-        gradQ_V[jpos][mpos[i]] += aij;
+        // newton on or off?
+        
+        if (newton_pair || j < nlocal) {
+          gradQ_V[mpos[i]][jpos] += aij;
+          gradQ_V[jpos][mpos[i]] += aij;
+        } else {
+          gradQ_V[mpos[i]][jpos] += 0.5*aij;
+          gradQ_V[jpos][mpos[i]] += 0.5*aij;
+        }
       }
     }
   }
@@ -382,24 +394,6 @@ void ComputeCoulMatrix::self_contribution()
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit || mask[i] & jgroupbit)
       gradQ_V[mpos[i]][mpos[i]] += preta*eta - selfint; 
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::write_matrix(double **matrix)
-{ 
-  fprintf(fp,"# atoms\n");
-  for (bigint i = 0; i < ngroup; i++)
-    fprintf(fp,"%d ", mat2tag[i]);
-  fprintf(fp,"\n");  
-
-  fprintf(fp,"# matrix\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(fp, "%E ", matrix[i][j]);
-    }
-    fprintf(fp,"\n");
-  }
 }
 
 /* ---------------------------------------------------------------------- 
@@ -532,4 +526,22 @@ void ComputeCoulMatrix::deallocate()
   for (bigint i = 0; i < ngroup; i++)
     delete [] gradQ_V[i];
   delete [] gradQ_V;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::write_matrix(double **matrix)
+{ 
+  fprintf(fp,"# atoms\n");
+  for (bigint i = 0; i < ngroup; i++)
+    fprintf(fp,"%d ", mat2tag[i]);
+  fprintf(fp,"\n");  
+
+  fprintf(fp,"# matrix\n");
+  for (bigint i = 0; i < ngroup; i++) {
+    for (bigint j = 0; j < ngroup; j++) {
+      fprintf(fp, "%E ", matrix[i][j]);
+    }
+    fprintf(fp,"\n");
+  }
 }
