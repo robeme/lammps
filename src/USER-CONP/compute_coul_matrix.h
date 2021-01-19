@@ -13,7 +13,7 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(coul/matrix,ComputeCoulMatrix)
+ComputeStyle(coul/matrix, ComputeCoulMatrix)
 
 #else
 
@@ -32,28 +32,28 @@ class ComputeCoulMatrix : public Compute {
   void setup();
   void init_list(int, class NeighList *);
   void compute_array();
-  
+
  protected:
-  tagint *mat2tag;                                  // stores tag of matrix position
+  tagint *mat2tag;  // stores tag of matrix position
 
  private:
   char *group2;
-  int jgroup,jgroupbit,othergroupbit;
+  int jgroup, jgroupbit, othergroupbit;
   bigint jgroupnum, igroupnum, ngroup;
   int recalc_every;
-  double **cutsq,**gradQ_V;
-  double g_ewald,eta;
-  int pairflag,kspaceflag,boundaryflag,selfflag;
-  int overwrite,gaussians,assigned;
-  bigint *mpos;                                     // locally stored matrix index of each local+ghost atom
+  double **cutsq, **gradQ_V;
+  double g_ewald, eta;
+  int pairflag, kspaceflag, boundaryflag, selfflag;
+  int overwrite, gaussians, assigned;
+  bigint *mpos;  // locally stored matrix index of each local+ghost atom
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
   class Ewald *ewald;
   FILE *fp;
-  
+
   long filepos;
-  
+
   void matrix_assignment();
   void pair_contribution();
   void self_contribution();
@@ -62,46 +62,47 @@ class ComputeCoulMatrix : public Compute {
   void deallocate();
 };
 
-}
+}  // namespace LAMMPS_NS
 
 #endif
 #endif
 
-/* ERROR/WARNING messages:
+    /* ERROR/WARNING messages:
 
-E: Illegal ... command
+    E: Illegal ... command
 
-Self-explanatory.  Check the input script syntax and compare to the
-documentation for the command.  You can use -echo screen as a
-command-line option when running LAMMPS to see the offending line.
+    Self-explanatory.  Check the input script syntax and compare to the
+    documentation for the command.  You can use -echo screen as a
+    command-line option when running LAMMPS to see the offending line.
 
-E: Compute group/group group ID does not exist
+    E: Compute group/group group ID does not exist
 
-Self-explanatory.
+    Self-explanatory.
 
-E: Compute group/group molecule requires molecule IDs
+    E: Compute group/group molecule requires molecule IDs
 
-UNDOCUMENTED
+    UNDOCUMENTED
 
-E: No pair style defined for compute group/group
+    E: No pair style defined for compute group/group
 
-Cannot calculate group interactions without a pair style defined.
+    Cannot calculate group interactions without a pair style defined.
 
-E: Pair style does not support compute group/group
+    E: Pair style does not support compute group/group
 
-The pair_style does not have a single() function, so it cannot be
-invoked by the compute group/group command.
+    The pair_style does not have a single() function, so it cannot be
+    invoked by the compute group/group command.
 
-E: No Kspace style defined for compute group/group
+    E: No Kspace style defined for compute group/group
 
-Self-explanatory.
+    Self-explanatory.
 
-E: Kspace style does not support compute group/group
+    E: Kspace style does not support compute group/group
 
-Self-explanatory.
+    Self-explanatory.
 
-W: Both groups in compute group/group have a net charge; the Kspace boundary correction to energy will be non-zero
+    W: Both groups in compute group/group have a net charge; the Kspace boundary
+    correction to energy will be non-zero
 
-Self-explanatory.
+    Self-explanatory.
 
-*/
+    */
