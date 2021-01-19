@@ -13,7 +13,7 @@
 
 #ifdef KSPACE_CLASS
 
-KSpaceStyle(ewald/conp,EwaldConp)
+KSpaceStyle(ewald/conp, EwaldConp)
 
 #else
 
@@ -35,34 +35,34 @@ class EwaldConp : public KSpace {
   double memory_usage();
 
   void compute_group_group(int, int, int);
-  
-  // k-space part of coulomb matrix computation 
-  
+
+  // k-space part of coulomb matrix computation
+
   void compute_matrix(bigint *, double **);
   void compute_matrix_corr(bigint *, double **);
 
  protected:
-  int kxmax,kymax,kzmax;
-  int kcount,kmax,kmax3d,kmax_created;
-  double gsqmx,volume,area;
+  int kxmax, kymax, kzmax;
+  int kcount, kmax, kmax3d, kmax_created;
+  double gsqmx, volume, area;
   int nmax;
 
   double unitk[3];
-  int *kxvecs,*kyvecs,*kzvecs;
-  int kxmax_orig,kymax_orig,kzmax_orig;
+  int *kxvecs, *kyvecs, *kzvecs;
+  int kxmax_orig, kymax_orig, kzmax_orig;
   int nprd_dim;
   double *ug;
-  double **eg,**vg;
+  double **eg, **vg;
   double **ek;
-  double *sfacrl,*sfacim,*sfacrl_all,*sfacim_all;
-  double ***cs,***sn;
+  double *sfacrl, *sfacim, *sfacrl_all, *sfacim_all;
+  double ***cs, ***sn;
 
   // group-group interactions
 
   int group_allocate_flag;
-  double *sfacrl_A,*sfacim_A,*sfacrl_A_all,*sfacim_A_all;
-  double *sfacrl_B,*sfacim_B,*sfacrl_B_all,*sfacim_B_all;
- 
+  double *sfacrl_A, *sfacim_A, *sfacrl_A_all, *sfacim_A_all;
+  double *sfacrl_B, *sfacim_B, *sfacrl_B_all, *sfacim_B_all;
+
   double rms(int, double, bigint, double);
   virtual void eik_dot_r();
   void coeffs();
@@ -79,65 +79,65 @@ class EwaldConp : public KSpace {
 
   // group-group interactions
 
-  void slabcorr_groups(int,int,int);
-  void ew2dcorr_groups(int,int,int);
+  void slabcorr_groups(int, int, int);
+  void ew2dcorr_groups(int, int, int);
   void allocate_groups();
   void deallocate_groups();
-  
 };
 
-}
+}  // namespace LAMMPS_NS
 
 #endif
 #endif
 
-/* ERROR/WARNING messages:
+    /* ERROR/WARNING messages:
 
-E: Illegal ... command
+    E: Illegal ... command
 
-Self-explanatory.  Check the input script syntax and compare to the
-documentation for the command.  You can use -echo screen as a
-command-line option when running LAMMPS to see the offending line.
+    Self-explanatory.  Check the input script syntax and compare to the
+    documentation for the command.  You can use -echo screen as a
+    command-line option when running LAMMPS to see the offending line.
 
-E: Cannot use Ewald with 2d simulation
+    E: Cannot use Ewald with 2d simulation
 
-The kspace style ewald cannot be used in 2d simulations.  You can use
-2d Ewald in a 3d simulation; see the kspace_modify command.
+    The kspace style ewald cannot be used in 2d simulations.  You can use
+    2d Ewald in a 3d simulation; see the kspace_modify command.
 
-E: Kspace style requires atom attribute q
+    E: Kspace style requires atom attribute q
 
-The atom style defined does not have these attributes.
+    The atom style defined does not have these attributes.
 
-E: Cannot use non-periodic boundaries with Ewald
+    E: Cannot use non-periodic boundaries with Ewald
 
-For kspace style ewald, all 3 dimensions must have periodic boundaries
-unless you use the kspace_modify command to define a 2d slab with a
-non-periodic z dimension.
+    For kspace style ewald, all 3 dimensions must have periodic boundaries
+    unless you use the kspace_modify command to define a 2d slab with a
+    non-periodic z dimension.
 
-E: Incorrect boundaries with slab Ewald
+    E: Incorrect boundaries with slab Ewald
 
-Must have periodic x,y dimensions and non-periodic z dimension to use
-2d slab option with Ewald.
+    Must have periodic x,y dimensions and non-periodic z dimension to use
+    2d slab option with Ewald.
 
-E: Cannot (yet) use Ewald with triclinic box and slab correction
+    E: Cannot (yet) use Ewald with triclinic box and slab correction
 
-This feature is not yet supported.
+    This feature is not yet supported.
 
-E: KSpace style is incompatible with Pair style
+    E: KSpace style is incompatible with Pair style
 
-Setting a kspace style requires that a pair style with matching
-long-range Coulombic or dispersion components be used.
+    Setting a kspace style requires that a pair style with matching
+    long-range Coulombic or dispersion components be used.
 
-E: KSpace accuracy must be > 0
+    E: KSpace accuracy must be > 0
 
-The kspace accuracy designated in the input must be greater than zero.
+    The kspace accuracy designated in the input must be greater than zero.
 
-E: Must use 'kspace_modify gewald' for uncharged system
+    E: Must use 'kspace_modify gewald' for uncharged system
 
-UNDOCUMENTED
+    UNDOCUMENTED
 
-E: Cannot (yet) use K-space slab correction with compute group/group for triclinic systems
+    E: Cannot (yet) use K-space slab correction with compute group/group for
+    triclinic systems
 
-This option is not yet supported.
+    This option is not yet supported.
 
-*/
+    */
