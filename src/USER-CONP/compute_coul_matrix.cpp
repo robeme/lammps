@@ -415,27 +415,8 @@ void ComputeCoulMatrix::self_contribution() {
       gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
 }
 
-<<<<<<< HEAD
-/* ---------------------------------------------------------------------- 
-=======
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::write_matrix(double **matrix) {
-  fprintf(fp, "# atoms\n");
-  for (bigint i = 0; i < ngroup; i++) fprintf(fp, "%d ", mat2tag[i]);
-  fprintf(fp, "\n");
-
-  fprintf(fp, "# matrix\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(fp, "%E ", matrix[i][j]);
-    }
-    fprintf(fp, "\n");
-  }
-}
 
 /* ----------------------------------------------------------------------
->>>>>>> 225000b34bb2736fe4fd458f4cfaf0915b69ae84
    looks up to which proc each atom in each group belongs and creates a
    local array which locates the position of each local atom in the global
    matrix. entries are sorted: first A then B. need to be so complex here
