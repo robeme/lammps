@@ -288,9 +288,9 @@ void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
 
 void ComputeCoulMatrix::compute_array() {
   if (pairflag) pair_contribution();
-//  if (selfflag) self_contribution();
-//  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
-//  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
+  if (selfflag) self_contribution();
+  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
+  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
