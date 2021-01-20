@@ -55,6 +55,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
     : Compute(lmp, narg, arg),
       group2(nullptr),
       gradQ_V(nullptr),
+      b_vec(nullptr),
       mpos(nullptr),
       fp(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/matrix command");
@@ -67,6 +68,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
 
   fp = nullptr;
   gradQ_V = nullptr;
+  b_vec = nullptr;
   mpos = nullptr;
 
   pairflag = 1;
@@ -162,6 +164,17 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
                                  arg[iarg + 1], utils::getsyserror()));
       }
       iarg += 2;
+    } else if (strcmp(arg[iarg], "file_vec") == 0) {
+      if (iarg + 2 > narg)
+        error->all(FLERR, "Illegal compute coul/matrix command");
+      if (comm->me == 0) {
+        fp_vec = fopen(arg[iarg + 1], "w");
+        if (fp_vec == nullptr)
+          error->one(FLERR,
+                     fmt::format("Cannot open compute coul/matrix file {}: {}",
+                                 arg[iarg + 1], utils::getsyserror()));
+      }
+      iarg += 2;
     } else
       error->all(FLERR, "Illegal compute coul/matrix command");
   }
@@ -186,6 +199,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix() {
   if (assigned) memory->destroy(mpos);
 
   if (fp && comm->me == 0) fclose(fp);
+  if (fp_vec && comm->me == 0) fclose(fp_vec);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -268,16 +282,22 @@ void ComputeCoulMatrix::setup() {
 
   // initial calculation of coulomb matrix at setup of simulation
 
-  compute_array();
+  // TODO move to compute_coul_vector
+  kspace->compute_vector(mpos, b_vec);
+  MPI_Allreduce(MPI_IN_PLACE, b_vec, ngroup, MPI_DOUBLE, MPI_SUM, world);
+
+  if (fp_vec && comm->me == 0) write_vector(fp_vec, b_vec);
+
+  //compute_array();
 
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
 
-  for (int i = 0; i < ngroup; i++)
-    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
-                  world);
+  //for (int i = 0; i < ngroup; i++)
+    //MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
+                  //world);
 
-  if (fp && comm->me == 0) write_matrix(gradQ_V);
+  //if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -298,20 +318,16 @@ void ComputeCoulMatrix::compute_array() {
 void ComputeCoulMatrix::pair_contribution() {
   int inum, jnum, itype, jtype;
   double xtmp, ytmp, ztmp, delx, dely, delz;
-  double r, rinv, rsq, grij, etarij, expm2, t, erfc, aij;
+  double r, rinv, rsq;
   int *ilist, *jlist, *numneigh, **firstneigh;
 
   double **x = atom->x;
-  tagint *tag = atom->tag;
+  double *q = atom->q;
   int *type = atom->type;
   int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-  int newton_pair = force->newton_pair;
- 
-  bigint jpos;
+  tagint *tag = atom->tag;
 
-  double etaij =
-      eta * eta / sqrt(2.0 * eta * eta);  // see mw ewald theory eq. (29)-(30)
+  bigint jpos;
 
   // invoke half neighbor list (will copy or build if necessary)
 
@@ -337,67 +353,62 @@ void ComputeCoulMatrix::pair_contribution() {
     jlist = firstneigh[i];
     jnum = numneigh[i];
 
+    double bi = 0;
+
     // real-space part of matrix is symmetric
 
     for (int jj = 0; jj < jnum; jj++) {
       int j = jlist[jj];
       j &= NEIGHMASK;
-      // skip if atom J is not in either group
-      if (!(mask[j] & groupbit || mask[j] & jgroupbit)) continue;
-
       delx = xtmp - x[j][0];  // neighlists take care of pbc
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       rsq = delx * delx + dely * dely + delz * delz;
+      if (rsq >= cutsq[itype][jtype]) continue;
       jtype = type[j];
-
-      if (rsq < cutsq[itype][jtype]) {
-        r = sqrt(rsq);
-        rinv = 1.0 / r;
-        aij = rinv;
-        
-        // kspace solver?
-        
-        if (kspaceflag || boundaryflag) {
-          grij = g_ewald * r;
-          expm2 = exp(-grij * grij);
-          t = 1.0 / (1.0 + EWALD_P * grij);
-          erfc = t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
-
-          aij *= erfc;
-        }
-        
-        // real-space gaussians?
-      
+      bool const in_electrode = (mask[j] & groupbit || mask[j] & jgroupbit);
+      r = sqrt(rsq);
+      rinv = 1.0 / r;
+      double aij = rinv;
+      if (kspaceflag || boundaryflag) {
+        aij *= calc_erfc(g_ewald * r);
+        // TODO real-space gaussians?
         if (gaussians) {
-          // TODO infer eta from coeffs of pair coul/long/gauss
-          etarij = etaij * r;
-          expm2 = exp(-etarij*etarij);
-          t = 1.0 / (1.0 + EWALD_P*etarij);
-          erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
-          
-          aij -= erfc*rinv;
-        }
-
-        // TODO we don't assign ghost atoms to matrix positions - which would
-        // be a non-trivial task in matrix_assignment() - so I'm using this
-        // rather slow approach here... It seems that lammps stores also tags of
-        // ghost atoms
-        for (jpos = 0; jpos < ngroup; jpos++)
-          if (mat2tag[jpos] == tag[j]) break;
-        
-        // newton on or off?
-        
-        if (newton_pair || j < nlocal) {
-          gradQ_V[mpos[i]][jpos] += aij;
-          gradQ_V[jpos][mpos[i]] += aij;
-        } else {
-          gradQ_V[mpos[i]][jpos] += 0.5*aij;
-          gradQ_V[jpos][mpos[i]] += 0.5*aij;
+          double etaij;  // TODO infer eta from coeffs of pair coul/long/gauss
+          if (in_electrode) {
+            // see mw ewald theory eq. (29)-(30)
+            etaij = eta * eta / sqrt(2.0 * eta * eta);
+          } else {
+            etaij = eta;
+          }
+          aij -= calc_erfc(etaij * r) * rinv;
         }
       }
+      // TODO we don't assign ghost atoms to matrix positions - which would
+      // be a non-trivial task in matrix_assignment() - so I'm using this
+      // rather slow approach here... It seems that lammps stores also tags of
+      // ghost atoms
+      for (jpos = 0; jpos < ngroup; jpos++)
+        if (mat2tag[jpos] == tag[j]) break;
+
+      if (in_electrode) {
+        gradQ_V[mpos[i]][jpos] += aij;
+        gradQ_V[jpos][mpos[i]] += aij;
+      } else {
+        bi += aij * q[j];
+      }
     }
+    // TODO factor 2?
+    // TODO gather
+    b_vec[mpos[i]] += bi;
   }
+}
+
+/* ---------------------------------------------------------------------- */
+double ComputeCoulMatrix::calc_erfc(double x) {
+  double expm2 = exp(-x * x);
+  double t = 1.0 / (1.0 + EWALD_P * x);
+  return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -415,6 +426,29 @@ void ComputeCoulMatrix::self_contribution() {
       gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
 }
 
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::write_matrix(FILE *file, double **matrix) {
+  fprintf(file, "# atoms\n");
+  for (bigint i = 0; i < ngroup; i++) fprintf(file, "%d ", mat2tag[i]);
+  fprintf(file, "\n");
+
+  fprintf(file, "# matrix\n");
+  for (bigint i = 0; i < ngroup; i++) {
+    for (bigint j = 0; j < ngroup; j++) {
+      fprintf(file, "%E ", matrix[i][j]);
+    }
+    fprintf(file, "\n");
+  }
+}
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::write_vector(FILE *file, double *vec) {
+  for (bigint i = 0; i < ngroup; i++) {
+    fprintf(file, "%d, %E\n",mat2tag[i], vec[i]);
+  }
+  fprintf(file, "\n");
+}
 
 /* ----------------------------------------------------------------------
    looks up to which proc each atom in each group belongs and creates a
@@ -519,6 +553,7 @@ void ComputeCoulMatrix::matrix_assignment() {
 
 void ComputeCoulMatrix::allocate() {
   memory->create(mat2tag, ngroup, "coul/matrix:mat2tag");
+  b_vec = new double[ngroup]();  // init to zero
   gradQ_V = new double *[ngroup];
   for (bigint i = 0; i < ngroup; i++) gradQ_V[i] = new double[ngroup];
 }
@@ -527,24 +562,7 @@ void ComputeCoulMatrix::allocate() {
 
 void ComputeCoulMatrix::deallocate() {
   memory->destroy(mat2tag);
+  delete[] b_vec;
   for (bigint i = 0; i < ngroup; i++) delete[] gradQ_V[i];
   delete[] gradQ_V;
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::write_matrix(double **matrix)
-{ 
-  fprintf(fp,"# atoms\n");
-  for (bigint i = 0; i < ngroup; i++)
-    fprintf(fp,"%d ", mat2tag[i]);
-  fprintf(fp,"\n");  
-
-  fprintf(fp,"# matrix\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(fp, "%E ", matrix[i][j]);
-    }
-    fprintf(fp,"\n");
-  }
 }
