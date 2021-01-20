@@ -33,6 +33,7 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
+using namespace std;
 
 #define SMALL 0.00001
 
@@ -1634,6 +1635,60 @@ void EwaldConp::ew2dcorr_groups(int /*groupbit_A*/, int /*groupbit_B*/,
                "Cannot (yet) use EW2D correction with compute group/group");
 }
 
+void EwaldConp::compute_vector(bigint *imat, double *vector) {
+  // TODO check cs and sn are up to date
+  int const nlocal = atom->nlocal;
+  double *q = atom->q;
+  std::vector<double> q_cos(kcount);
+  std::vector<double> q_sin(kcount);
+
+  for (int k = 0; k < kcount; k++) {
+    int const kx = kxvecs[k];
+    int const ky = kyvecs[k];
+    int const kz = kzvecs[k];
+    double q_cos_k = 0;
+    double q_sin_k = 0;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] >= 0) continue;  // only electrode atoms
+      double const cos_kxky =
+          cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
+      double const sin_kxky =
+          sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
+      double const cos_kr = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
+      double const sin_kr = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
+
+      q_cos_k += q[i] * cos_kr;
+      q_sin_k += q[i] * sin_kr;
+    }
+    q_cos[k] = q_cos_k;
+    q_sin[k] = q_sin_k;
+  }
+
+  MPI_Allreduce(MPI_IN_PLACE, &q_cos.front(), kcount, MPI_DOUBLE, MPI_SUM,
+                world);
+  MPI_Allreduce(MPI_IN_PLACE, &q_sin.front(), kcount, MPI_DOUBLE, MPI_SUM,
+                world);
+
+  for (int i = 0; i < nlocal; i++) {
+    if (imat[i] < 0) continue;
+    double bi = 0;
+    for (int k = 0; k < kcount; k++) {
+      int const kx = kxvecs[k];
+      int const ky = kyvecs[k];
+      int const kz = kzvecs[k];
+      double const cos_kxky =
+          cs[kx][0][i] * cs[ky][1][i] - sn[kx][0][i] * sn[ky][1][i];
+      double const sin_kxky =
+          sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
+      double const cos_kr = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
+      double const sin_kr = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
+      bi += 2 * ug[k] *
+            (cos_kr * q_cos[k] +
+             sin_kr * q_sin[k]);  // different sign than fix_conp for now
+    }
+    vector[imat[i]] += bi;
+  }
+}
 /* ----------------------------------------------------------------------
    compute individual interactions between all pairs of atoms in group A
    and B. see lammps_gather_atoms_concat() on how all sn and cs have been
@@ -1781,15 +1836,14 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
 
   double aij;
 
-  // aij for each atom pair in groups; first loop over i,j then over k to reduce
-  // memory access
+  // aij for each atom pair in groups; first loop over i,j then over k to
+  // reduce memory access
 
   for (int i = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
 
     for (bigint j = 0; j < ngroup; j++) {
       // matrix is symmetric, skip upper triangular matrix
-      // TODO skip electrolyte? i.e. if (jmat[i] < 0) continue
       if (jmat[j] > imat[i]) continue;
 
       aij = 0.0;
@@ -1840,12 +1894,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
       if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
     }
 
-    if ((i + 1) % 100 == 0) printf("(%d/%d) on %d\n", i + 1, nlocal, comm->me);
-    // TODO b-vector
-    for (bigint j = 0; j < ngroup; j++) {
-      // electrolyte only
-      if (jmat[j] >= 0) continue;
-    }
+    if ((i + 1) % 500 == 0) printf("(%d/%d) on %d\n", i + 1, nlocal, comm->me);
   }
 
   memory->destroy(jmat);

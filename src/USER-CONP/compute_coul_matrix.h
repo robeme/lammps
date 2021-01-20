@@ -51,7 +51,7 @@ class ComputeCoulMatrix : public Compute {
   class NeighList *list;
   class KSpace *kspace;
   class Ewald *ewald;
-  FILE *fp;
+  FILE *fp, *fp_vec;
 
   long filepos;
 
@@ -59,6 +59,7 @@ class ComputeCoulMatrix : public Compute {
   void pair_contribution();
   void self_contribution();
   void write_matrix(FILE *, double **);
+  void write_vector(FILE *, double *);
   void allocate();
   void deallocate();
   double calc_erfc(double);

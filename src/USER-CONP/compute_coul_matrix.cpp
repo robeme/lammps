@@ -164,6 +164,17 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
                                  arg[iarg + 1], utils::getsyserror()));
       }
       iarg += 2;
+    } else if (strcmp(arg[iarg], "file_vec") == 0) {
+      if (iarg + 2 > narg)
+        error->all(FLERR, "Illegal compute coul/matrix command");
+      if (comm->me == 0) {
+        fp_vec = fopen(arg[iarg + 1], "w");
+        if (fp_vec == nullptr)
+          error->one(FLERR,
+                     fmt::format("Cannot open compute coul/matrix file {}: {}",
+                                 arg[iarg + 1], utils::getsyserror()));
+      }
+      iarg += 2;
     } else
       error->all(FLERR, "Illegal compute coul/matrix command");
   }
@@ -188,6 +199,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix() {
   if (assigned) memory->destroy(mpos);
 
   if (fp && comm->me == 0) fclose(fp);
+  if (fp_vec && comm->me == 0) fclose(fp_vec);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -270,16 +282,22 @@ void ComputeCoulMatrix::setup() {
 
   // initial calculation of coulomb matrix at setup of simulation
 
-  compute_array();
+  // TODO move to compute_coul_vector
+  kspace->compute_vector(mpos, b_vec);
+  MPI_Allreduce(MPI_IN_PLACE, b_vec, ngroup, MPI_DOUBLE, MPI_SUM, world);
+
+  if (fp_vec && comm->me == 0) write_vector(fp_vec, b_vec);
+
+  //compute_array();
 
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
 
-  for (int i = 0; i < ngroup; i++)
-    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
-                  world);
+  //for (int i = 0; i < ngroup; i++)
+    //MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
+                  //world);
 
-  if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
+  //if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -381,6 +399,7 @@ void ComputeCoulMatrix::pair_contribution() {
       }
     }
     // TODO factor 2?
+    // TODO gather
     b_vec[mpos[i]] += bi;
   }
 }
@@ -421,6 +440,14 @@ void ComputeCoulMatrix::write_matrix(FILE *file, double **matrix) {
     }
     fprintf(file, "\n");
   }
+}
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::write_vector(FILE *file, double *vec) {
+  for (bigint i = 0; i < ngroup; i++) {
+    fprintf(file, "%d, %E\n",mat2tag[i], vec[i]);
+  }
+  fprintf(file, "\n");
 }
 
 /* ----------------------------------------------------------------------
