@@ -45,7 +45,8 @@ class ComputeCoulMatrix : public Compute {
   double *b_vec;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag, selfflag;
-  int overwrite, gaussians, assigned;
+  bool assigned;
+  int overwrite, gaussians;
   bigint *mpos;  // locally stored matrix index of each local+ghost atom
   class Pair *pair;
   class NeighList *list;
@@ -57,6 +58,7 @@ class ComputeCoulMatrix : public Compute {
 
   void matrix_assignment();
   void pair_contribution();
+  void pair_contribution_vec();
   void self_contribution();
   void write_matrix(FILE *, double **);
   void write_vector(FILE *, double *);

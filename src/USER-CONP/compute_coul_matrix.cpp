@@ -20,6 +20,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -38,6 +39,7 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
+using namespace std;
 
 #define EWALD_F 1.12837917
 #define EWALD_P 0.3275911
@@ -78,7 +80,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
   gaussians = 1;
   recalc_every = 0;
   overwrite = 1;
-  assigned = 0;
+  assigned = false;
 
   g_ewald = 0.0;
 
@@ -196,7 +198,9 @@ ComputeCoulMatrix::~ComputeCoulMatrix() {
 
   deallocate();
 
-  if (assigned) memory->destroy(mpos);
+  if (assigned) {
+    memory->destroy(mpos);
+  }
 
   if (fp && comm->me == 0) fclose(fp);
   if (fp_vec && comm->me == 0) fclose(fp_vec);
@@ -283,21 +287,22 @@ void ComputeCoulMatrix::setup() {
   // initial calculation of coulomb matrix at setup of simulation
 
   // TODO move to compute_coul_vector
-  kspace->compute_vector(mpos, b_vec);
+  // kspace->compute_vector(mpos, b_vec);
+  pair_contribution_vec();
   MPI_Allreduce(MPI_IN_PLACE, b_vec, ngroup, MPI_DOUBLE, MPI_SUM, world);
 
   if (fp_vec && comm->me == 0) write_vector(fp_vec, b_vec);
 
-  //compute_array();
+  // compute_array();
 
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
 
-  //for (int i = 0; i < ngroup; i++)
-    //MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
-                  //world);
+  // for (int i = 0; i < ngroup; i++)
+  // MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
+  // world);
 
-  //if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
+  // if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -315,14 +320,68 @@ void ComputeCoulMatrix::compute_array() {
 
 /* ---------------------------------------------------------------------- */
 
+void ComputeCoulMatrix::pair_contribution_vec() {
+  double **x = atom->x;
+  double *q = atom->q;
+  int *type = atom->type;
+  int *mask = atom->mask;
+  neighbor->build_one(list);
+  int const nlocal = atom->nlocal;
+  int const inum = list->inum;
+  int *ilist = list->ilist;
+  int *numneigh = list->numneigh;
+  int **firstneigh = list->firstneigh;
+
+  for (int ii = 0; ii < inum; ii++) {
+    int const i = ilist[ii];
+    bool const i_in_electrode = (mask[i] & groupbit || mask[i] & jgroupbit);
+    double const xtmp = x[i][0];
+    double const ytmp = x[i][1];
+    double const ztmp = x[i][2];
+    int itype = type[i];
+    int *jlist = firstneigh[i];
+    int jnum = numneigh[i];
+    for (int jj = 0; jj < jnum; jj++) {
+      int const j = jlist[jj] & NEIGHMASK;
+      bool const j_in_electrode = (mask[j] & groupbit || mask[j] & jgroupbit);
+      if (i_in_electrode == j_in_electrode) continue;
+
+      double const delx = xtmp - x[j][0];  // neighlists take care of pbc
+      double const dely = ytmp - x[j][1];
+      double const delz = ztmp - x[j][2];
+      double const rsq = delx * delx + dely * dely + delz * delz;
+      int jtype = type[j];
+      if (rsq >= cutsq[itype][jtype]) continue;
+      double const r = sqrt(rsq);
+      double const rinv = 1.0 / r;
+      double aij = rinv;
+      if (kspaceflag || boundaryflag) {
+        aij *= calc_erfc(g_ewald * r);
+        // TODO real-space gaussians?
+        if (gaussians) {
+          // TODO infer eta from coeffs of pair coul/long/gauss
+          aij -= calc_erfc(eta * r) * rinv;
+        }
+      }
+      for (bigint jpos = 0; jpos < ngroup; jpos++)  // TODO what is this doing?
+        if (mat2tag[jpos] == atom->tag[j]) break;
+      if (i_in_electrode && (i < nlocal)) {  // TODO why smaller than nlocal?
+        b_vec[mpos[i]] += aij * q[j];
+      } else if (j_in_electrode && (j < nlocal)) {
+        b_vec[mpos[j]] += aij * q[i];
+      }
+    }
+  }
+}
+/* ---------------------------------------------------------------------- */
+
 void ComputeCoulMatrix::pair_contribution() {
-  int inum, jnum, itype, jtype;
+  int inum, jnum;
   double xtmp, ytmp, ztmp, delx, dely, delz;
   double r, rinv, rsq;
   int *ilist, *jlist, *numneigh, **firstneigh;
 
   double **x = atom->x;
-  double *q = atom->q;
   int *type = atom->type;
   int *mask = atom->mask;
   tagint *tag = atom->tag;
@@ -340,7 +399,7 @@ void ComputeCoulMatrix::pair_contribution() {
 
   // loop over neighbors of my atoms
   // skip if I,J are not in 2 groups
-
+  //
   for (int ii = 0; ii < inum; ii++) {
     int i = ilist[ii];
     // skip if atom I is not in either group
@@ -349,24 +408,25 @@ void ComputeCoulMatrix::pair_contribution() {
     xtmp = x[i][0];
     ytmp = x[i][1];
     ztmp = x[i][2];
-    itype = type[i];
+    int itype = type[i];
     jlist = firstneigh[i];
     jnum = numneigh[i];
-
-    double bi = 0;
 
     // real-space part of matrix is symmetric
 
     for (int jj = 0; jj < jnum; jj++) {
       int j = jlist[jj];
       j &= NEIGHMASK;
+      if (!(mask[j] & groupbit || mask[j] & jgroupbit)) continue;
+
+      // for (int j = 0; j < atom->nlocal; j++) {
+      // cout << "  j: " << j << endl;
       delx = xtmp - x[j][0];  // neighlists take care of pbc
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       rsq = delx * delx + dely * dely + delz * delz;
+      int jtype = type[j];
       if (rsq >= cutsq[itype][jtype]) continue;
-      jtype = type[j];
-      bool const in_electrode = (mask[j] & groupbit || mask[j] & jgroupbit);
       r = sqrt(rsq);
       rinv = 1.0 / r;
       double aij = rinv;
@@ -375,12 +435,8 @@ void ComputeCoulMatrix::pair_contribution() {
         // TODO real-space gaussians?
         if (gaussians) {
           double etaij;  // TODO infer eta from coeffs of pair coul/long/gauss
-          if (in_electrode) {
-            // see mw ewald theory eq. (29)-(30)
-            etaij = eta * eta / sqrt(2.0 * eta * eta);
-          } else {
-            etaij = eta;
-          }
+          // see mw ewald theory eq. (29)-(30)
+          etaij = eta * eta / sqrt(2.0 * eta * eta);
           aij -= calc_erfc(etaij * r) * rinv;
         }
       }
@@ -391,16 +447,9 @@ void ComputeCoulMatrix::pair_contribution() {
       for (jpos = 0; jpos < ngroup; jpos++)
         if (mat2tag[jpos] == tag[j]) break;
 
-      if (in_electrode) {
-        gradQ_V[mpos[i]][jpos] += aij;
-        gradQ_V[jpos][mpos[i]] += aij;
-      } else {
-        bi += aij * q[j];
-      }
+      gradQ_V[mpos[i]][jpos] += aij;
+      gradQ_V[jpos][mpos[i]] += aij;
     }
-    // TODO factor 2?
-    // TODO gather
-    b_vec[mpos[i]] += bi;
   }
 }
 
@@ -445,7 +494,7 @@ void ComputeCoulMatrix::write_matrix(FILE *file, double **matrix) {
 
 void ComputeCoulMatrix::write_vector(FILE *file, double *vec) {
   for (bigint i = 0; i < ngroup; i++) {
-    fprintf(file, "%d, %E\n",mat2tag[i], vec[i]);
+    fprintf(file, "%d, %E\n", mat2tag[i], vec[i]);
   }
   fprintf(file, "\n");
 }
@@ -465,6 +514,9 @@ void ComputeCoulMatrix::matrix_assignment() {
   int nprocs = comm->nprocs;
   tagint *tag = atom->tag;
   int igroupnum_local, jgroupnum_local;
+
+  bigint nall;
+  MPI_Allreduce(&nlocal, &nall, 1, MPI_INT, MPI_SUM, world);
 
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -523,10 +575,12 @@ void ComputeCoulMatrix::matrix_assignment() {
 
   // if local+ghost matrix assignment already created, recreate
 
-  if (assigned) memory->destroy(mpos);
+  if (assigned) {
+    memory->destroy(mpos);
+  }
   memory->create(mpos, nlocal, "coul/matrix:mpos");
 
-  assigned = 1;
+  assigned = true;
 
   // local+ghost non-matrix atoms are -1 in mpos
 
