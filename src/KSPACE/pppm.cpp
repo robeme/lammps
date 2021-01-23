@@ -3614,7 +3614,7 @@ void PPPM::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 
   // compute corrections
 
-  const double qscale = qqrd2e * scale;
+  const double qscale = qqrd2e * scale * wire_fact;
   const double efact = qscale * MY_2PI/volume;
 
   e2group += efact * (dipole_A*dipole_B - 0.5*(qsum_A*dipole_r2_B +
@@ -3693,13 +3693,13 @@ void PPPM::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
   // compute corrections
 
   const double qscale = qqrd2e * scale;
-  const double efact = qscale * MY_2PI/volume;
+  const double efact = qscale * MY_PI/volume;
 
   e2group += efact * (dipole_A*dipole_B - 0.5*(qsum_A*dipole_r2_B +
     qsum_B*dipole_r2_A) - qsum_A*qsum_B*yprd*yprd/12.0);
 
   // add on force corrections
 
-  const double ffact = qscale * (-4.0*MY_PI/volume);
+  const double ffact = qscale * (-2.0*MY_PI/volume);
   f2group[1] += ffact * (qsum_A*dipole_B - qsum_B*dipole_A);
 }

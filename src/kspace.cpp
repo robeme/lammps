@@ -552,6 +552,7 @@ void KSpace::modify_params(int narg, char **arg)
         if (slab_volfactor < 2.0 && comm->me == 0)
           error->warning(FLERR,"Kspace_modify wire param < 2.0 may "
                          "cause unphysical behavior");
+        wire_fact = 0.5;
       }
       iarg += 2;
     } else if (strcmp(arg[iarg],"compute") == 0) {
