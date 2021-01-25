@@ -21,6 +21,7 @@
 #include "ewald_conp.h"
 
 #include <cmath>
+#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -1682,11 +1683,27 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
           sn[kx][0][i] * cs[ky][1][i] + cs[kx][0][i] * sn[ky][1][i];
       double const cos_kr = cos_kxky * cs[kz][2][i] - sin_kxky * sn[kz][2][i];
       double const sin_kr = sin_kxky * cs[kz][2][i] + cos_kxky * sn[kz][2][i];
-      bi += 2 * ug[k] *
-            (cos_kr * q_cos[k] +
-             sin_kr * q_sin[k]);  // different sign than fix_conp for now
+      bi += 2 * ug[k] * (cos_kr * q_cos[k] + sin_kr * q_sin[k]);
+      // different sign than fix_conp for now
     }
     vector[imat[i]] += bi;
+  }
+}
+
+void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
+  // TODO 2D correction
+  int const nlocal = atom->nlocal;
+  double **x = atom->x;
+  double *q = atom->q;
+  double dipole = 0.;
+  for (int i = 0; i < nlocal; i++) {
+    if (imat[i] < 0) dipole += q[i] * x[i][2];
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
+  dipole *= 4.0 * MY_PI / volume; // TODO why 4? should be 2
+  for (int i = 0; i < nlocal; i++) {
+    int const pos = imat[i];
+    if (pos >= 0) vec[pos] += x[i][2] * dipole;
   }
 }
 /* ----------------------------------------------------------------------
