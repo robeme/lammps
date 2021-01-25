@@ -44,7 +44,7 @@ class ComputeCoulVector : public Compute {
   double **cutsq;
   double *vec;  // electric potential from electrode-electrolyte-interaction
   double g_ewald, eta;
-  int pairflag, kspaceflag, boundaryflag, selfflag;
+  int pairflag, kspaceflag, boundaryflag;
   bool assigned;
   int overwrite, gaussians;
   bigint *mpos;  // locally stored matrix index of each local+ghost atom
@@ -58,6 +58,7 @@ class ComputeCoulVector : public Compute {
 
   void matrix_assignment();
   void pair_contribution();
+  void pair_contribution_corr();
   void write_vector(FILE *, double *);
   void allocate();
   void deallocate();

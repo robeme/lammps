@@ -56,7 +56,6 @@ ComputeCoulVector::ComputeCoulVector(LAMMPS *lmp, int narg, char **arg)
   pairflag = 1;
   kspaceflag = 1;
   boundaryflag = 1;  // include infite boundary correction term
-  selfflag = 1;
   gaussians = 1;
   recalc_every = 0;
   overwrite = 1;
@@ -239,15 +238,9 @@ void ComputeCoulVector::setup() {
 
   matrix_assignment();
 
-  // setting all entries of coulomb vector to zero
-
-  for (int i = 0; i < ngroup; i++) vec[i] = 0.;
-
   // initial calculation of coulomb matrix at setup of simulation
 
-  kspace->compute_vector(mpos, vec);
-  // pair_contribution();
-  // compute_array();
+  compute_array();
   MPI_Allreduce(MPI_IN_PLACE, vec, ngroup, MPI_DOUBLE, MPI_SUM, world);
 
   if (fp && comm->me == 0) write_vector(fp, vec);
@@ -255,9 +248,10 @@ void ComputeCoulVector::setup() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulVector::compute_array() {
+  for (int i = 0; i < ngroup; i++) vec[i] = 0.;
   if (pairflag) pair_contribution();
   if (kspaceflag) kspace->compute_vector(mpos, vec);
-  // if (boundaryflag) kspace->compute_vector_corr(mpos, vec); TODO
+  if (boundaryflag) kspace->compute_vector_corr(mpos, vec);
 }
 
 /* ---------------------------------------------------------------------- */
