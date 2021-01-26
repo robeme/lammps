@@ -13,7 +13,7 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(coul/vector, ComputeCoulVector)
+ComputeStyle(conp/vector, ComputeConpVector)
 
 #else
 
@@ -24,14 +24,14 @@ ComputeStyle(coul/vector, ComputeCoulVector)
 
 namespace LAMMPS_NS {
 
-class ComputeCoulVector : public Compute {
+class ComputeConpVector : public Compute {
  public:
-  ComputeCoulVector(class LAMMPS *, int, char **);
-  ~ComputeCoulVector();
+  ComputeConpVector(class LAMMPS *, int, char **);
+  ~ComputeConpVector();
   void init();
   void setup();
   void init_list(int, class NeighList *);
-  void compute_array();
+  void compute_vector();
 
  protected:
   tagint *mat2tag;  // stores tag of matrix position
@@ -42,7 +42,6 @@ class ComputeCoulVector : public Compute {
   bigint jgroupnum, igroupnum, ngroup;
   int recalc_every;
   double **cutsq;
-  double *vec;  // electric potential from electrode-electrolyte-interaction
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag;
   bool assigned;

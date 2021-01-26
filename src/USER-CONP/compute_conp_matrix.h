@@ -13,21 +13,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(coul/matrix, ComputeCoulMatrix)
+ComputeStyle(conp/matrix, ComputeConpMatrix)
 
 #else
 
-#ifndef LMP_COMPUTE_COUL_MATRIX_H
-#define LMP_COMPUTE_COUL_MATRIX_H
+#ifndef LMP_COMPUTE_CONP_MATRIX_H
+#define LMP_COMPUTE_CONP_MATRIX_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeCoulMatrix : public Compute {
+class ComputeConpMatrix : public Compute {
  public:
-  ComputeCoulMatrix(class LAMMPS *, int, char **);
-  ~ComputeCoulMatrix();
+  ComputeConpMatrix(class LAMMPS *, int, char **);
+  ~ComputeConpMatrix();
   void init();
   void setup();
   void init_list(int, class NeighList *);

@@ -13,7 +13,7 @@
 
 #ifdef PAIR_CLASS
 
-PairStyle(coul/long/gauss, PairCoulLongGauss)
+PairStyle(conp/long/gauss, PairConpLongGauss)
 
 #else
 
@@ -24,10 +24,10 @@ PairStyle(coul/long/gauss, PairCoulLongGauss)
 
 namespace LAMMPS_NS {
 
-class PairCoulLongGauss : public Pair {
+class PairConpLongGauss : public Pair {
  public:
-  PairCoulLongGauss(class LAMMPS *);
-  ~PairCoulLongGauss();
+  PairConpLongGauss(class LAMMPS *);
+  ~PairConpLongGauss();
   virtual void compute(int, int);
   virtual void settings(int, char **);
   void coeff(int, char **);

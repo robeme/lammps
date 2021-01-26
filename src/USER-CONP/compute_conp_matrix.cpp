@@ -16,7 +16,7 @@
      K-space terms added by Stan Moore (BYU)
 ------------------------------------------------------------------------- */
 
-#include "compute_coul_matrix.h"
+#include "compute_conp_matrix.h"
 
 #include <cmath>
 #include <cstring>
@@ -51,7 +51,7 @@ enum { OFF, INTER, INTRA };
 
 /* ---------------------------------------------------------------------- */
 
-ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
+ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
     : Compute(lmp, narg, arg),
       group2(nullptr),
       gradQ_V(nullptr),
@@ -178,7 +178,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
-ComputeCoulMatrix::~ComputeCoulMatrix() {
+ComputeConpMatrix::~ComputeConpMatrix() {
   delete[] group2;
 
   deallocate();
@@ -190,7 +190,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::init() {
+void ComputeConpMatrix::init() {
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
 
@@ -241,7 +241,7 @@ void ComputeCoulMatrix::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::setup() {
+void ComputeConpMatrix::setup() {
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   ngroup = igroupnum + jgroupnum;
@@ -282,11 +282,11 @@ void ComputeCoulMatrix::setup() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
+void ComputeConpMatrix::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::compute_array() {
+void ComputeConpMatrix::compute_array() {
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
   if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
@@ -295,7 +295,7 @@ void ComputeCoulMatrix::compute_array() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::pair_contribution() {
+void ComputeConpMatrix::pair_contribution() {
   int inum, jnum, itype, jtype;
   double xtmp, ytmp, ztmp, delx, dely, delz;
   double r, rinv, rsq, grij, etarij, expm2, t, erfc, aij;
@@ -307,7 +307,7 @@ void ComputeCoulMatrix::pair_contribution() {
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
   int newton_pair = force->newton_pair;
- 
+
   bigint jpos;
 
   double etaij =
@@ -355,9 +355,9 @@ void ComputeCoulMatrix::pair_contribution() {
         r = sqrt(rsq);
         rinv = 1.0 / r;
         aij = rinv;
-        
+
         // kspace solver?
-        
+
         if (kspaceflag || boundaryflag) {
           grij = g_ewald * r;
           expm2 = exp(-grij * grij);
@@ -366,17 +366,17 @@ void ComputeCoulMatrix::pair_contribution() {
 
           aij *= erfc;
         }
-        
+
         // real-space gaussians?
-      
+
         if (gaussians) {
           // TODO infer eta from coeffs of pair coul/long/gauss
           etarij = etaij * r;
-          expm2 = exp(-etarij*etarij);
-          t = 1.0 / (1.0 + EWALD_P*etarij);
-          erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
-          
-          aij -= erfc*rinv;
+          expm2 = exp(-etarij * etarij);
+          t = 1.0 / (1.0 + EWALD_P * etarij);
+          erfc = t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
+
+          aij -= erfc * rinv;
         }
 
         // TODO we don't assign ghost atoms to matrix positions - which would
@@ -385,15 +385,15 @@ void ComputeCoulMatrix::pair_contribution() {
         // ghost atoms
         for (jpos = 0; jpos < ngroup; jpos++)
           if (mat2tag[jpos] == tag[j]) break;
-        
+
         // newton on or off?
-        
+
         if (newton_pair || j < nlocal) {
           gradQ_V[mpos[i]][jpos] += aij;
           gradQ_V[jpos][mpos[i]] += aij;
         } else {
-          gradQ_V[mpos[i]][jpos] += 0.5*aij;
-          gradQ_V[jpos][mpos[i]] += 0.5*aij;
+          gradQ_V[mpos[i]][jpos] += 0.5 * aij;
+          gradQ_V[jpos][mpos[i]] += 0.5 * aij;
         }
       }
     }
@@ -402,7 +402,7 @@ void ComputeCoulMatrix::pair_contribution() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::self_contribution() {
+void ComputeConpMatrix::self_contribution() {
   int nlocal = atom->nlocal;
   int *mask = atom->mask;
 
@@ -415,7 +415,6 @@ void ComputeCoulMatrix::self_contribution() {
       gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
 }
 
-
 /* ----------------------------------------------------------------------
    looks up to which proc each atom in each group belongs and creates a
    local array which locates the position of each local atom in the global
@@ -423,7 +422,7 @@ void ComputeCoulMatrix::self_contribution() {
    b/c atom tags might not be be consecutive or sorted in any way.
 ------------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::matrix_assignment() {
+void ComputeConpMatrix::matrix_assignment() {
   // assign local matrix indices to local atoms on each proc
 
   int *mask = atom->mask;
@@ -492,11 +491,8 @@ void ComputeCoulMatrix::matrix_assignment() {
 
   // if local+ghost matrix assignment already created, recreate
 
-  if (assigned) {
-    memory->destroy(mpos);
-    memory->create(mpos, ngroup, "coul/matrix:mpos");
-  } else
-    memory->create(mpos, ngroup, "coul/matrix:mpos");
+  if (assigned) memory->destroy(mpos);
+  memory->create(mpos, nlocal, "coul/matrix:mpos");
 
   assigned = 1;
 
@@ -528,7 +524,7 @@ void ComputeCoulMatrix::matrix_assignment() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::allocate() {
+void ComputeConpMatrix::allocate() {
   memory->create(mat2tag, ngroup, "coul/matrix:mat2tag");
   gradQ_V = new double *[ngroup];
   for (bigint i = 0; i < ngroup; i++) gradQ_V[i] = new double[ngroup];
@@ -536,7 +532,7 @@ void ComputeCoulMatrix::allocate() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::deallocate() {
+void ComputeConpMatrix::deallocate() {
   memory->destroy(mat2tag);
   for (bigint i = 0; i < ngroup; i++) delete[] gradQ_V[i];
   delete[] gradQ_V;
@@ -544,18 +540,16 @@ void ComputeCoulMatrix::deallocate() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulMatrix::write_matrix(double **matrix)
-{ 
-  fprintf(fp,"# atoms\n");
-  for (bigint i = 0; i < ngroup; i++)
-    fprintf(fp,"%d ", mat2tag[i]);
-  fprintf(fp,"\n");  
+void ComputeConpMatrix::write_matrix(double **matrix) {
+  fprintf(fp, "# atoms\n");
+  for (bigint i = 0; i < ngroup; i++) fprintf(fp, "%d ", mat2tag[i]);
+  fprintf(fp, "\n");
 
-  fprintf(fp,"# matrix\n");
+  fprintf(fp, "# matrix\n");
   for (bigint i = 0; i < ngroup; i++) {
     for (bigint j = 0; j < ngroup; j++) {
       fprintf(fp, "%E ", matrix[i][j]);
     }
-    fprintf(fp,"\n");
+    fprintf(fp, "\n");
   }
 }
