@@ -15,7 +15,7 @@
    Contributing author: Paul Crozier (SNL)
 ------------------------------------------------------------------------- */
 
-#include "pair_coul_long_gauss.h"
+#include "pair_conp_long_gauss.h"
 
 #include <cmath>
 #include <cstring>
@@ -41,7 +41,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-PairCoulLongGauss::PairCoulLongGauss(LAMMPS *lmp) : Pair(lmp) {
+PairConpLongGauss::PairConpLongGauss(LAMMPS *lmp) : Pair(lmp) {
   ewaldflag = pppmflag = 1;
   ftable = nullptr;
   qdist = 0.0;
@@ -49,7 +49,7 @@ PairCoulLongGauss::PairCoulLongGauss(LAMMPS *lmp) : Pair(lmp) {
 
 /* ---------------------------------------------------------------------- */
 
-PairCoulLongGauss::~PairCoulLongGauss() {
+PairConpLongGauss::~PairConpLongGauss() {
   if (copymode) return;
 
   if (allocated) {
@@ -66,13 +66,13 @@ PairCoulLongGauss::~PairCoulLongGauss() {
 }
 
 /* ---------------------------------------------------------------------- */
-double PairCoulLongGauss::cal_erfc(double x) {
+double PairConpLongGauss::cal_erfc(double x) {
   double expm2 = exp(-x * x);
   double t = 1.0 / (1.0 + EWALD_P * x);
   return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
 
-void PairCoulLongGauss::compute(int eflag, int vflag) {
+void PairConpLongGauss::compute(int eflag, int vflag) {
   int i, j, ii, jj, inum, jnum, /*itable,*/ itype, jtype;
   double qtmp, xtmp, ytmp, ztmp, delx, dely, delz, ecoul, fpair;
   // double fraction, table;
@@ -187,7 +187,7 @@ void PairCoulLongGauss::compute(int eflag, int vflag) {
    allocate all arrays
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::allocate() {
+void PairConpLongGauss::allocate() {
   allocated = 1;
   int n = atom->ntypes;
 
@@ -210,7 +210,7 @@ void PairCoulLongGauss::allocate() {
    global settings
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::settings(int narg, char **arg) {
+void PairConpLongGauss::settings(int narg, char **arg) {
   if (narg != 1) error->all(FLERR, "Illegal pair_style command");
 
   cut_coul = utils::numeric(FLERR, arg[0], false, lmp);
@@ -220,7 +220,7 @@ void PairCoulLongGauss::settings(int narg, char **arg) {
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::coeff(int narg, char **arg) {
+void PairConpLongGauss::coeff(int narg, char **arg) {
   if (narg < 2 || narg > 3)
     error->all(FLERR, "Incorrect args for pair coefficients");
   if (!allocated) allocate();
@@ -251,7 +251,7 @@ void PairCoulLongGauss::coeff(int narg, char **arg) {
    init specific to this pair style
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::init_style() {
+void PairConpLongGauss::init_style() {
   if (!atom->q_flag)
     error->all(FLERR, "Pair style coul/long requires atom attribute q");
 
@@ -274,7 +274,7 @@ void PairCoulLongGauss::init_style() {
    init for one type pair i,j and corresponding j,i
 ------------------------------------------------------------------------- */
 
-double PairCoulLongGauss::init_one(int i, int j) {
+double PairConpLongGauss::init_one(int i, int j) {
   if (gauss_flag[i] || gauss_flag[j]) {
     double eta_i = eta_single[i];
     double eta_j = eta_single[j];
@@ -295,7 +295,7 @@ double PairCoulLongGauss::init_one(int i, int j) {
   proc 0 writes to restart file
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::write_restart(FILE *fp) {
+void PairConpLongGauss::write_restart(FILE *fp) {
   write_restart_settings(fp);
 
   for (int i = 1; i <= atom->ntypes; i++)
@@ -309,7 +309,7 @@ void PairCoulLongGauss::write_restart(FILE *fp) {
   proc 0 reads from restart file, bcasts
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::read_restart(FILE *fp) {
+void PairConpLongGauss::read_restart(FILE *fp) {
   read_restart_settings(fp);
 
   allocate();
@@ -335,7 +335,7 @@ void PairCoulLongGauss::read_restart(FILE *fp) {
   proc 0 writes to restart file
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::write_restart_settings(FILE *fp) {
+void PairConpLongGauss::write_restart_settings(FILE *fp) {
   fwrite(&cut_coul, sizeof(double), 1, fp);
   fwrite(&offset_flag, sizeof(int), 1, fp);
   fwrite(&mix_flag, sizeof(int), 1, fp);
@@ -347,7 +347,7 @@ void PairCoulLongGauss::write_restart_settings(FILE *fp) {
   proc 0 reads from restart file, bcasts
 ------------------------------------------------------------------------- */
 
-void PairCoulLongGauss::read_restart_settings(FILE *fp) {
+void PairConpLongGauss::read_restart_settings(FILE *fp) {
   if (comm->me == 0) {
     utils::sfread(FLERR, &cut_coul, sizeof(double), 1, fp, nullptr, error);
     utils::sfread(FLERR, &offset_flag, sizeof(int), 1, fp, nullptr, error);
@@ -364,7 +364,7 @@ void PairCoulLongGauss::read_restart_settings(FILE *fp) {
 
 /* ---------------------------------------------------------------------- */
 
-double PairCoulLongGauss::single(int i, int j, int /*itype*/, int /*jtype*/,
+double PairConpLongGauss::single(int i, int j, int /*itype*/, int /*jtype*/,
                              double rsq, double factor_coul,
                              double /*factor_lj*/, double &fforce) {
   double r2inv, r, grij, expm2, t, erfc, prefactor;
@@ -410,7 +410,7 @@ double PairCoulLongGauss::single(int i, int j, int /*itype*/, int /*jtype*/,
 
 /* ---------------------------------------------------------------------- */
 
-void *PairCoulLongGauss::extract(const char *str, int &dim) {
+void *PairConpLongGauss::extract(const char *str, int &dim) {
   if (strcmp(str, "cut_coul") == 0) {
     dim = 0;
     return (void *)&cut_coul;

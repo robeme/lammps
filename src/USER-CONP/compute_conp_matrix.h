@@ -13,21 +13,21 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(coul/matrix, ComputeCoulMatrix)
+ComputeStyle(conp/matrix, ComputeConpMatrix)
 
 #else
 
-#ifndef LMP_COMPUTE_COUL_MATRIX_H
-#define LMP_COMPUTE_COUL_MATRIX_H
+#ifndef LMP_COMPUTE_CONP_MATRIX_H
+#define LMP_COMPUTE_CONP_MATRIX_H
 
 #include "compute.h"
 
 namespace LAMMPS_NS {
 
-class ComputeCoulMatrix : public Compute {
+class ComputeConpMatrix : public Compute {
  public:
-  ComputeCoulMatrix(class LAMMPS *, int, char **);
-  ~ComputeCoulMatrix();
+  ComputeConpMatrix(class LAMMPS *, int, char **);
+  ~ComputeConpMatrix();
   void init();
   void setup();
   void init_list(int, class NeighList *);
@@ -44,7 +44,8 @@ class ComputeCoulMatrix : public Compute {
   double **cutsq, **gradQ_V;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag, selfflag;
-  int overwrite, gaussians, assigned;
+  bool assigned;
+  int overwrite, gaussians;
   bigint *mpos;  // locally stored matrix index of each local+ghost atom
   class Pair *pair;
   class NeighList *list;
@@ -60,6 +61,7 @@ class ComputeCoulMatrix : public Compute {
   void write_matrix(double **);
   void allocate();
   void deallocate();
+  double calc_erfc(double);
 };
 
 }  // namespace LAMMPS_NS

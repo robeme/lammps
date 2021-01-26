@@ -140,6 +140,8 @@ class KSpace : protected Pointers {
   
   // USER-CONP package
   
+  virtual void compute_vector(bigint *, double *) {};
+  virtual void compute_vector_corr(bigint *, double *) {};
   virtual void compute_matrix(bigint *, double **) {};
   virtual void compute_matrix_corr(bigint *, double **) {};
 
