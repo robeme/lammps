@@ -20,7 +20,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -77,7 +76,7 @@ ComputeCoulMatrix::ComputeCoulMatrix(LAMMPS *lmp, int narg, char **arg)
   gaussians = 1;
   recalc_every = 0;
   overwrite = 1;
-  assigned = false;
+  assigned = 0;
 
   g_ewald = 0.0;
 
@@ -184,9 +183,7 @@ ComputeCoulMatrix::~ComputeCoulMatrix() {
 
   deallocate();
 
-  if (assigned) {
-    memory->destroy(mpos);
-  }
+  if (assigned) memory->destroy(mpos);
 
   if (fp && comm->me == 0) fclose(fp);
 }
@@ -280,7 +277,7 @@ void ComputeCoulMatrix::setup() {
     MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
                   world);
 
-  if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
+  if (fp && comm->me == 0) write_matrix(gradQ_V);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -299,17 +296,22 @@ void ComputeCoulMatrix::compute_array() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeCoulMatrix::pair_contribution() {
-  int inum, jnum;
+  int inum, jnum, itype, jtype;
   double xtmp, ytmp, ztmp, delx, dely, delz;
-  double r, rinv, rsq;
+  double r, rinv, rsq, grij, etarij, expm2, t, erfc, aij;
   int *ilist, *jlist, *numneigh, **firstneigh;
 
   double **x = atom->x;
+  tagint *tag = atom->tag;
   int *type = atom->type;
   int *mask = atom->mask;
-  tagint *tag = atom->tag;
-
+  int nlocal = atom->nlocal;
+  int newton_pair = force->newton_pair;
+ 
   bigint jpos;
+
+  double etaij =
+      eta * eta / sqrt(2.0 * eta * eta);  // see mw ewald theory eq. (29)-(30)
 
   // invoke half neighbor list (will copy or build if necessary)
 
@@ -322,7 +324,7 @@ void ComputeCoulMatrix::pair_contribution() {
 
   // loop over neighbors of my atoms
   // skip if I,J are not in 2 groups
-  //
+
   for (int ii = 0; ii < inum; ii++) {
     int i = ilist[ii];
     // skip if atom I is not in either group
@@ -331,7 +333,7 @@ void ComputeCoulMatrix::pair_contribution() {
     xtmp = x[i][0];
     ytmp = x[i][1];
     ztmp = x[i][2];
-    int itype = type[i];
+    itype = type[i];
     jlist = firstneigh[i];
     jnum = numneigh[i];
 
@@ -340,47 +342,62 @@ void ComputeCoulMatrix::pair_contribution() {
     for (int jj = 0; jj < jnum; jj++) {
       int j = jlist[jj];
       j &= NEIGHMASK;
+      // skip if atom J is not in either group
       if (!(mask[j] & groupbit || mask[j] & jgroupbit)) continue;
 
-      // for (int j = 0; j < atom->nlocal; j++) {
-      // cout << "  j: " << j << endl;
       delx = xtmp - x[j][0];  // neighlists take care of pbc
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       rsq = delx * delx + dely * dely + delz * delz;
-      int jtype = type[j];
-      if (rsq >= cutsq[itype][jtype]) continue;
-      r = sqrt(rsq);
-      rinv = 1.0 / r;
-      double aij = rinv;
-      if (kspaceflag || boundaryflag) {
-        aij *= calc_erfc(g_ewald * r);
-        // TODO real-space gaussians?
+      jtype = type[j];
+
+      if (rsq < cutsq[itype][jtype]) {
+        r = sqrt(rsq);
+        rinv = 1.0 / r;
+        aij = rinv;
+        
+        // kspace solver?
+        
+        if (kspaceflag || boundaryflag) {
+          grij = g_ewald * r;
+          expm2 = exp(-grij * grij);
+          t = 1.0 / (1.0 + EWALD_P * grij);
+          erfc = t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
+
+          aij *= erfc;
+        }
+        
+        // real-space gaussians?
+      
         if (gaussians) {
-          double etaij;  // TODO infer eta from coeffs of pair coul/long/gauss
-          // see mw ewald theory eq. (29)-(30)
-          etaij = eta * eta / sqrt(2.0 * eta * eta);
-          aij -= calc_erfc(etaij * r) * rinv;
+          // TODO infer eta from coeffs of pair coul/long/gauss
+          etarij = etaij * r;
+          expm2 = exp(-etarij*etarij);
+          t = 1.0 / (1.0 + EWALD_P*etarij);
+          erfc = t * (A1+t*(A2+t*(A3+t*(A4+t*A5)))) * expm2;
+          
+          aij -= erfc*rinv;
+        }
+
+        // TODO we don't assign ghost atoms to matrix positions - which would
+        // be a non-trivial task in matrix_assignment() - so I'm using this
+        // rather slow approach here... It seems that lammps stores also tags of
+        // ghost atoms
+        for (jpos = 0; jpos < ngroup; jpos++)
+          if (mat2tag[jpos] == tag[j]) break;
+        
+        // newton on or off?
+        
+        if (newton_pair || j < nlocal) {
+          gradQ_V[mpos[i]][jpos] += aij;
+          gradQ_V[jpos][mpos[i]] += aij;
+        } else {
+          gradQ_V[mpos[i]][jpos] += 0.5*aij;
+          gradQ_V[jpos][mpos[i]] += 0.5*aij;
         }
       }
-      // TODO we don't assign ghost atoms to matrix positions - which would
-      // be a non-trivial task in matrix_assignment() - so I'm using this
-      // rather slow approach here... It seems that lammps stores also tags of
-      // ghost atoms
-      for (jpos = 0; jpos < ngroup; jpos++)
-        if (mat2tag[jpos] == tag[j]) break;
-
-      gradQ_V[mpos[i]][jpos] += aij;
-      gradQ_V[jpos][mpos[i]] += aij;
     }
   }
-}
-
-/* ---------------------------------------------------------------------- */
-double ComputeCoulMatrix::calc_erfc(double x) {
-  double expm2 = exp(-x * x);
-  double t = 1.0 / (1.0 + EWALD_P * x);
-  return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -398,22 +415,6 @@ void ComputeCoulMatrix::self_contribution() {
       gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
 }
 
-/* ---------------------------------------------------------------------- */
-
-void ComputeCoulMatrix::write_matrix(FILE *file, double **matrix) {
-  fprintf(file, "# atoms\n");
-  for (bigint i = 0; i < ngroup; i++) fprintf(file, "%d ", mat2tag[i]);
-  fprintf(file, "\n");
-
-  fprintf(file, "# matrix\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(file, "%E ", matrix[i][j]);
-    }
-    fprintf(file, "\n");
-  }
-}
-/* ---------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
    looks up to which proc each atom in each group belongs and creates a
@@ -429,7 +430,12 @@ void ComputeCoulMatrix::matrix_assignment() {
   int nlocal = atom->nlocal;
   int nprocs = comm->nprocs;
   tagint *tag = atom->tag;
+
+  tagint *itaglist, *itaglist_local;
+  tagint *jtaglist, *jtaglist_local;
   int igroupnum_local, jgroupnum_local;
+  int *igroupnum_list, *jgroupnum_list;
+  int *idispls, *jdispls;
 
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -441,15 +447,15 @@ void ComputeCoulMatrix::matrix_assignment() {
       jgroupnum_local++;
   }
 
-  std::vector<int> idispls(nprocs);
-  std::vector<int> jdispls(nprocs);
-  std::vector<int> igroupnum_list(nprocs);
-  std::vector<int> jgroupnum_list(nprocs);
+  memory->create(idispls, nprocs, "coul/matrix:idispls");
+  memory->create(jdispls, nprocs, "coul/matrix:jdispls");
+  memory->create(igroupnum_list, nprocs, "coul/matrix:ilist");
+  memory->create(jgroupnum_list, nprocs, "coul/matrix:jlist");
 
-  MPI_Allgather(&igroupnum_local, 1, MPI_INT, &igroupnum_list.front(), 1,
-                MPI_INT, world);
-  MPI_Allgather(&jgroupnum_local, 1, MPI_INT, &jgroupnum_list.front(), 1,
-                MPI_INT, world);
+  MPI_Allgather(&igroupnum_local, 1, MPI_INT, igroupnum_list, 1, MPI_INT,
+                world);
+  MPI_Allgather(&jgroupnum_local, 1, MPI_INT, jgroupnum_list, 1, MPI_INT,
+                world);
 
   idispls[0] = jdispls[0] = 0;
   for (int i = 1; i < nprocs; i++) {
@@ -457,8 +463,8 @@ void ComputeCoulMatrix::matrix_assignment() {
     jdispls[i] = jdispls[i - 1] + jgroupnum_list[i - 1];
   }
 
-  std::vector<int> itaglist_local(igroupnum_local);
-  std::vector<int> jtaglist_local(jgroupnum_local);
+  memory->create(itaglist_local, igroupnum_local, "coul/matrix:itaglist_local");
+  memory->create(jtaglist_local, jgroupnum_local, "coul/matrix:jtaglist_local");
 
   igroupnum_local = jgroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -471,35 +477,33 @@ void ComputeCoulMatrix::matrix_assignment() {
     }
   }
 
-  std::vector<int> itaglist(igroupnum);
-  std::vector<int> jtaglist(jgroupnum);
+  memory->create(itaglist, igroupnum, "coul/matrix:itaglist");
+  memory->create(jtaglist, jgroupnum, "coul/matrix:jtaglist");
 
-  MPI_Allgatherv(&itaglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
-                 &itaglist.front(), &igroupnum_list.front(), &idispls.front(),
-                 MPI_LMP_TAGINT, world);
-  MPI_Allgatherv(&jtaglist_local.front(), jgroupnum_local, MPI_LMP_TAGINT,
-                 &jtaglist.front(), &jgroupnum_list.front(), &jdispls.front(),
-                 MPI_LMP_TAGINT, world);
+  MPI_Allgatherv(itaglist_local, igroupnum_local, MPI_LMP_TAGINT, itaglist,
+                 igroupnum_list, idispls, MPI_LMP_TAGINT, world);
+  MPI_Allgatherv(jtaglist_local, jgroupnum_local, MPI_LMP_TAGINT, jtaglist,
+                 jgroupnum_list, jdispls, MPI_LMP_TAGINT, world);
 
   // sort individual group taglists, first igroup than jgroup
 
-  std::sort(itaglist.begin(), itaglist.end());
-  std::sort(jtaglist.begin(), jtaglist.end());
+  std::sort(itaglist, itaglist + igroupnum);
+  std::sort(jtaglist, jtaglist + jgroupnum);
 
   // if local+ghost matrix assignment already created, recreate
 
   if (assigned) {
     memory->destroy(mpos);
-  }
-  memory->create(mpos, nlocal, "coul/matrix:mpos");
+    memory->create(mpos, ngroup, "coul/matrix:mpos");
+  } else
+    memory->create(mpos, ngroup, "coul/matrix:mpos");
 
-  assigned = true;
+  assigned = 1;
 
   // local+ghost non-matrix atoms are -1 in mpos
 
-  for (int i = 0; i < nlocal; i++) {
-    mpos[i] = -1;
-  }
+  size_t nbytes = sizeof(bigint) * ngroup;
+  if (nbytes) memset(mpos, -1, nbytes);
 
   // store which tag represents value in matrix
 
@@ -507,13 +511,19 @@ void ComputeCoulMatrix::matrix_assignment() {
   for (bigint j = 0; j < jgroupnum; j++) mat2tag[igroupnum + j] = jtaglist[j];
 
   // create global matrix indices for local+ghost atoms
-  for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nlocal; i++) {
-      if (mat2tag[ii] == tag[i]) {
-        mpos[i] = ii;
-      }
-    }
-  }
+
+  for (bigint ii = 0; ii < ngroup; ii++)
+    for (int i = 0; i < nlocal; i++)
+      if (mat2tag[ii] == tag[i]) mpos[i] = ii;
+
+  memory->destroy(igroupnum_list);
+  memory->destroy(jgroupnum_list);
+  memory->destroy(idispls);
+  memory->destroy(jdispls);
+  memory->destroy(itaglist_local);
+  memory->destroy(jtaglist_local);
+  memory->destroy(itaglist);
+  memory->destroy(jtaglist);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -530,4 +540,22 @@ void ComputeCoulMatrix::deallocate() {
   memory->destroy(mat2tag);
   for (bigint i = 0; i < ngroup; i++) delete[] gradQ_V[i];
   delete[] gradQ_V;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeCoulMatrix::write_matrix(double **matrix)
+{ 
+  fprintf(fp,"# atoms\n");
+  for (bigint i = 0; i < ngroup; i++)
+    fprintf(fp,"%d ", mat2tag[i]);
+  fprintf(fp,"\n");  
+
+  fprintf(fp,"# matrix\n");
+  for (bigint i = 0; i < ngroup; i++) {
+    for (bigint j = 0; j < ngroup; j++) {
+      fprintf(fp, "%E ", matrix[i][j]);
+    }
+    fprintf(fp,"\n");
+  }
 }
