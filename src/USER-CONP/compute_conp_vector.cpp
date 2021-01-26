@@ -12,7 +12,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "compute_coul_vector.h"
+#include "compute_conp_vector.h"
 
 #include "atom.h"
 #include "comm.h"
@@ -35,22 +35,21 @@ using namespace LAMMPS_NS;
 #define A4 -1.453152027
 #define A5 1.061405429
 
-ComputeCoulVector::ComputeCoulVector(LAMMPS *lmp, int narg, char **arg)
+ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
     : Compute(lmp, narg, arg),
       group2(nullptr),
-      vec(nullptr),
       mpos(nullptr),
       fp(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/vector command");
 
-  array_flag = 1;
+  vector_flag = 1;
   size_array_cols = 0;
   size_array_rows = 0;
   size_array_rows_variable = 0;
   extarray = 0;
 
   fp = nullptr;
-  vec = nullptr;
+  vector = nullptr;
   mpos = nullptr;
 
   pairflag = 1;
@@ -151,7 +150,7 @@ ComputeCoulVector::ComputeCoulVector(LAMMPS *lmp, int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
-ComputeCoulVector::~ComputeCoulVector() {
+ComputeConpVector::~ComputeConpVector() {
   delete[] group2;
 
   deallocate();
@@ -165,11 +164,11 @@ ComputeCoulVector::~ComputeCoulVector() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
+void ComputeConpVector::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::init() {
+void ComputeConpVector::init() {
   // if non-hybrid, then error if single_enable = 0
   // if hybrid, let hybrid determine if sub-style sets single_enable = 0
 
@@ -220,7 +219,7 @@ void ComputeCoulVector::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::setup() {
+void ComputeConpVector::setup() {
   igroupnum = group->count(igroup);
   jgroupnum = group->count(jgroup);
   ngroup = igroupnum + jgroupnum;
@@ -240,23 +239,23 @@ void ComputeCoulVector::setup() {
 
   // initial calculation of coulomb matrix at setup of simulation
 
-  compute_array();
-  MPI_Allreduce(MPI_IN_PLACE, vec, ngroup, MPI_DOUBLE, MPI_SUM, world);
+  compute_vector();
+  MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
 
-  if (fp && comm->me == 0) write_vector(fp, vec);
+  if (fp && comm->me == 0) write_vector(fp, vector);
 }
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::compute_array() {
-  for (int i = 0; i < ngroup; i++) vec[i] = 0.;
+void ComputeConpVector::compute_vector() {
+  for (int i = 0; i < ngroup; i++) vector[i] = 0.;
   if (pairflag) pair_contribution();
-  if (kspaceflag) kspace->compute_vector(mpos, vec);
-  if (boundaryflag) kspace->compute_vector_corr(mpos, vec);
+  if (kspaceflag) kspace->compute_vector(mpos, vector);
+  if (boundaryflag) kspace->compute_vector_corr(mpos, vector);
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::pair_contribution() {
+void ComputeConpVector::pair_contribution() {
   double **x = atom->x;
   double *q = atom->q;
   int *type = atom->type;
@@ -302,15 +301,15 @@ void ComputeCoulVector::pair_contribution() {
       for (bigint jpos = 0; jpos < ngroup; jpos++)  // TODO what is this doing?
         if (mat2tag[jpos] == atom->tag[j]) break;
       if (i_in_electrode && (i < nlocal)) {  // TODO why smaller than nlocal?
-        vec[mpos[i]] += aij * q[j];
+        vector[mpos[i]] += aij * q[j];
       } else if (j_in_electrode && (j < nlocal)) {
-        vec[mpos[j]] += aij * q[i];
+        vector[mpos[j]] += aij * q[i];
       }
     }
   }
 }
 /* ---------------------------------------------------------------------- */
-void ComputeCoulVector::matrix_assignment() {
+void ComputeConpVector::matrix_assignment() {
   // assign local matrix indices to local atoms on each proc
 
   int *mask = atom->mask;
@@ -405,27 +404,27 @@ void ComputeCoulVector::matrix_assignment() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::allocate() {
+void ComputeConpVector::allocate() {
   memory->create(mat2tag, ngroup, "coul/vector:mat2tag");
-  vec = new double[ngroup]();  // init to zero
+  vector = new double[ngroup]();  // init to zero
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::deallocate() {
+void ComputeConpVector::deallocate() {
   memory->destroy(mat2tag);
-  delete[] vec;
+  delete[] vector;
 }
 
 /* ---------------------------------------------------------------------- */
-double ComputeCoulVector::calc_erfc(double x) {
+double ComputeConpVector::calc_erfc(double x) {
   double expm2 = exp(-x * x);
   double t = 1.0 / (1.0 + EWALD_P * x);
   return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
 /* ---------------------------------------------------------------------- */
 
-void ComputeCoulVector::write_vector(FILE *file, double *v) {
+void ComputeConpVector::write_vector(FILE *file, double *v) {
   for (bigint i = 0; i < ngroup; i++) {
     fprintf(file, "%d, %E\n", mat2tag[i], v[i]);
   }
