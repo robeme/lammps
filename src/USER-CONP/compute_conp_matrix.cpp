@@ -498,7 +498,7 @@ void ComputeConpMatrix::matrix_assignment() {
 
   // local+ghost non-matrix atoms are -1 in mpos
 
-  size_t nbytes = sizeof(bigint) * ngroup;
+  size_t nbytes = sizeof(bigint) * nlocal;
   if (nbytes) memset(mpos, -1, nbytes);
 
   // store which tag represents value in matrix
