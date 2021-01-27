@@ -3029,11 +3029,11 @@ void PPPM::slabcorr()
    Wire-geometry correction term to dampen inter-wire interactions between
    periodically repeating wires.  Yields good approximation to 1D Ewald if
    adequate empty space is left between repeating wires (J. Mol. Struct.
-   704, 101).  Wires defined here are parellel to the x-axis. As it is  
-   applied on top of the slab correction it is probably also extended to 
-   non-neutral systems (J. Chem. Phys. 131, 094107). TODO: However, I've 
-   not checked this explicitly. Nertheless, non-neutral system contributions 
-   are here zero when there is no net charge.
+   704, 101). y and z are non-periodic. As it is applied on top of the slab 
+   correction it probably works also for non-neutral systems (J. Chem. Phys.
+   131, 094107). TODO: However, I've not checked this explicitly. Anyway,
+   if system is initially charge neutral (checked in init using qsum_qsq)
+   the correction terms for non charge neutral systems are zero.
 ------------------------------------------------------------------------- */
 
 void PPPM::wirecorr()
