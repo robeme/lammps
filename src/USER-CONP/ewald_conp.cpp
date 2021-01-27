@@ -1753,12 +1753,12 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
       snx[k + ngrouplocal * (kxmax + 1)] = sn[k][0][i];
     }
     for (int k = 0; k <= kymax; k++) {
-      csy[k + ngrouplocal * (kxmax + 1)] = cs[k][1][i];
-      sny[k + ngrouplocal * (kxmax + 1)] = sn[k][1][i];
+      csy[k + ngrouplocal * (kymax + 1)] = cs[k][1][i];
+      sny[k + ngrouplocal * (kymax + 1)] = sn[k][1][i];
     }
     for (int k = 0; k <= kzmax; k++) {
-      csz[k + ngrouplocal * (kxmax + 1)] = cs[k][2][i];
-      snz[k + ngrouplocal * (kxmax + 1)] = sn[k][2][i];
+      csz[k + ngrouplocal * (kzmax + 1)] = cs[k][2][i];
+      snz[k + ngrouplocal * (kzmax + 1)] = sn[k][2][i];
     }
 
     // ... and keep track of matrix index
@@ -1941,6 +1941,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
                "Cannot (yet) use K-space slab "
                "correction with compute coul/matrix for triclinic systems");
 
+  int nprd_dim = 2; // TODO fix properly
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
 
