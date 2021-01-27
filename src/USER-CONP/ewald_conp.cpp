@@ -73,8 +73,6 @@ EwaldConp::EwaldConp(LAMMPS *lmp)
   kmax = 0;
   kxvecs = kyvecs = kzvecs = nullptr;
 
-  nprd_dim = -1;
-
   ug = nullptr;
   eg = vg = nullptr;
   sfacrl = sfacim = sfacrl_all = sfacim_all = nullptr;
@@ -118,31 +116,14 @@ void EwaldConp::init() {
     error->all(FLERR, "Kspace style requires atom attribute q");
 
   if (slabflag == 0 && domain->nonperiodic > 0)
-    error->all(FLERR, "Cannot use non-periodic boundaries with Ewald");
+    error->all(FLERR,"Cannot use non-periodic boundaries with Ewald");
   if (slabflag) {
-    if (slab_volfactor == 1.0) {
-      int ndim = 0;
-      if (domain->xperiodic != 1) {
-        nprd_dim = 0;
-        ndim++;
-      }
-      if (domain->yperiodic != 1) {
-        nprd_dim = 1;
-        ndim++;
-      }
-      if (domain->zperiodic != 1) {
-        nprd_dim = 2;
-        ndim++;
-      }
-      if (ndim > 1)
-        error->all(FLERR, "Cannot use < 2 periodic boundaries with EW2D");
-    } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
-               domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
-      error->all(FLERR, "Incorrect boundaries with slab Ewald");
+    if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
+        domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
+      error->all(FLERR,"Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
-      error->all(FLERR,
-                 "Cannot (yet) use Ewald with triclinic box "
-                 "and slab correction nor with EW2D");
+      error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
+                 "and slab correction");
   }
 
   // compute two charge force
@@ -252,9 +233,7 @@ void EwaldConp::setup() {
 
   double zprd_slab = zprd * slab_volfactor;
   volume = xprd * yprd * zprd_slab;
-  if (nprd_dim == 0) area = yprd * zprd;
-  if (nprd_dim == 1) area = xprd * zprd;
-  if (nprd_dim == 2) area = xprd * yprd;
+  area = xprd * yprd;
 
   unitk[0] = 2.0 * MY_PI / xprd;
   unitk[1] = 2.0 * MY_PI / yprd;
@@ -523,10 +502,8 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   // 2d slab correction
 
-  if (slabflag == 1 && slab_volfactor > 1.0)
-    slabcorr();
-  else if (slabflag == 1 && slab_volfactor == 1.0)
-    ew2dcorr();
+  if (slabflag == 1) slabcorr();
+  else if (slabflag == 3) ew2dcorr();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -814,7 +791,7 @@ void EwaldConp::coeffs() {
   // (k,0,0), (0,l,0), (0,0,m), however skip (0,0) in case os EW2D
   for (m = 1; m <= kmax; m++) {
     sqk = (m * unitk[0]) * (m * unitk[0]);
-    if (sqk <= gsqmx && nprd_dim != 0) {
+    if (sqk <= gsqmx) {
       kxvecs[kcount] = m;
       kyvecs[kcount] = 0;
       kzvecs[kcount] = 0;
@@ -832,7 +809,7 @@ void EwaldConp::coeffs() {
       kcount++;
     }
     sqk = (m * unitk[1]) * (m * unitk[1]);
-    if (sqk <= gsqmx && nprd_dim != 1) {
+    if (sqk <= gsqmx) {
       kxvecs[kcount] = 0;
       kyvecs[kcount] = m;
       kzvecs[kcount] = 0;
@@ -850,7 +827,7 @@ void EwaldConp::coeffs() {
       kcount++;
     }
     sqk = (m * unitk[2]) * (m * unitk[2]);
-    if (sqk <= gsqmx && nprd_dim != 2) {
+    if (sqk <= gsqmx && slabflag != 3) {
       kxvecs[kcount] = 0;
       kyvecs[kcount] = 0;
       kzvecs[kcount] = m;
@@ -1304,7 +1281,7 @@ void EwaldConp::ew2dcorr() {
 
   memory->create(nprd, nlocal, "ewald/conp:nprd");
 
-  for (int i = 0; i < nlocal; i++) nprd[i] = x[i][nprd_dim];
+  for (int i = 0; i < nlocal; i++) nprd[i] = x[i][2];
 
   memory->create(nprd_all, natoms, "ewald/conp:nprd_all");
   memory->create(q_all, natoms, "ewald/conp:q_all");
@@ -1334,7 +1311,7 @@ void EwaldConp::ew2dcorr() {
 
     // TODO check if we are double counting the interactions here?
     for (bigint j = 0; j < natoms; j++) {
-      dij = nprd_all[j] - x[i][nprd_dim];
+      dij = nprd_all[j] - x[i][2];
 
       // resembles (aij) matrix component in constant potential
       aij = efact * (exp(-dij * dij * g_ewald_sq) * g_ewald_inv +
@@ -1344,7 +1321,7 @@ void EwaldConp::ew2dcorr() {
 
       // add on force corrections
 
-      f[i][nprd_dim] -= ffact * q[i] * q_all[j] * erf(g_ewald * dij);
+      f[i][2] -= ffact * q[i] * q_all[j] * erf(g_ewald * dij);
     }
 
     // per-atom energy; see eq. (20) in metalwalls ewald doc
@@ -1501,9 +1478,9 @@ void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B,
 
   // 2d slab correction
 
-  if (slabflag == 1 && slab_volfactor > 1.0)
+  if (slabflag == 1)
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
-  else if (slabflag == 1 && slab_volfactor == 1.0)
+  else if (slabflag == 3)
     ew2dcorr_groups(groupbit_A, groupbit_B, AA_flag);
 }
 
@@ -1631,10 +1608,14 @@ void EwaldConp::deallocate_groups() {
 
 void EwaldConp::ew2dcorr_groups(int /*groupbit_A*/, int /*groupbit_B*/,
                                 int /*AA_flag*/) {
-  if (slabflag == 1 && slab_volfactor == 1.0)
+  if (slabflag == 3)
     error->all(FLERR,
                "Cannot (yet) use EW2D correction with compute group/group");
 }
+
+/* ----------------------------------------------------------------------
+   compute b-vector of constant potential approach
+ ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_vector(bigint *imat, double *vector) {
   // TODO check cs and sn are up to date
@@ -1706,6 +1687,7 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
     if (pos >= 0) vec[pos] += x[i][2] * dipole;
   }
 }
+
 /* ----------------------------------------------------------------------
    compute individual interactions between all pairs of atoms in group A
    and B. see lammps_gather_atoms_concat() on how all sn and cs have been
@@ -1941,7 +1923,6 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
                "Cannot (yet) use K-space slab "
                "correction with compute coul/matrix for triclinic systems");
 
-  int nprd_dim = 2; // TODO fix properly
   int nprocs = comm->nprocs;
   int nlocal = atom->nlocal;
 
@@ -1973,7 +1954,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 
     // gather non-periodic positions of groups
 
-    nprd_local[ngrouplocal] = x[i][nprd_dim];
+    nprd_local[ngrouplocal] = x[i][2];
 
     // ... and keep track of matrix index
 
@@ -2015,7 +1996,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 
         if (jmat[j] > imat[i]) continue;
 
-        aij = prefac * x[i][nprd_dim] * nprd_all[j];
+        aij = prefac * x[i][2] * nprd_all[j];
 
         matrix[imat[i]][jmat[j]] += aij;
         if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
@@ -2041,7 +2022,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 
         if (jmat[j] > imat[i]) continue;
 
-        dij = nprd_all[j] - x[i][nprd_dim];
+        dij = nprd_all[j] - x[i][2];
 
         // resembles (aij) matrix component in constant potential
         aij = prefac * (exp(-dij * dij * g_ewald_sq) * g_ewald_inv +
