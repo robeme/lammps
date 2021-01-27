@@ -17,8 +17,8 @@ PairStyle(conp/long/gauss, PairConpLongGauss)
 
 #else
 
-#ifndef LMP_PAIR_COUL_LONG_GAUSS_H
-#define LMP_PAIR_COUL_LONG_GAUSS_H
+#ifndef LMP_PAIR_CONP_LONG_GAUSS_H
+#define LMP_PAIR_CONP_LONG_GAUSS_H
 
 #include "pair.h"
 
