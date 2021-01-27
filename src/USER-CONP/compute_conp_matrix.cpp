@@ -388,13 +388,9 @@ void ComputeConpMatrix::pair_contribution() {
 
         // newton on or off?
 
-        if (newton_pair || j < nlocal) {
-          gradQ_V[mpos[i]][jpos] += aij;
-          gradQ_V[jpos][mpos[i]] += aij;
-        } else {
-          gradQ_V[mpos[i]][jpos] += 0.5 * aij;
-          gradQ_V[jpos][mpos[i]] += 0.5 * aij;
-        }
+        if (!(newton_pair || j < nlocal)) aij *= 0.5;
+        gradQ_V[mpos[i]][jpos] += aij;
+        gradQ_V[jpos][mpos[i]] += aij;
       }
     }
   }
@@ -411,8 +407,9 @@ void ComputeConpMatrix::self_contribution() {
 
   // TODO infer eta from pair_coeffs
   for (int i = 0; i < nlocal; i++)
-    if (mask[i] & groupbit || mask[i] & jgroupbit)
+    if (mask[i] & groupbit || mask[i] & jgroupbit) {
       gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
+    }
 }
 
 /* ----------------------------------------------------------------------
