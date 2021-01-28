@@ -259,7 +259,7 @@ void ComputeConpVector::pair_contribution() {
   int *mask = atom->mask;
   neighbor->build_one(list);
   int const nlocal = atom->nlocal;
-  int const nghost = atom->nghost;
+  int const nall = atom->nghost + nlocal;
   int const inum = list->inum;
   int *ilist = list->ilist;
   int *numneigh = list->numneigh;
@@ -298,7 +298,7 @@ void ComputeConpVector::pair_contribution() {
       }
       if (i_in_electrode && (i < nlocal)) {
         vector[mpos[i]] += aij * q[j];
-      } else if (j_in_electrode && (j < nghost)) {
+      } else if (j_in_electrode && (j < nall)) {
         vector[mpos[j]] += aij * q[i];
       }
     }
