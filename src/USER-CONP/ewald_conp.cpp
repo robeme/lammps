@@ -21,7 +21,6 @@
 #include "ewald_conp.h"
 
 #include <cmath>
-#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -34,7 +33,6 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
-using namespace std;
 
 #define SMALL 0.00001
 
@@ -115,15 +113,25 @@ void EwaldConp::init() {
   if (!atom->q_flag)
     error->all(FLERR, "Kspace style requires atom attribute q");
 
-  if (slabflag == 0 && domain->nonperiodic > 0)
-    error->all(FLERR,"Cannot use non-periodic boundaries with Ewald");
+  if (slabflag == 0 && wireflag == 0 && domain->nonperiodic > 0)
+    error->all(FLERR, "Cannot use non-periodic boundaries with Ewald");
   if (slabflag) {
     if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
-      error->all(FLERR,"Incorrect boundaries with slab Ewald");
+      error->all(FLERR, "Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
-      error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
+      error->all(FLERR,
+                 "Cannot (yet) use Ewald with triclinic box "
                  "and slab correction");
+  }else if (wireflag) {
+    if (domain->zperiodic != 1 || domain->boundary[0][0] != 1 || 
+        domain->boundary[0][1] != 1 || domain->boundary[1][0] != 1 || 
+        domain->boundary[1][1] != 1)
+      error->all(FLERR, "Incorrect boundaries with wire Ewald");
+    if (domain->triclinic)
+      error->all(FLERR,
+                 "Cannot (yet) use Ewald with triclinic box "
+                 "and wire correction");
   }
 
   // compute two charge force
@@ -166,6 +174,8 @@ void EwaldConp::init() {
   double xprd = domain->xprd;
   double yprd = domain->yprd;
   double zprd = domain->zprd;
+  double xprd_wire = xprd * wire_volfactor;
+  double yprd_wire = yprd * wire_volfactor;
   double zprd_slab = zprd * slab_volfactor;
 
   // make initial g_ewald estimate
@@ -191,11 +201,11 @@ void EwaldConp::init() {
 
   // final RMS accuracy
 
-  double lprx = rms(kxmax_orig, xprd, natoms, q2);
-  double lpry = rms(kymax_orig, yprd, natoms, q2);
+  double lprx = rms(kxmax_orig, xprd_wire, natoms, q2);
+  double lpry = rms(kymax_orig, yprd_wire, natoms, q2);
   double lprz = rms(kzmax_orig, zprd_slab, natoms, q2);
   double lpr = sqrt(lprx * lprx + lpry * lpry + lprz * lprz) / sqrt(3.0);
-  double q2_over_sqrt = q2 / sqrt(natoms * cutoff * xprd * yprd * zprd_slab);
+  double q2_over_sqrt = q2 / sqrt(natoms * cutoff * xprd_wire * yprd_wire * zprd_slab);
   double spr = 2.0 * q2_over_sqrt * exp(-g_ewald * g_ewald * cutoff * cutoff);
   double tpr = estimate_table_accuracy(q2_over_sqrt, spr);
   double estimated_accuracy = sqrt(lpr * lpr + spr * spr + tpr * tpr);
@@ -231,12 +241,17 @@ void EwaldConp::setup() {
   // adjustment of z dimension for 2d slab Ewald
   // 3d Ewald just uses zprd since slab_volfactor = 1.0
 
+  double xprd_wire = xprd * wire_volfactor;
+  double yprd_wire = yprd * wire_volfactor;
   double zprd_slab = zprd * slab_volfactor;
-  volume = xprd * yprd * zprd_slab;
-  area = xprd * yprd;
+  volume = xprd_wire * yprd_wire * zprd_slab;
+  
+  // area required for EW2D
+  
+  area = xprd_wire * yprd_wire;
 
-  unitk[0] = 2.0 * MY_PI / xprd;
-  unitk[1] = 2.0 * MY_PI / yprd;
+  unitk[0] = 2.0 * MY_PI / xprd_wire;
+  unitk[1] = 2.0 * MY_PI / yprd_wire;
   unitk[2] = 2.0 * MY_PI / zprd_slab;
 
   int kmax_old = kmax;
@@ -251,16 +266,16 @@ void EwaldConp::setup() {
     kymax = 1;
     kzmax = 1;
 
-    err = rms(kxmax, xprd, natoms, q2);
+    err = rms(kxmax, xprd_wire, natoms, q2);
     while (err > accuracy) {
       kxmax++;
-      err = rms(kxmax, xprd, natoms, q2);
+      err = rms(kxmax, xprd_wire, natoms, q2);
     }
 
-    err = rms(kymax, yprd, natoms, q2);
+    err = rms(kymax, yprd_wire, natoms, q2);
     while (err > accuracy) {
       kymax++;
-      err = rms(kymax, yprd, natoms, q2);
+      err = rms(kymax, yprd_wire, natoms, q2);
     }
 
     err = rms(kzmax, zprd_slab, natoms, q2);
@@ -457,6 +472,10 @@ void EwaldConp::compute(int eflag, int vflag) {
     f[i][0] += qscale * q[i] * ek[i][0];
     f[i][1] += qscale * q[i] * ek[i][1];
     if (slabflag != 2) f[i][2] += qscale * q[i] * ek[i][2];
+    if (wireflag != 2) {
+      f[i][0] += qscale * q[i] * ek[i][0];
+      f[i][1] += qscale * q[i] * ek[i][1];
+    }
   }
 
   // sum global energy across Kspace vevs and add in volume-dependent term
@@ -504,6 +523,10 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   if (slabflag == 1) slabcorr();
   else if (slabflag == 3) ew2dcorr();
+    
+  // 1d wire correction 
+  
+  if (wireflag == 1) wirecorr();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1342,6 +1365,83 @@ void EwaldConp::ew2dcorr() {
 }
 
 /* ----------------------------------------------------------------------
+   Wire-geometry correction term to dampen inter-wire interactions between
+   periodically repeating wires.  Yields good approximation to 1D Ewald if
+   adequate empty space is left between repeating wires (J. Mol. Struct.
+   704, 101). x and y are non-periodic.
+------------------------------------------------------------------------- */
+
+void EwaldConp::wirecorr()
+{
+  // compute local contribution to global dipole moment
+
+  double *q = atom->q;
+  double **x = atom->x;
+  double xprd = domain->xprd;
+  double yprd = domain->yprd;
+  int nlocal = atom->nlocal;
+
+  double xdipole = 0.0;
+  double ydipole = 0.0;
+  for (int i = 0; i < nlocal; i++) {
+    xdipole += q[i]*x[i][0];
+    ydipole += q[i]*x[i][1];
+  }
+  
+  // sum local contributions to get global dipole moment
+
+  double xdipole_all, ydipole_all;
+  MPI_Allreduce(&xdipole,&xdipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(&ydipole,&ydipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+
+  // need to make per-atom energy translationally invariant
+
+  double xdipole_r2 = 0.0;
+  double ydipole_r2 = 0.0;
+  if (eflag_atom) {
+    for (int i = 0; i < nlocal; i++) {
+      xdipole_r2 += q[i]*x[i][0]*x[i][0];
+      ydipole_r2 += q[i]*x[i][1]*x[i][1];
+    }
+
+    // sum local contributions
+
+    double tmp;
+    MPI_Allreduce(&xdipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+    xdipole_r2 = tmp;
+    MPI_Allreduce(&ydipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+    ydipole_r2 = tmp;
+  }
+
+  // compute corrections
+
+  const double e_wirecorr = MY_PI*(xdipole_all*xdipole_all +
+    ydipole_all*ydipole_all)/volume;
+  const double qscale = qqrd2e * scale;
+
+  if (eflag_global) energy += qscale * e_wirecorr;
+
+  // per-atom energy
+
+  if (eflag_atom) {
+    double efact = qscale * MY_PI/volume;
+    for (int i = 0; i < nlocal; i++)
+      eatom[i] += efact * q[i]*(x[i][0]*xdipole_all + x[i][1]*ydipole_all - 
+        0.5*(xdipole_r2 + ydipole_r2));
+  }
+
+  // add on force corrections
+
+  double ffact = qscale * (-MY_2PI/volume);
+  double **f = atom->f;
+
+  for (int i = 0; i < nlocal; i++) {
+    f[i][0] += ffact * q[i]*xdipole_all;
+    f[i][1] += ffact * q[i]*ydipole_all;
+  }
+}
+
+/* ----------------------------------------------------------------------
    memory usage of local arrays
 ------------------------------------------------------------------------- */
 
@@ -1478,10 +1578,8 @@ void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B,
 
   // 2d slab correction
 
-  if (slabflag == 1)
+  if (slabflag == 1 || slabflag == 3)
     slabcorr_groups(groupbit_A, groupbit_B, AA_flag);
-  else if (slabflag == 3)
-    ew2dcorr_groups(groupbit_A, groupbit_B, AA_flag);
 }
 
 /* ----------------------------------------------------------------------
@@ -1493,6 +1591,10 @@ void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B,
 ------------------------------------------------------------------------- */
 
 void EwaldConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
+  if (slabflag == 3)
+    error->all(FLERR,
+               "Cannot (yet) use EW2D correction with compute group/group");
+  
   // compute local contribution to global dipole moment
 
   double *q = atom->q;
@@ -1563,6 +1665,111 @@ void EwaldConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
 }
 
 /* ----------------------------------------------------------------------
+   Wire-geometry correction term to dampen inter-wire interactions between
+   periodically repeating wires.  Yields good approximation to 1D Ewald if
+   adequate empty space is left between repeating wires (J. Mol. Struct.
+   704, 101). x and y are non-periodic.
+------------------------------------------------------------------------- */
+
+void EwaldConp::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
+{
+  // compute local contribution to global dipole moment
+
+  double *q = atom->q;
+  double **x = atom->x;
+  double xprd = domain->xprd;
+  double yprd = domain->yprd;
+  int *mask = atom->mask;
+  int nlocal = atom->nlocal;
+
+  double qsum_A = 0.0;
+  double qsum_B = 0.0;
+  double xdipole_A = 0.0;
+  double xdipole_B = 0.0;
+  double xdipole_r2_A = 0.0;
+  double xdipole_r2_B = 0.0;
+  double ydipole_A = 0.0;
+  double ydipole_B = 0.0;
+  double ydipole_r2_A = 0.0;
+  double ydipole_r2_B = 0.0;
+
+  for (int i = 0; i < nlocal; i++) {
+    if (!((mask[i] & groupbit_A) && (mask[i] & groupbit_B)))
+      if (AA_flag) continue;
+
+    if (mask[i] & groupbit_A) {
+      qsum_A += q[i];
+      xdipole_A += q[i]*x[i][0];
+      xdipole_r2_A += q[i]*x[i][0]*x[i][0];
+      ydipole_A += q[i]*x[i][1];
+      ydipole_r2_A += q[i]*x[i][1]*x[i][1];
+    }
+
+    if (mask[i] & groupbit_B) {
+      qsum_B += q[i];
+      xdipole_B += q[i]*x[i][0];
+      xdipole_r2_B += q[i]*x[i][0]*x[i][0];
+      ydipole_B += q[i]*x[i][1];
+      ydipole_r2_B += q[i]*x[i][1]*x[i][1];
+    }
+  }
+
+  // sum local contributions to get total charge and global dipole moment
+  //  for each group
+
+  double tmp;
+  MPI_Allreduce(&qsum_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  qsum_A = tmp;
+
+  MPI_Allreduce(&qsum_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  qsum_B = tmp;
+  
+  if (fabs(qsum_A) > SMALL || fabs(qsum_B) > SMALL)
+    error->all(FLERR,
+               "Cannot (yet) use K-space wire "
+               "correction with compute group/group for charged groups");
+  
+  MPI_Allreduce(&xdipole_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  xdipole_A = tmp;
+  MPI_Allreduce(&ydipole_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  ydipole_A = tmp;
+
+  MPI_Allreduce(&xdipole_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  xdipole_B = tmp;
+  MPI_Allreduce(&ydipole_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  ydipole_B = tmp;
+
+  MPI_Allreduce(&xdipole_r2_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  xdipole_r2_A = tmp;
+  MPI_Allreduce(&ydipole_r2_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  ydipole_r2_A = tmp;
+
+  MPI_Allreduce(&xdipole_r2_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  xdipole_r2_B = tmp;
+  MPI_Allreduce(&ydipole_r2_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+  ydipole_r2_B = tmp;
+
+  // compute corrections
+
+  const double qscale = qqrd2e * scale;
+  const double efact = qscale * MY_PI/volume;
+
+  // TODO do math for non-neutral wire geometries of Ballenegger et al.
+
+  e2group += efact * (xdipole_A*xdipole_B + ydipole_A*ydipole_B - 
+    0.5*(qsum_A*xdipole_r2_B + qsum_A*ydipole_r2_B +
+    qsum_B*xdipole_r2_A + qsum_B*ydipole_r2_A) - 
+    qsum_A*qsum_B*xprd*xprd/12.0 -
+    qsum_A*qsum_B*yprd*yprd/12.0);
+
+  // add on force corrections
+
+  const double ffact = qscale * (-2.0*MY_PI/volume);
+  f2group[1] += ffact * (qsum_A*xdipole_B + qsum_A*ydipole_B - 
+    qsum_B*xdipole_A - qsum_B*ydipole_A);
+}
+
+/* ----------------------------------------------------------------------
    allocate group-group memory that depends on # of K-vectors
 ------------------------------------------------------------------------- */
 
@@ -1600,17 +1807,6 @@ void EwaldConp::deallocate_groups() {
   delete[] sfacim_B;
   delete[] sfacrl_B_all;
   delete[] sfacim_B_all;
-}
-
-/* ----------------------------------------------------------------------
-   computes infinite boundary term with EW2D (i.e. k = 0).
-------------------------------------------------------------------------- */
-
-void EwaldConp::ew2dcorr_groups(int /*groupbit_A*/, int /*groupbit_B*/,
-                                int /*AA_flag*/) {
-  if (slabflag == 3)
-    error->all(FLERR,
-               "Cannot (yet) use EW2D correction with compute group/group");
 }
 
 /* ----------------------------------------------------------------------
@@ -1671,6 +1867,10 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
   }
 }
 
+/* ----------------------------------------------------------------------
+   compute b-vector EW3DC correction of constant potential approach
+ ------------------------------------------------------------------------- */
+
 void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
   // TODO 2D correction
   int const nlocal = atom->nlocal;
@@ -1681,7 +1881,7 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
     if (imat[i] < 0) dipole += q[i] * x[i][2];
   }
   MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
-  dipole *= 4.0 * MY_PI / volume; // TODO why 4? should be 2
+  dipole *= 4.0 * MY_PI / volume;  // TODO why 4? should be 2
   for (int i = 0; i < nlocal; i++) {
     int const pos = imat[i];
     if (pos >= 0) vec[pos] += x[i][2] * dipole;
@@ -1704,12 +1904,8 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
   bigint *jmat, *jmat_local;
   // how many local group atoms owns each proc and how many in total
   bigint ngroup = 0;
-  int ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) {
-    if (imat[i] < 0) continue;
-    ngrouplocal++;
-  }
-
+  int ngrouplocal =
+      std::count_if(&imat[0], &imat[nlocal], [](int i) { return i >= 0; });
   MPI_Allreduce(&ngrouplocal, &ngroup, 1, MPI_INT, MPI_SUM, world);
 
   // gather only subset of local sn and cs on each proc
@@ -1726,28 +1922,23 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
   // copy subsets of local sn and cn to new local group arrays
   // beeing as memory efficient as one can possibly be ...
 
-  ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) {
+  for (int i = 0, n = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
 
     for (int k = 0; k <= kxmax; k++) {
-      csx[k + ngrouplocal * (kxmax + 1)] = cs[k][0][i];
-      snx[k + ngrouplocal * (kxmax + 1)] = sn[k][0][i];
+      csx[k + n * (kxmax + 1)] = cs[k][0][i];
+      snx[k + n * (kxmax + 1)] = sn[k][0][i];
     }
     for (int k = 0; k <= kymax; k++) {
-      csy[k + ngrouplocal * (kymax + 1)] = cs[k][1][i];
-      sny[k + ngrouplocal * (kymax + 1)] = sn[k][1][i];
+      csy[k + n * (kymax + 1)] = cs[k][1][i];
+      sny[k + n * (kymax + 1)] = sn[k][1][i];
     }
     for (int k = 0; k <= kzmax; k++) {
-      csz[k + ngrouplocal * (kzmax + 1)] = cs[k][2][i];
-      snz[k + ngrouplocal * (kzmax + 1)] = sn[k][2][i];
+      csz[k + n * (kzmax + 1)] = cs[k][2][i];
+      snz[k + n * (kzmax + 1)] = sn[k][2][i];
     }
-
-    // ... and keep track of matrix index
-
-    jmat_local[ngrouplocal] = imat[i];
-
-    ngrouplocal++;
+    jmat_local[n] = imat[i];
+    n++;
   }
 
   // TODO check if ((bigint) kxmax+1)*ngroup overflows ...
@@ -1767,9 +1958,10 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
   memory->create(displs, nprocs, "ewald/conp:displs");
 
   // gather subsets global cs and sn
-  int n =
-      (kxmax + 1) * ngrouplocal;  // TODO check if (kxmax+1)*ngrouplocal, etc.
-                                  // overflows int n! typically kxmax small
+  int n = (kxmax + 1) * ngrouplocal;
+  // TODO check if (kxmax+1)*ngrouplocal, etc.
+  // overflows int n! typically kxmax small
+
   MPI_Allgather(&n, 1, MPI_INT, recvcounts, 1, MPI_INT, world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
@@ -1807,37 +1999,13 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
   MPI_Allgatherv(&jmat_local[0], ngrouplocal, MPI_LMP_BIGINT, jmat, recvcounts,
                  displs, MPI_LMP_BIGINT, world);
 
-  // sanity check ...
-
-  //  FILE *pFile;
-  //  char fn[12];
-  //
-  //  sprintf(fn,"cos_kx.%d",comm->me);
-  //  pFile = fopen(fn,"w");
-  //  for (int i = 0; i < nlocal; i++)
-  //    if (imat[i] > -1)
-  //      for (int k = 0; k < kxmax+1; k++)
-  //        fprintf(pFile, "%jd,%d: %f\n",imat[i],k,cs[k][0][i]);
-  //  fclose(pFile);
-  //
-  //  if (comm->me == 0) {
-  //    sprintf(fn,"cos_kx.all");
-  //    pFile = fopen(fn,"w");
-  //    for (bigint j = 0; j < ngroup; j++)
-  //      for (int k = 0; k < kxmax+1; k++)
-  //        fprintf(pFile, "%jd,%d %f\n",j,k,csx_all[k+j*(kxmax+1)]);
-  //    fclose(pFile);
-  //  }
-
-  memory->destroy(jmat_local);
   memory->destroy(displs);
   memory->destroy(recvcounts);
 
-  double aij;
+  memory->destroy(jmat_local);
 
   // aij for each atom pair in groups; first loop over i,j then over k to
   // reduce memory access
-
   for (int i = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
 
@@ -1845,7 +2013,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
       // matrix is symmetric, skip upper triangular matrix
       if (jmat[j] > imat[i]) continue;
 
-      aij = 0.0;
+      double aij = 0.0;
 
       for (int k = 0; k < kcount; k++) {
         // local  indexing  cs[k_idim][idim][i]       <>
@@ -1888,7 +2056,6 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
         aij += 2.0 * ug[k] *
                (cos_kxkykz_i * cos_kxkykz_j + sin_kxkykz_i * sin_kxkykz_j);
       }
-
       matrix[imat[i]][jmat[j]] += aij;
       if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
     }
@@ -1930,114 +2097,165 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 
   double **x = atom->x;
 
-  double *nprd_local, *nprd_all;
-
   // how many local and total group atoms?
-
-  int ngrouplocal;
+  
   bigint ngroup = 0;
 
-  ngrouplocal = 0;
+  int ngrouplocal = 0;
   for (int i = 0; i < nlocal; i++)
     if (imat[i] > -1) ngrouplocal++;
   MPI_Allreduce(&ngrouplocal, &ngroup, 1, MPI_INT, MPI_SUM, world);
 
   memory->create(jmat, ngroup, "ewald/conp:jmat");
   memory->create(jmat_local, ngrouplocal, "ewald/conp:jmat_local");
-
-  memory->create(nprd_all, ngroup, "ewald/conp:nprd_all");
-  memory->create(nprd_local, ngrouplocal, "ewald/conp:nprd_local");
-
-  ngrouplocal = 0;
-  for (int i = 0; i < nlocal; i++) {
+  
+  for (int i = 0, n = 0; i < nlocal; i++) {
     if (imat[i] < 0) continue;
+    
+    // ... keep track of matrix index
 
-    // gather non-periodic positions of groups
+    jmat_local[n] = imat[i];
 
-    nprd_local[ngrouplocal] = x[i][2];
-
-    // ... and keep track of matrix index
-
-    jmat_local[ngrouplocal] = imat[i];
-
-    ngrouplocal++;
+    n++;
   }
-
-  // gather matrix indexing and subsets nprd positions
-
+  
   int *recvcounts, *displs;
 
   memory->create(recvcounts, nprocs, "ewald/conp:recvcounts");
   memory->create(displs, nprocs, "ewald/conp:displs");
-
+  
   MPI_Allgather(&ngrouplocal, 1, MPI_INT, recvcounts, 1, MPI_INT, world);
   displs[0] = 0;
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i - 1] + recvcounts[i - 1];
+  
+  // gather global matrix indexing  
+    
   MPI_Allgatherv(jmat_local, ngrouplocal, MPI_LMP_BIGINT, jmat, recvcounts,
                  displs, MPI_LMP_BIGINT, world);
-  MPI_Allgatherv(nprd_local, ngrouplocal, MPI_DOUBLE, nprd_all, recvcounts,
-                 displs, MPI_DOUBLE, world);
-  memory->destroy(jmat_local);
-  memory->destroy(nprd_local);
 
-  double aij, elc;
+  if (slabflag) {
 
-  if (slabflag == 1) {
-    // use EW3DC slab correction on subset
+    double *nprd_local, *nprd_all;
 
-    const double prefac = MY_4PI / volume;
+    memory->create(nprd_all, ngroup, "ewald/conp:nprd_all");
+    memory->create(nprd_local, ngrouplocal, "ewald/conp:nprd_local");
 
-    for (int i = 0; i < nlocal; i++) {
+    for (int i = 0, n = 0; i < nlocal; i++) {
       if (imat[i] < 0) continue;
 
+      // gather non-periodic positions of groups
+
+      nprd_local[n] = x[i][2];
+      
+      n++;
+    }
+
+    // gather subsets nprd positions
+
+    MPI_Allgatherv(nprd_local, ngrouplocal, MPI_DOUBLE, nprd_all, recvcounts,
+                   displs, MPI_DOUBLE, world);
+    memory->destroy(nprd_local);
+
+    double aij, elc;
+
+    if (slabflag == 1) {
+    
+      // use EW3DC slab correction on subset
+
+      const double prefac = MY_4PI / volume;
+      for (int i = 0; i < nlocal; i++) {
+        if (imat[i] < 0) continue;
+        for (bigint j = 0; j < ngroup; j++) {
+          // matrix is symmetric
+          if (jmat[j] > imat[i]) continue;
+          aij = prefac * x[i][2] * nprd_all[j];
+          
+          // TODO add ELC corrections, needs sum over all kpoints but not (0,0)
+
+          matrix[imat[i]][jmat[j]] += aij;
+          if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
+        }
+      }
+
+    } else if (slabflag == 3) {
+    
+      // use EW2D infinite boundary correction
+      
+      const double g_ewald_inv = 1.0 / g_ewald;
+      const double g_ewald_sq = g_ewald * g_ewald;
+      const double prefac = 2.0 * MY_PIS / area;
+
+      double dij;
+      for (int i = 0; i < nlocal; i++) {
+        if (imat[i] < 0) continue;
+        for (bigint j = 0; j < ngroup; j++) {
+          // matrix is symmetric
+          if (jmat[j] > imat[i]) continue;
+          dij = nprd_all[j] - x[i][2];
+          // resembles (aij) matrix component in constant potential
+          aij = prefac * (exp(-dij * dij * g_ewald_sq) * g_ewald_inv +
+                          MY_PIS * dij * erf(dij * g_ewald));
+          matrix[imat[i]][jmat[j]] -= aij;
+          if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
+        }
+      }
+    }
+
+    memory->destroy(nprd_all);
+  } else if (wireflag) {
+  
+    // use EW3DC wire correction on subset
+    
+    double *xprd_local, *xprd_all;
+    double *yprd_local, *yprd_all;
+
+    memory->create(xprd_all, ngroup, "ewald/conp:xprd_all");
+    memory->create(yprd_all, ngroup, "ewald/conp:yprd_all");
+    memory->create(xprd_local, ngrouplocal, "ewald/conp:xprd_local");
+    memory->create(yprd_local, ngrouplocal, "ewald/conp:yprd_local");
+
+    for (int i = 0, n = 0; i < nlocal; i++) {
+      if (imat[i] < 0) continue;
+
+      // gather non-periodic positions of groups
+
+      xprd_local[n] = x[i][0];
+      yprd_local[n] = x[i][1];
+      
+      n++;
+    }
+
+    // gather subsets nprd positions
+
+    MPI_Allgatherv(xprd_local, ngrouplocal, MPI_DOUBLE, xprd_all, recvcounts,
+                   displs, MPI_DOUBLE, world);
+    MPI_Allgatherv(yprd_local, ngrouplocal, MPI_DOUBLE, yprd_all, recvcounts,
+                   displs, MPI_DOUBLE, world);
+    memory->destroy(xprd_local);
+    memory->destroy(yprd_local);
+
+    double aij;
+
+    const double prefac = MY_2PI / volume;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) continue;
       for (bigint j = 0; j < ngroup; j++) {
         // matrix is symmetric
-
         if (jmat[j] > imat[i]) continue;
-
-        aij = prefac * x[i][2] * nprd_all[j];
-        
-        // TODO add ELC corrections, needs sum over all kpoints but not (0,0)
+        aij = prefac * (x[i][0] * xprd_all[j] + x[i][1] * yprd_all[j]);
 
         matrix[imat[i]][jmat[j]] += aij;
         if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
 
-  } else if (slabflag == 3) {
-    // use EW2D infinite boundary correction
-
-    const double g_ewald_inv = 1.0 / g_ewald;
-    const double g_ewald_sq = g_ewald * g_ewald;
-    const double prefac = 2.0 * MY_PIS / area;
-
-    double dij;
-
-    // loop over ALL atom interactions in subset
-
-    for (int i = 0; i < nlocal; i++) {
-      if (imat[i] < 0) continue;
-
-      for (bigint j = 0; j < ngroup; j++) {
-        // matrix is symmetric
-
-        if (jmat[j] > imat[i]) continue;
-
-        dij = nprd_all[j] - x[i][2];
-
-        // resembles (aij) matrix component in constant potential
-        aij = prefac * (exp(-dij * dij * g_ewald_sq) * g_ewald_inv +
-                        MY_PIS * dij * erf(dij * g_ewald));
-
-        matrix[imat[i]][jmat[j]] -= aij;
-        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
-      }
-    }
+    memory->destroy(xprd_all);
+    memory->destroy(yprd_all);
   }
-
-  memory->destroy(nprd_all);
+  
   memory->destroy(recvcounts);
   memory->destroy(displs);
   memory->destroy(jmat);
+  memory->destroy(jmat_local);
 }

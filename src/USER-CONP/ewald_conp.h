@@ -71,6 +71,7 @@ class EwaldConp : public KSpace {
   void deallocate();
   void slabcorr();
   void ew2dcorr();
+  void wirecorr();
 
   // triclinic
 
@@ -81,7 +82,7 @@ class EwaldConp : public KSpace {
   // group-group interactions
 
   void slabcorr_groups(int, int, int);
-  void ew2dcorr_groups(int, int, int);
+  void wirecorr_groups(int, int, int);
   void allocate_groups();
   void deallocate_groups();
 };

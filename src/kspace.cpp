@@ -68,9 +68,10 @@ KSpace::KSpace(LAMMPS *lmp) : Pointers(lmp)
   gewaldflag_6 = 0;
   auto_disp_flag = 0;
 
-  slabflag = 0;
+  slabflag = wireflag = 0;
   differentiation_flag = 0;
   slab_volfactor = 1;
+  wire_volfactor = 1;
   suffix_flag = Suffix::NONE;
   adjust_cutoff_flag = 1;
   scalar_pressure_flag = 0;
@@ -534,6 +535,21 @@ void KSpace::modify_params(int narg, char **arg)
           error->warning(FLERR,"Kspace_modify slab param < 2.0 may "
                          "cause unphysical behavior");
       }
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"wire") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal kspace_modify command");
+      if (strcmp(arg[iarg+1],"noxyforce") == 0) {
+        wireflag = 2;
+      } else {
+        wireflag = 1;
+        wire_volfactor = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        if (wire_volfactor <= 1.0)
+          error->all(FLERR,"Bad kspace_modify slab parameter");
+        if (wire_volfactor < 2.0 && comm->me == 0)
+          error->warning(FLERR,"Kspace_modify slab param < 2.0 may "
+                         "cause unphysical behavior");
+      }
+      warn_nonneutral = 0; // can't use wire correction with non-neutral system
       iarg += 2;
     } else if (strcmp(arg[iarg],"compute") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal kspace_modify command");

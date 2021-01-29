@@ -104,8 +104,8 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
   // TODO recalculate coulomb matrix every recalc_every
 
   recalc_every = utils::inumeric(FLERR, arg[4], false, lmp);
-  eta =
-      utils::numeric(FLERR, arg[5], false, lmp);  // TODO infer from pair_style!
+  // TODO infer from pair_style!
+  eta = utils::numeric(FLERR, arg[5], false, lmp);  
 
   int iarg = 6;
   while (iarg < narg) {
@@ -321,9 +321,10 @@ void ComputeConpMatrix::compute_array() {
 }
 
 /* ---------------------------------------------------------------------- */
+
 void ComputeConpMatrix::invert() {
   // TODO use vectors for ipiv and work?
-  if (comm->me == 0) utils::logmesg(lmp, "Inverting\n");
+  if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
   int m = ngroup, n = ngroup, lda = ngroup;
   int *ipiv = new int[ngroup + 1];
   int info_rf, info_ri;
@@ -343,8 +344,9 @@ void ComputeConpMatrix::invert() {
   ipiv = NULL;
   delete[] work;
   work = NULL;
-  if (info_rf != 0 || info_ri != 0) error->all(FLERR, "Inversion failed!");
+  if (info_rf != 0 || info_ri != 0) error->all(FLERR, "CONP matrix inversion failed!");
 }
+
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::pair_contribution() {
