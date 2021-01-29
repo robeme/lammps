@@ -116,22 +116,22 @@ void EwaldConp::init() {
   if (slabflag == 0 && wireflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR, "Cannot use non-periodic boundaries with Ewald");
   if (slabflag) {
+    if (wireflag) 
+      error->all(FLERR, "Cannot use slab and wire corrections together");
     if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR, "Incorrect boundaries with slab Ewald");
     if (domain->triclinic)
-      error->all(FLERR,
-                 "Cannot (yet) use Ewald with triclinic box "
-                 "and slab correction");
-  }else if (wireflag) {
+      error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
+        "and slab correction");
+  } else if (wireflag) {
     if (domain->zperiodic != 1 || domain->boundary[0][0] != 1 || 
         domain->boundary[0][1] != 1 || domain->boundary[1][0] != 1 || 
         domain->boundary[1][1] != 1)
       error->all(FLERR, "Incorrect boundaries with wire Ewald");
     if (domain->triclinic)
-      error->all(FLERR,
-                 "Cannot (yet) use Ewald with triclinic box "
-                 "and wire correction");
+      error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
+        "and wire correction");
   }
 
   // compute two charge force
@@ -1724,10 +1724,9 @@ void EwaldConp::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
   MPI_Allreduce(&qsum_B,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
   qsum_B = tmp;
   
-  if (fabs(qsum_A) > SMALL || fabs(qsum_B) > SMALL)
-    error->all(FLERR,
-               "Cannot (yet) use K-space wire "
-               "correction with compute group/group for charged groups");
+  if (fabs(qsum_A+qsum_B) > SMALL)
+    error->all(FLERR,"Cannot (yet) use K-space wire "
+      "correction with compute group/group for charged groups");
   
   MPI_Allreduce(&xdipole_A,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
   xdipole_A = tmp;
