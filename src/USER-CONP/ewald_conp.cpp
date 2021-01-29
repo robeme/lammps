@@ -788,7 +788,7 @@ void EwaldConp::coeffs() {
 
   kcount = 0;
 
-  // (k,0,0), (0,l,0), (0,0,m), however skip (0,0) in case os EW2D
+  // (k,0,0), (0,l,0), (0,0,m), skip (0,0) in case os EW2D
   for (m = 1; m <= kmax; m++) {
     sqk = (m * unitk[0]) * (m * unitk[0]);
     if (sqk <= gsqmx) {
@@ -1981,9 +1981,9 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
   memory->destroy(jmat_local);
   memory->destroy(nprd_local);
 
-  double aij;
+  double aij, elc;
 
-  if (slab_volfactor > 1.0) {
+  if (slabflag == 1) {
     // use EW3DC slab correction on subset
 
     const double prefac = MY_4PI / volume;
@@ -1997,13 +1997,15 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
         if (jmat[j] > imat[i]) continue;
 
         aij = prefac * x[i][2] * nprd_all[j];
+        
+        // TODO add ELC corrections, needs sum over all kpoints but not (0,0)
 
         matrix[imat[i]][jmat[j]] += aij;
         if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
       }
     }
 
-  } else {
+  } else if (slabflag == 3) {
     // use EW2D infinite boundary correction
 
     const double g_ewald_inv = 1.0 / g_ewald;
