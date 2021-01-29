@@ -41,7 +41,7 @@ class ComputeConpMatrix : public Compute {
   int jgroup, jgroupbit, othergroupbit;
   bigint jgroupnum, igroupnum, ngroup;
   int recalc_every;
-  double **cutsq, **gradQ_V;
+  double **cutsq, **gradQ_V, *gradQ_V_inv;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag, selfflag;
   bool assigned;
@@ -51,14 +51,16 @@ class ComputeConpMatrix : public Compute {
   class NeighList *list;
   class KSpace *kspace;
   class Ewald *ewald;
-  FILE *fp;
+  FILE *fp, *fp_inv;
 
   long filepos;
 
+  void invert();
   void matrix_assignment();
   void pair_contribution();
   void self_contribution();
-  void write_matrix(double **);
+  void write_matrix(FILE*, double **);
+  void write_matrix(FILE*, double *);
   void allocate();
   void deallocate();
   double calc_erfc(double);
