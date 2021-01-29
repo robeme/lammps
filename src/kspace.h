@@ -52,7 +52,8 @@ class KSpace : protected Pointers {
                                  // for LJ coefficients
   int slabflag,wireflag;
   int scalar_pressure_flag;      // 1 if using MSM fast scalar pressure
-  double slab_volfactor,wire_volfactor, wire_fact;
+  double slab_volfactor;
+  double wire_volfactor;
 
   int warn_nonneutral;           // 0 = error if non-neutral system
                                  // 1 = warn once if non-neutral system

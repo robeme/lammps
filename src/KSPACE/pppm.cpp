@@ -210,17 +210,17 @@ void PPPM::init()
   if (!atom->q_flag)
     error->all(FLERR,"Kspace style requires atom attribute q");
 
-  if (slabflag == 0 && domain->nonperiodic > 0)
+  if (slabflag == 0 && wireflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with PPPM");
   if (slabflag) {
-    if (wireflag) {
-      if (domain->xperiodic != 1 || domain->boundary[1][0] != 1 || 
-        domain->boundary[1][1] != 1 || domain->boundary[2][0] != 1 || 
-        domain->boundary[2][1] != 1)
-        error->all(FLERR,"Incorrect boundaries with wire PPPM");
-    } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
-        domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
-        error->all(FLERR,"Incorrect boundaries with slab PPPM");
+    if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
+      domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
+      error->all(FLERR,"Incorrect boundaries with slab PPPM");
+  } else if (wireflag) {
+    if (domain->zperiodic != 1 || domain->boundary[0][0] != 1 || 
+      domain->boundary[0][1] != 1 || domain->boundary[1][0] != 1 || 
+      domain->boundary[1][1] != 1)
+      error->all(FLERR,"Incorrect boundaries with wire PPPM");
   }
 
   if (order < 2 || order > MAXORDER)
@@ -386,17 +386,17 @@ void PPPM::setup()
 
   // perform some checks to avoid illegal boundaries with read_data
 
-  if (wireflag == 0 && slabflag == 0 && domain->nonperiodic > 0)
+  if (slabflag == 0 && wireflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR,"Cannot use non-periodic boundaries with PPPM");
   if (slabflag) {
-    if (wireflag) {
-      if (domain->xperiodic != 1 || domain->boundary[1][0] != 1 || 
-        domain->boundary[1][1] != 1 || domain->boundary[2][0] != 1 || 
-        domain->boundary[2][1] != 1)
-      error->all(FLERR,"Incorrect boundaries with wire PPPM");
-    } else if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
-        domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
+    if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
+      domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR,"Incorrect boundaries with slab PPPM");
+  } else if (wireflag) {
+    if (domain->zperiodic != 1 || domain->boundary[0][0] != 1 || 
+      domain->boundary[0][1] != 1 || domain->boundary[1][0] != 1 || 
+      domain->boundary[1][1] != 1)
+      error->all(FLERR,"Incorrect boundaries with wire PPPM");
   }
 
   int i,j,k,n;
@@ -412,18 +412,19 @@ void PPPM::setup()
   double xprd = prd[0];
   double yprd = prd[1];
   double zprd = prd[2];
-  double yprd_slab = yprd*wire_volfactor;
+  double xprd_wire = xprd*wire_volfactor;
+  double yprd_wire = yprd*wire_volfactor;
   double zprd_slab = zprd*slab_volfactor;
-  volume = xprd * yprd_slab * zprd_slab;
+  volume = xprd_wire * yprd_wire * zprd_slab;
 
-  delxinv = nx_pppm/xprd;
-  delyinv = ny_pppm/yprd_slab;
+  delxinv = nx_pppm/xprd_wire;
+  delyinv = ny_pppm/yprd_wire;
   delzinv = nz_pppm/zprd_slab;
 
   delvolinv = delxinv*delyinv*delzinv;
 
-  double unitkx = (MY_2PI/xprd);
-  double unitky = (MY_2PI/yprd_slab);
+  double unitkx = (MY_2PI/xprd_wire);
+  double unitky = (MY_2PI/yprd_wire);
   double unitkz = (MY_2PI/zprd_slab);
 
   // fkx,fky,fkz for my FFT grid pts
@@ -498,9 +499,10 @@ void PPPM::setup_triclinic()
   double xprd = prd[0];
   double yprd = prd[1];
   double zprd = prd[2];
-  double yprd_slab = yprd*wire_volfactor;
+  double xprd_wire = xprd*wire_volfactor;
+  double yprd_wire = yprd*wire_volfactor;
   double zprd_slab = zprd*slab_volfactor;
-  volume = xprd * yprd_slab * zprd_slab;
+  volume = xprd_wire * yprd_wire * zprd_slab;
 
   // use lamda (0-1) coordinates
 
@@ -971,7 +973,8 @@ void PPPM::set_grid_global()
   double xprd = domain->xprd;
   double yprd = domain->yprd;
   double zprd = domain->zprd;
-  double yprd_slab = yprd*wire_volfactor;
+  double xprd_wire = xprd*wire_volfactor;
+  double yprd_wire = yprd*wire_volfactor;
   double zprd_slab = zprd*slab_volfactor;
 
   // make initial g_ewald estimate
@@ -1006,8 +1009,8 @@ void PPPM::set_grid_global()
 
         // set grid dimensions
 
-        nx_pppm = static_cast<int> (xprd/h_x);
-        ny_pppm = static_cast<int> (yprd_slab/h_y);
+        nx_pppm = static_cast<int> (xprd_wire/h_x);
+        ny_pppm = static_cast<int> (yprd_wire/h_y);
         nz_pppm = static_cast<int> (zprd_slab/h_z);
 
         if (nx_pppm <= 1) nx_pppm = 2;
@@ -1034,22 +1037,22 @@ void PPPM::set_grid_global()
       double err;
       h_x = h_y = h_z = 1.0/g_ewald;
 
-      nx_pppm = static_cast<int> (xprd/h_x) + 1;
-      ny_pppm = static_cast<int> (yprd_slab/h_y) + 1;
+      nx_pppm = static_cast<int> (xprd_wire/h_x) + 1;
+      ny_pppm = static_cast<int> (yprd_wire/h_y) + 1;
       nz_pppm = static_cast<int> (zprd_slab/h_z) + 1;
 
-      err = estimate_ik_error(h_x,xprd,natoms);
+      err = estimate_ik_error(h_x,xprd_wire,natoms);
       while (err > accuracy) {
-        err = estimate_ik_error(h_x,xprd,natoms);
+        err = estimate_ik_error(h_x,xprd_wire,natoms);
         nx_pppm++;
-        h_x = xprd/nx_pppm;
+        h_x = xprd_wire/nx_pppm;
       }
 
-      err = estimate_ik_error(h_y,yprd_slab,natoms);
+      err = estimate_ik_error(h_y,yprd_wire,natoms);
       while (err > accuracy) {
-        err = estimate_ik_error(h_y,yprd_slab,natoms);
+        err = estimate_ik_error(h_y,yprd_wire,natoms);
         ny_pppm++;
-        h_y = yprd_slab/ny_pppm;
+        h_y = yprd_wire/ny_pppm;
       }
 
       err = estimate_ik_error(h_z,zprd_slab,natoms);
@@ -1081,8 +1084,8 @@ void PPPM::set_grid_global()
   while (!factorable(nz_pppm)) nz_pppm++;
 
   if (triclinic == 0) {
-    h_x = xprd/nx_pppm;
-    h_y = yprd_slab/ny_pppm;
+    h_x = xprd_wire/nx_pppm;
+    h_y = yprd_wire/ny_pppm;
     h_z = zprd_slab/nz_pppm;
   } else {
     double tmp[3];
@@ -1130,16 +1133,17 @@ double PPPM::compute_df_kspace()
   double xprd = domain->xprd;
   double yprd = domain->yprd;
   double zprd = domain->zprd;
-  double yprd_slab = yprd*wire_volfactor;
+  double xprd_wire = xprd*wire_volfactor;
+  double yprd_wire = yprd*wire_volfactor;
   double zprd_slab = zprd*slab_volfactor;
   bigint natoms = atom->natoms;
   double df_kspace = 0.0;
   if (differentiation_flag == 1 || stagger_flag) {
     double qopt = compute_qopt();
-    df_kspace = sqrt(qopt/natoms)*q2/(xprd*yprd_slab*zprd_slab);
+    df_kspace = sqrt(qopt/natoms)*q2/(xprd_wire*yprd_wire*zprd_slab);
   } else {
-    double lprx = estimate_ik_error(h_x,xprd,natoms);
-    double lpry = estimate_ik_error(h_y,yprd_slab,natoms);
+    double lprx = estimate_ik_error(h_x,xprd_wire,natoms);
+    double lpry = estimate_ik_error(h_y,yprd_wire,natoms);
     double lprz = estimate_ik_error(h_z,zprd_slab,natoms);
     df_kspace = sqrt(lprx*lprx + lpry*lpry + lprz*lprz) / sqrt(3.0);
   }
@@ -1162,12 +1166,13 @@ double PPPM::compute_qopt()
   const double xprd = prd[0];
   const double yprd = prd[1];
   const double zprd = prd[2];
-  const double yprd_slab = yprd*wire_volfactor;
+  const double xprd_wire = xprd*wire_volfactor;
+  const double yprd_wire = yprd*wire_volfactor;
   const double zprd_slab = zprd*slab_volfactor;
-  volume = xprd * yprd_slab * zprd_slab;
+  volume = xprd_wire * yprd_wire * zprd_slab;
 
-  const double unitkx = (MY_2PI/xprd);
-  const double unitky = (MY_2PI/yprd_slab);
+  const double unitkx = (MY_2PI/xprd_wire);
+  const double unitky = (MY_2PI/yprd_wire);
   const double unitkz = (MY_2PI/zprd_slab);
 
   const int twoorder = 2*order;
@@ -1197,14 +1202,14 @@ double PPPM::compute_qopt()
     for (nx = -2; nx <= 2; nx++) {
       qx = unitkx*(kper+nx_pppm*nx);
       sx = exp(-0.25*square(qx/g_ewald));
-      argx = 0.5*qx*xprd/nx_pppm;
+      argx = 0.5*qx*xprd_wire/nx_pppm;
       wx = powsinxx(argx,twoorder);
       qx *= qx;
 
       for (ny = -2; ny <= 2; ny++) {
         qy = unitky*(lper+ny_pppm*ny);
         sy = exp(-0.25*square(qy/g_ewald));
-        argy = 0.5*qy*yprd_slab/ny_pppm;
+        argy = 0.5*qy*yprd_wire/ny_pppm;
         wy = powsinxx(argy,twoorder);
         qy *= qy;
 
@@ -1348,8 +1353,10 @@ void PPPM::set_grid_local()
   // both non-tiled and tiled proc layouts use 0-1 fractional sumdomain info
 
   if (comm->layout != Comm::LAYOUT_TILED) {
-    nxlo_in = static_cast<int> (comm->xsplit[comm->myloc[0]] * nx_pppm);
-    nxhi_in = static_cast<int> (comm->xsplit[comm->myloc[0]+1] * nx_pppm) - 1;
+    nxlo_in = static_cast<int> 
+      (comm->xsplit[comm->myloc[0]] * nx_pppm/wire_volfactor);
+    nxhi_in = static_cast<int> 
+      (comm->xsplit[comm->myloc[0]+1] * nx_pppm/wire_volfactor) - 1;
 
     nylo_in = static_cast<int> 
       (comm->ysplit[comm->myloc[1]] * ny_pppm/wire_volfactor);
@@ -1362,8 +1369,8 @@ void PPPM::set_grid_local()
       (comm->zsplit[comm->myloc[2]+1] * nz_pppm/slab_volfactor) - 1;
 
   } else {
-    nxlo_in = static_cast<int> (comm->mysplit[0][0] * nx_pppm);
-    nxhi_in = static_cast<int> (comm->mysplit[0][1] * nx_pppm) - 1;
+    nxlo_in = static_cast<int> (comm->mysplit[0][0] * nx_pppm/wire_volfactor);
+    nxhi_in = static_cast<int> (comm->mysplit[0][1] * nx_pppm/wire_volfactor) - 1;
 
     nylo_in = static_cast<int> (comm->mysplit[1][0] * ny_pppm/wire_volfactor);
     nyhi_in = static_cast<int> (comm->mysplit[1][1] * ny_pppm/wire_volfactor) - 1;
@@ -1413,7 +1420,8 @@ void PPPM::set_grid_local()
   double xprd = prd[0];
   double yprd = prd[1];
   double zprd = prd[2];
-  double yprd_slab = yprd*wire_volfactor;
+  double xprd_wire = xprd*wire_volfactor;
+  double yprd_wire = yprd*wire_volfactor;
   double zprd_slab = zprd*slab_volfactor;
 
   double dist[3] = {0.0,0.0,0.0};
@@ -1425,16 +1433,16 @@ void PPPM::set_grid_local()
   nlo = nhi = 0;
 
   nlo = static_cast<int> ((sublo[0]-dist[0]-boxlo[0]) *
-                            nx_pppm/xprd + shift) - OFFSET;
+                            nx_pppm/xprd_wire + shift) - OFFSET;
   nhi = static_cast<int> ((subhi[0]+dist[0]-boxlo[0]) *
-                            nx_pppm/xprd + shift) - OFFSET;
+                            nx_pppm/xprd_wire + shift) - OFFSET;
   nxlo_out = nlo + nlower;
   nxhi_out = nhi + nupper;
 
   nlo = static_cast<int> ((sublo[1]-dist[1]-boxlo[1]) *
-                            ny_pppm/yprd_slab + shift) - OFFSET;
+                            ny_pppm/yprd_wire + shift) - OFFSET;
   nhi = static_cast<int> ((subhi[1]+dist[1]-boxlo[1]) *
-                            ny_pppm/yprd_slab + shift) - OFFSET;
+                            ny_pppm/yprd_wire + shift) - OFFSET;
   nylo_out = nlo + nlower;
   nyhi_out = nhi + nupper;
 
@@ -1471,10 +1479,13 @@ void PPPM::set_grid_local()
   
   if (wireflag == 1) {
     if (comm->layout != Comm::LAYOUT_TILED) {
+      if (comm->myloc[0] == comm->procgrid[0]-1) nxhi_in = nxhi_out = nx_pppm - 1;
       if (comm->myloc[1] == comm->procgrid[1]-1) nyhi_in = nyhi_out = ny_pppm - 1;
     } else {
+      if (comm->mysplit[0][1] == 1.0) nxhi_in = nxhi_out = nx_pppm - 1;
       if (comm->mysplit[1][1] == 1.0) nyhi_in = nyhi_out = ny_pppm - 1;
     }
+    nxhi_out = MIN(nxhi_out,nx_pppm-1);
     nyhi_out = MIN(nyhi_out,ny_pppm-1);
   }
 
@@ -1556,10 +1567,11 @@ void PPPM::compute_gf_ik()
   const double xprd = prd[0];
   const double yprd = prd[1];
   const double zprd = prd[2];
-  const double yprd_slab = yprd*wire_volfactor;
+  const double xprd_wire = xprd*wire_volfactor;
+  const double yprd_wire = yprd*wire_volfactor;
   const double zprd_slab = zprd*slab_volfactor;
-  const double unitkx = (MY_2PI/xprd);
-  const double unitky = (MY_2PI/yprd_slab);
+  const double unitkx = (MY_2PI/xprd_wire);
+  const double unitky = (MY_2PI/yprd_wire);
   const double unitkz = (MY_2PI/zprd_slab);
 
   double snx,sny,snz;
@@ -1570,9 +1582,9 @@ void PPPM::compute_gf_ik()
 
   int k,l,m,n,nx,ny,nz,kper,lper,mper;
 
-  const int nbx = static_cast<int> ((g_ewald*xprd/(MY_PI*nx_pppm)) *
+  const int nbx = static_cast<int> ((g_ewald*xprd_wire/(MY_PI*nx_pppm)) *
                                     pow(-log(EPS_HOC),0.25));
-  const int nby = static_cast<int> ((g_ewald*yprd_slab/(MY_PI*ny_pppm)) *
+  const int nby = static_cast<int> ((g_ewald*yprd_wire/(MY_PI*ny_pppm)) *
                                     pow(-log(EPS_HOC),0.25));
   const int nbz = static_cast<int> ((g_ewald*zprd_slab/(MY_PI*nz_pppm)) *
                                     pow(-log(EPS_HOC),0.25));
@@ -1585,11 +1597,11 @@ void PPPM::compute_gf_ik()
 
     for (l = nylo_fft; l <= nyhi_fft; l++) {
       lper = l - ny_pppm*(2*l/ny_pppm);
-      sny = square(sin(0.5*unitky*lper*yprd_slab/ny_pppm));
+      sny = square(sin(0.5*unitky*lper*yprd_wire/ny_pppm));
 
       for (k = nxlo_fft; k <= nxhi_fft; k++) {
         kper = k - nx_pppm*(2*k/nx_pppm);
-        snx = square(sin(0.5*unitkx*kper*xprd/nx_pppm));
+        snx = square(sin(0.5*unitkx*kper*xprd_wire/nx_pppm));
 
         sqk = square(unitkx*kper) + square(unitky*lper) + square(unitkz*mper);
 
@@ -1601,13 +1613,13 @@ void PPPM::compute_gf_ik()
           for (nx = -nbx; nx <= nbx; nx++) {
             qx = unitkx*(kper+nx_pppm*nx);
             sx = exp(-0.25*square(qx/g_ewald));
-            argx = 0.5*qx*xprd/nx_pppm;
+            argx = 0.5*qx*xprd_wire/nx_pppm;
             wx = powsinxx(argx,twoorder);
 
             for (ny = -nby; ny <= nby; ny++) {
               qy = unitky*(lper+ny_pppm*ny);
               sy = exp(-0.25*square(qy/g_ewald));
-              argy = 0.5*qy*yprd_slab/ny_pppm;
+              argy = 0.5*qy*yprd_wire/ny_pppm;
               wy = powsinxx(argy,twoorder);
 
               for (nz = -nbz; nz <= nbz; nz++) {
@@ -1732,10 +1744,11 @@ void PPPM::compute_gf_ad()
   const double xprd = prd[0];
   const double yprd = prd[1];
   const double zprd = prd[2];
-  const double yprd_slab = yprd*wire_volfactor;
+  const double xprd_wire = xprd*wire_volfactor;
+  const double yprd_wire = yprd*wire_volfactor;
   const double zprd_slab = zprd*slab_volfactor;
-  const double unitkx = (MY_2PI/xprd);
-  const double unitky = (MY_2PI/yprd_slab);
+  const double unitkx = (MY_2PI/xprd_wire);
+  const double unitky = (MY_2PI/yprd_wire);
   const double unitkz = (MY_2PI/zprd_slab);
 
   double snx,sny,snz,sqk;
@@ -1759,17 +1772,17 @@ void PPPM::compute_gf_ad()
     for (l = nylo_fft; l <= nyhi_fft; l++) {
       lper = l - ny_pppm*(2*l/ny_pppm);
       qy = unitky*lper;
-      sny = square(sin(0.5*qy*yprd_slab/ny_pppm));
+      sny = square(sin(0.5*qy*yprd_wire/ny_pppm));
       sy = exp(-0.25*square(qy/g_ewald));
-      argy = 0.5*qy*yprd_slab/ny_pppm;
+      argy = 0.5*qy*yprd_wire/ny_pppm;
       wy = powsinxx(argy,twoorder);
 
       for (k = nxlo_fft; k <= nxhi_fft; k++) {
         kper = k - nx_pppm*(2*k/nx_pppm);
         qx = unitkx*kper;
-        snx = square(sin(0.5*qx*xprd/nx_pppm));
+        snx = square(sin(0.5*qx*xprd_wire/nx_pppm));
         sx = exp(-0.25*square(qx/g_ewald));
-        argx = 0.5*qx*xprd/nx_pppm;
+        argx = 0.5*qx*xprd_wire/nx_pppm;
         wx = powsinxx(argx,twoorder);
 
         sqk = qx*qx + qy*qy + qz*qz;
@@ -1803,8 +1816,8 @@ void PPPM::compute_gf_ad()
 
   double prex, prey, prez;
   prex = prey = prez = MY_PI/volume;
-  prex *= nx_pppm/xprd;
-  prey *= ny_pppm/yprd_slab;
+  prex *= nx_pppm/xprd_wire;
+  prey *= ny_pppm/yprd_wire;
   prez *= nz_pppm/zprd_slab;
   sf_coeff[0] *= prex;
   sf_coeff[1] *= prex*2;
@@ -2504,7 +2517,10 @@ void PPPM::fieldforce_ik()
 
     const double qfactor = qqrd2e * scale * q[i];
     f[i][0] += qfactor*ekx;
-    if (wireflag != 2) f[i][1] += qfactor*eky;
+    if (wireflag != 2) {
+      f[i][0] += qfactor*ekx;
+      f[i][1] += qfactor*eky;
+    }
     if (slabflag != 2) f[i][2] += qfactor*ekz;
   }
 }
@@ -2581,13 +2597,12 @@ void PPPM::fieldforce_ad()
     sf = sf_coeff[0]*sin(2*MY_PI*s1);
     sf += sf_coeff[1]*sin(4*MY_PI*s1);
     sf *= 2*q[i]*q[i];
-    f[i][0] += qfactor*(ekx*q[i] - sf);
+    if (wireflag != 2) f[i][0] += qfactor*(ekx*q[i] - sf);
 
     sf = sf_coeff[2]*sin(2*MY_PI*s2);
     sf += sf_coeff[3]*sin(4*MY_PI*s2);
     sf *= 2*q[i]*q[i];
     if (wireflag != 2) f[i][1] += qfactor*(eky*q[i] - sf);
-
 
     sf = sf_coeff[4]*sin(2*MY_PI*s3);
     sf += sf_coeff[5]*sin(4*MY_PI*s3);
@@ -3004,7 +3019,7 @@ void PPPM::slabcorr()
 
   const double e_slabcorr = MY_2PI*(dipole_all*dipole_all -
     qsum*dipole_r2 - qsum*qsum*zprd*zprd/12.0)/volume;
-  const double qscale = qqrd2e * scale * wire_fact;
+  const double qscale = qqrd2e * scale;
 
   if (eflag_global) energy += qscale * e_slabcorr;
 
@@ -3029,11 +3044,7 @@ void PPPM::slabcorr()
    Wire-geometry correction term to dampen inter-wire interactions between
    periodically repeating wires.  Yields good approximation to 1D Ewald if
    adequate empty space is left between repeating wires (J. Mol. Struct.
-   704, 101). y and z are non-periodic. As it is applied on top of the slab 
-   correction it probably works also for non-neutral systems (J. Chem. Phys.
-   131, 094107). TODO: However, I've not checked this explicitly. Anyway,
-   if system is initially charge neutral (checked in init using qsum_qsq)
-   the correction terms for non charge neutral systems are zero.
+   704, 101). x and y are non-periodic. 
 ------------------------------------------------------------------------- */
 
 void PPPM::wirecorr()
@@ -3042,36 +3053,46 @@ void PPPM::wirecorr()
 
   double *q = atom->q;
   double **x = atom->x;
+  double xprd = domain->xprd;
   double yprd = domain->yprd;
   int nlocal = atom->nlocal;
 
-  double dipole = 0.0;
-  for (int i = 0; i < nlocal; i++) dipole += q[i]*x[i][1];
-
+  double xdipole = 0.0;
+  double ydipole = 0.0;
+  for (int i = 0; i < nlocal; i++) {
+    xdipole += q[i]*x[i][0];
+    ydipole += q[i]*x[i][1];
+  }
+  
   // sum local contributions to get global dipole moment
 
-  double dipole_all;
-  MPI_Allreduce(&dipole,&dipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+  double xdipole_all, ydipole_all;
+  MPI_Allreduce(&xdipole,&xdipole_all,1,MPI_DOUBLE,MPI_SUM,world);
+  MPI_Allreduce(&ydipole,&ydipole_all,1,MPI_DOUBLE,MPI_SUM,world);
 
-  // need to make non-neutral systems and/or
-  //  per-atom energy translationally invariant
+  // need to make per-atom energy translationally invariant
 
-  double dipole_r2 = 0.0;
-  if (eflag_atom || fabs(qsum) > SMALL) {
-    for (int i = 0; i < nlocal; i++)
-      dipole_r2 += q[i]*x[i][1]*x[i][1];
+  double xdipole_r2 = 0.0;
+  double ydipole_r2 = 0.0;
+  if (eflag_atom) {
+    for (int i = 0; i < nlocal; i++) {
+      xdipole_r2 += q[i]*x[i][0]*x[i][0];
+      ydipole_r2 += q[i]*x[i][1]*x[i][1];
+    }
 
     // sum local contributions
 
     double tmp;
-    MPI_Allreduce(&dipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
-    dipole_r2 = tmp;
+    MPI_Allreduce(&xdipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+    xdipole_r2 = tmp;
+    MPI_Allreduce(&ydipole_r2,&tmp,1,MPI_DOUBLE,MPI_SUM,world);
+    ydipole_r2 = tmp;
   }
 
   // compute corrections
 
-  const double e_wirecorr = MY_PI*(dipole_all*dipole_all -
-    qsum*dipole_r2 - qsum*qsum*yprd*yprd/12.0)/volume;
+  const double e_wirecorr = MY_PI*(xdipole_all*xdipole_all +
+    ydipole_all*ydipole_all)/volume;
   const double qscale = qqrd2e * scale;
 
   if (eflag_global) energy += qscale * e_wirecorr;
@@ -3081,8 +3102,8 @@ void PPPM::wirecorr()
   if (eflag_atom) {
     double efact = qscale * MY_PI/volume;
     for (int i = 0; i < nlocal; i++)
-      eatom[i] += efact * q[i]*(x[i][1]*dipole_all - 0.5*(dipole_r2 +
-        qsum*x[i][1]*x[i][1]) - qsum*yprd*yprd/12.0);
+      eatom[i] += efact * q[i]*(x[i][0]*xdipole_all + x[i][1]*ydipole_all - 
+        0.5*(xdipole_r2 + ydipole_r2));
   }
 
   // add on force corrections
@@ -3090,7 +3111,10 @@ void PPPM::wirecorr()
   double ffact = qscale * (-MY_2PI/volume);
   double **f = atom->f;
 
-  for (int i = 0; i < nlocal; i++) f[i][1] += ffact * q[i]*(dipole_all - qsum*x[i][1]);
+  for (int i = 0; i < nlocal; i++) {
+    f[i][0] += ffact * q[i]*xdipole_all;
+    f[i][1] += ffact * q[i]*ydipole_all;
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -3282,7 +3306,10 @@ void PPPM::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
   MPI_Allreduce(f2group,f2group_all,3,MPI_DOUBLE,MPI_SUM,world);
 
   f2group[0] = qscale*volume*f2group_all[0];
-  if (wireflag != 2) f2group[1] = qscale*volume*f2group_all[1];
+  if (wireflag != 2) {
+    f2group[0] = qscale*volume*f2group_all[0];
+    f2group[1] = qscale*volume*f2group_all[1];
+  } 
   if (slabflag != 2) f2group[2] = qscale*volume*f2group_all[2];
 
   // convert atoms back from lamda to box coords
@@ -3614,7 +3641,7 @@ void PPPM::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 
   // compute corrections
 
-  const double qscale = qqrd2e * scale * wire_fact;
+  const double qscale = qqrd2e * scale;
   const double efact = qscale * MY_2PI/volume;
 
   e2group += efact * (dipole_A*dipole_B - 0.5*(qsum_A*dipole_r2_B +
@@ -3627,7 +3654,7 @@ void PPPM::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag)
 }
 
 /* ----------------------------------------------------------------------
-   wire-geometry correction term to dampen inter-wire interactions between
+   TODO wire-geometry correction term to dampen inter-wire interactions between
    periodically repeating wires.  Yields good approximation to 2D Ewald if
    adequate empty space is left between repeating wires (J. Chem. Phys.
    111, 3155).  Wires defined here to be parallel to the x axis. Also

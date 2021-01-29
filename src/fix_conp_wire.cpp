@@ -165,13 +165,13 @@ void FixConpWire::setup(int vflag)
   double xprd = domain->xprd;
   double yprd = domain->yprd;
   double zprd = domain->zprd;
+  double xprd_wire = xprd*wire_volfactor;
   double yprd_wire = yprd*wire_volfactor;
-  double zprd_wire = zprd*wire_volfactor;
-  volume = xprd * yprd_wire * zprd_wire;
+  volume = xprd_wire * yprd_wire * zprd;
 
-  unitk[0] = 2.0*MY_PI/xprd;
+  unitk[0] = 2.0*MY_PI/xprd_wire;
   unitk[1] = 2.0*MY_PI/yprd_wire;
-  unitk[2] = 2.0*MY_PI/zprd_wire;
+  unitk[2] = 2.0*MY_PI/zprd;
 
   bigint natoms = atom->natoms;
   double err;
@@ -179,10 +179,10 @@ void FixConpWire::setup(int vflag)
   kymax = 1;
   kzmax = 1;
 
-  err = rms(kxmax,xprd,natoms,q2);
+  err = rms(kxmax,xprd_wire,natoms,q2);
   while (err > accuracy) {
     kxmax++;
-    err = rms(kxmax,xprd,natoms,q2);
+    err = rms(kxmax,xprd_wire,natoms,q2);
   }
 
   err = rms(kymax,yprd_wire,natoms,q2);
@@ -191,10 +191,10 @@ void FixConpWire::setup(int vflag)
     err = rms(kymax,yprd_wire,natoms,q2);
   }
 
-  err = rms(kzmax,zprd_wire,natoms,q2);
+  err = rms(kzmax,zprd,natoms,q2);
   while (err > accuracy) {
     kzmax++;
-    err = rms(kzmax,zprd_wire,natoms,q2);
+    err = rms(kzmax,zprd,natoms,q2);
   }
 
   kmax = MAX(kxmax,kymax);
@@ -371,22 +371,22 @@ void FixConpWire::b_cal()
   }
 
   //wire correction and create ele tag list in current timestep
+  double xwirecorrtmp = 0.0;
+  double xwirecorrtmp_all = 0.0;
   double ywirecorrtmp = 0.0;
   double ywirecorrtmp_all = 0.0;
-  double zwirecorrtmp = 0.0;
-  double zwirecorrtmp_all = 0.0;
   for (i = 0; i < nlocal; i++) {
     if (electrode_check(i) == 0) {
+      xwirecorrtmp += 2.0*q[i]*MY_PI*x[i][0]/volume;
       ywirecorrtmp += 2.0*q[i]*MY_PI*x[i][1]/volume;
-      zwirecorrtmp += 2.0*q[i]*MY_PI*x[i][2]/volume;
     }
   }
+  MPI_Allreduce(&xwirecorrtmp,&xwirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
   MPI_Allreduce(&ywirecorrtmp,&ywirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
-  MPI_Allreduce(&zwirecorrtmp,&zwirecorrtmp_all,1,MPI_DOUBLE,MPI_SUM,world);
   j = 0;
   for (i = 0; i < nlocal; i++) {
     if (electrode_check(i)) {
-      bbb[j] -= x[i][1]*ywirecorrtmp_all + x[i][2]*zwirecorrtmp_all;
+      bbb[j] -= x[i][0]*xwirecorrtmp_all + x[i][1]*ywirecorrtmp_all;
       ele2tag[j] = tag[i];
       j++;
     }
