@@ -36,10 +36,7 @@ using namespace LAMMPS_NS;
 #define A5 1.061405429
 
 ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
-    : Compute(lmp, narg, arg),
-      group2(nullptr),
-      mpos(nullptr),
-      fp(nullptr) {
+    : Compute(lmp, narg, arg), group2(nullptr), mpos(nullptr), fp(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/vector command");
 
   vector_flag = 1;
@@ -262,6 +259,7 @@ void ComputeConpVector::pair_contribution() {
   int *mask = atom->mask;
   neighbor->build_one(list);
   int const nlocal = atom->nlocal;
+  int const nall = atom->nghost + nlocal;
   int const inum = list->inum;
   int *ilist = list->ilist;
   int *numneigh = list->numneigh;
@@ -298,11 +296,9 @@ void ComputeConpVector::pair_contribution() {
           aij -= calc_erfc(eta * r) * rinv;
         }
       }
-      for (bigint jpos = 0; jpos < ngroup; jpos++)  // TODO what is this doing?
-        if (mat2tag[jpos] == atom->tag[j]) break;
-      if (i_in_electrode && (i < nlocal)) {  // TODO why smaller than nlocal?
+      if (i_in_electrode && (i < nlocal)) {
         vector[mpos[i]] += aij * q[j];
-      } else if (j_in_electrode && (j < nlocal)) {
+      } else if (j_in_electrode && (j < nall)) {
         vector[mpos[j]] += aij * q[i];
       }
     }
@@ -314,6 +310,7 @@ void ComputeConpVector::matrix_assignment() {
 
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
+  int nghost = atom->nghost;
   int nprocs = comm->nprocs;
   tagint *tag = atom->tag;
   int igroupnum_local = 0, jgroupnum_local = 0;
@@ -377,13 +374,13 @@ void ComputeConpVector::matrix_assignment() {
   if (assigned) {
     memory->destroy(mpos);
   }
-  memory->create(mpos, nlocal, "coul/vector:mpos");
+  memory->create(mpos, nghost, "coul/vector:mpos");
 
   assigned = true;
 
   // local+ghost non-matrix atoms are -1 in mpos
 
-  for (int i = 0; i < nlocal; i++) {
+  for (int i = 0; i < nghost; i++) {
     mpos[i] = -1;
   }
 
@@ -394,7 +391,7 @@ void ComputeConpVector::matrix_assignment() {
 
   // create global matrix indices for local+ghost atoms
   for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nlocal; i++) {
+    for (int i = 0; i < nghost; i++) {
       if (mat2tag[ii] == tag[i]) {
         mpos[i] = ii;
       }
