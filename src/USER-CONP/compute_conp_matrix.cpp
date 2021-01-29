@@ -47,6 +47,12 @@ using namespace MathConst;
 #define A4 -1.453152027
 #define A5 1.061405429
 
+extern "C" {
+void dgetrf_(const int *M, const int *N, double *A, const int *lda, int *ipiv,
+             int *info);
+void dgetri_(const int *N, double *A, const int *lda, const int *ipiv,
+             double *work, const int *lwork, int *info);
+}
 enum { OFF, INTER, INTRA };
 
 /* ---------------------------------------------------------------------- */
@@ -55,8 +61,10 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
     : Compute(lmp, narg, arg),
       group2(nullptr),
       gradQ_V(nullptr),
+      gradQ_V_inv(nullptr),
       mpos(nullptr),
-      fp(nullptr) {
+      fp(nullptr),
+      fp_inv(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/matrix command");
 
   array_flag = 1;
@@ -66,7 +74,9 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
   extarray = 0;
 
   fp = nullptr;
+  fp_inv = nullptr;
   gradQ_V = nullptr;
+  gradQ_V_inv = nullptr;
   mpos = nullptr;
 
   pairflag = 1;
@@ -162,17 +172,29 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
                                  arg[iarg + 1], utils::getsyserror()));
       }
       iarg += 2;
+    } else if (strcmp(arg[iarg], "file_inv") == 0) {
+      if (iarg + 2 > narg)
+        error->all(FLERR, "Illegal compute coul/matrix command");
+      if (comm->me == 0) {
+        fp_inv = fopen(arg[iarg + 1], "w");
+        if (fp_inv == nullptr)
+          error->one(FLERR,
+                     fmt::format("Cannot open compute coul/matrix file {}: {}",
+                                 arg[iarg + 1], utils::getsyserror()));
+      }
+      iarg += 2;
     } else
       error->all(FLERR, "Illegal compute coul/matrix command");
   }
 
   // print file comment lines
-
-  if (fp && comm->me == 0) {
-    clearerr(fp);
-    fprintf(fp, "# Constant potential coulomb matrix\n");
-    if (ferror(fp)) error->one(FLERR, "Error writing file header");
-    filepos = ftell(fp);
+  for (FILE *f : {fp, fp_inv}) {
+    if (f && comm->me == 0) {
+      clearerr(f);
+      fprintf(f, "# Constant potential coulomb matrix\n");
+      if (ferror(f)) error->one(FLERR, "Error writing file header");
+      filepos = ftell(f);
+    }
   }
 }
 
@@ -185,7 +207,9 @@ ComputeConpMatrix::~ComputeConpMatrix() {
 
   if (assigned) memory->destroy(mpos);
 
-  if (fp && comm->me == 0) fclose(fp);
+  for (FILE *f : {fp, fp_inv}) {
+    if (f && comm->me == 0) fclose(f);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -277,7 +301,10 @@ void ComputeConpMatrix::setup() {
     MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
                   world);
 
-  if (fp && comm->me == 0) write_matrix(gradQ_V);
+  invert();
+
+  if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
+  if (fp_inv && comm->me == 0) write_matrix(fp_inv, gradQ_V_inv);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -293,6 +320,31 @@ void ComputeConpMatrix::compute_array() {
   if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
 }
 
+/* ---------------------------------------------------------------------- */
+void ComputeConpMatrix::invert() {
+  // TODO use vectors for ipiv and work?
+  if (comm->me == 0) utils::logmesg(lmp, "Inverting\n");
+  int m = ngroup, n = ngroup, lda = ngroup;
+  int *ipiv = new int[ngroup + 1];
+  int info_rf, info_ri;
+  int lwork = ngroup * ngroup;
+  double *work = new double[lwork];
+
+  for (int i = 0; i < ngroup; i++) {
+    for (int j = 0; j < ngroup; j++) {
+      int idx = i * ngroup + j;
+      gradQ_V_inv[idx] = gradQ_V[i][j];
+    }
+  }
+
+  dgetrf_(&m, &n, gradQ_V_inv, &lda, ipiv, &info_rf);
+  dgetri_(&n, gradQ_V_inv, &lda, ipiv, work, &lwork, &info_ri);
+  delete[] ipiv;
+  ipiv = NULL;
+  delete[] work;
+  work = NULL;
+  if (info_rf != 0 || info_ri != 0) error->all(FLERR, "Inversion failed!");
+}
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::pair_contribution() {
@@ -523,6 +575,7 @@ void ComputeConpMatrix::matrix_assignment() {
 
 void ComputeConpMatrix::allocate() {
   memory->create(mat2tag, ngroup, "coul/matrix:mat2tag");
+  gradQ_V_inv = new double[ngroup * ngroup];
   gradQ_V = new double *[ngroup];
   for (bigint i = 0; i < ngroup; i++) gradQ_V[i] = new double[ngroup];
 }
@@ -531,22 +584,39 @@ void ComputeConpMatrix::allocate() {
 
 void ComputeConpMatrix::deallocate() {
   memory->destroy(mat2tag);
+  delete[] gradQ_V_inv;
   for (bigint i = 0; i < ngroup; i++) delete[] gradQ_V[i];
   delete[] gradQ_V;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeConpMatrix::write_matrix(double **matrix) {
-  fprintf(fp, "# atoms\n");
-  for (bigint i = 0; i < ngroup; i++) fprintf(fp, "%d ", mat2tag[i]);
-  fprintf(fp, "\n");
+void ComputeConpMatrix::write_matrix(FILE *f, double **matrix) {
+  fprintf(f, "# atoms\n");
+  for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
+  fprintf(f, "\n");
 
-  fprintf(fp, "# matrix\n");
+  fprintf(f, "# matrix\n");
   for (bigint i = 0; i < ngroup; i++) {
     for (bigint j = 0; j < ngroup; j++) {
-      fprintf(fp, "%E ", matrix[i][j]);
+      fprintf(f, "%E ", matrix[i][j]);
     }
-    fprintf(fp, "\n");
+    fprintf(f, "\n");
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeConpMatrix::write_matrix(FILE *f, double *matrix) {
+  fprintf(f, "# atoms\n");
+  for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
+  fprintf(f, "\n");
+
+  fprintf(f, "# matrix\n");
+  for (bigint i = 0; i < ngroup; i++) {
+    for (bigint j = 0; j < ngroup; j++) {
+      fprintf(f, "%E ", matrix[i * ngroup + j]);
+    }
+    fprintf(f, "\n");
   }
 }
