@@ -1010,9 +1010,9 @@ void FixConp::update_charge() {
   int elealli, tagi;
   double eleallq_i;
   int *tag = atom->tag;
-  int nall = atom->nlocal + atom->nghost;
+  int nmax = atom->nmax;
   double *q = atom->q;
-  for (i = 0; i < nall; ++i) {
+  for (i = 0; i < nmax; ++i) {
     if (electrode_check(i)) {
       tagi = tag[i];
       elealli = tag2eleall[tagi];
@@ -1061,6 +1061,7 @@ void FixConp::coul_cal(int coulcalflag, double *m, int *ele2tag) {
 
   int inum = force->pair->list->inum;
   int nlocal = atom->nlocal;
+  int nmax = atom->nmax;
   int newton_pair = force->newton_pair;
   int *atomtype = atom->type;
   int *tag = atom->tag;
@@ -1148,7 +1149,7 @@ void FixConp::coul_cal(int coulcalflag, double *m, int *ele2tag) {
                       }
                     }
                   }
-                  if (j < nlocal) {
+                  if (j < nmax) {
                     if (ele2tag[k] == tag[j]) {
                       elej = k;
                       if (coulcalflag == 1) {
