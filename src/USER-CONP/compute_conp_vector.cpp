@@ -310,7 +310,7 @@ void ComputeConpVector::matrix_assignment() {
 
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-  int nghost = atom->nghost;
+  int nall = atom->nghost + atom->nlocal;
   int nprocs = comm->nprocs;
   tagint *tag = atom->tag;
   int igroupnum_local = 0, jgroupnum_local = 0;
@@ -374,13 +374,13 @@ void ComputeConpVector::matrix_assignment() {
   if (assigned) {
     memory->destroy(mpos);
   }
-  memory->create(mpos, nghost, "coul/vector:mpos");
+  memory->create(mpos, nall, "coul/vector:mpos");
 
   assigned = true;
 
   // local+ghost non-matrix atoms are -1 in mpos
 
-  for (int i = 0; i < nghost; i++) {
+  for (int i = 0; i < nall; i++) {
     mpos[i] = -1;
   }
 
@@ -391,7 +391,7 @@ void ComputeConpVector::matrix_assignment() {
 
   // create global matrix indices for local+ghost atoms
   for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nghost; i++) {
+    for (int i = 0; i < nall; i++) {
       if (mat2tag[ii] == tag[i]) {
         mpos[i] = ii;
       }
