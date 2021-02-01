@@ -560,13 +560,13 @@ void FixConpWire::a_cal()
   delete [] elexyzlist_all;
 
   int elealli,elei,idx1d;
-  double yi,zi;
+  double xi,yi;
   double CON_2PIoverV = MY_2PI/volume;
   double CON_s2overPIS = sqrt(2.0)/MY_PIS;
   double CON_2overPIS = 2.0/MY_PIS;
   for (i = 0; i < nlocal; ++i) {
+    xi = x[i][0];
     yi = x[i][1];
-    zi = x[i][2];
     if (electrode_check(i)) {
       elealli = tag2eleall[tag[i]];
       for (k = 0; k < elenum; ++k) {
@@ -581,8 +581,7 @@ void FixConpWire::a_cal()
           aaa[idx1d] += 2.0*ug[k]*(csk[k][elealli]*csk[k][j]+snk[k][elealli]*snk[k][j]);
         }
         // this seems to be the slab-correction for the electrode atoms
-        aaa[idx1d] += CON_2PIoverV*yi*eleallx[j][1];
-        aaa[idx1d] += CON_2PIoverV*zi*eleallx[j][2];
+        aaa[idx1d] += CON_2PIoverV*(xi*eleallx[j][0] + yi*eleallx[j][1]);
       }
       idx1d = elei*elenum_all+elealli;
       aaa[idx1d] += CON_s2overPIS*eta-CON_2overPIS*g_ewald; //gaussian self correction
