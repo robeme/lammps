@@ -37,9 +37,8 @@ class ComputeConpVector : public Compute {
   tagint *mat2tag;  // stores tag of matrix position
 
  private:
-  char *group2;
-  int jgroup, jgroupbit, othergroupbit;
-  bigint jgroupnum, igroupnum, ngroup;
+  int othergroupbit;
+  bigint igroupnum, ngroup;
   int recalc_every;
   double **cutsq;
   double g_ewald, eta;
