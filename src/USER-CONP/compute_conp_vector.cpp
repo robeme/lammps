@@ -14,6 +14,8 @@
 
 #include "compute_conp_vector.h"
 
+#include <iostream>
+
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
@@ -27,6 +29,7 @@
 #include "pair.h"
 
 using namespace LAMMPS_NS;
+using namespace std;
 
 #define EWALD_P 0.3275911
 #define A1 0.254829592
@@ -55,9 +58,10 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
   gaussians = 1;
   recalc_every = 0;
   overwrite = 1;
-  assigned = false;
 
   g_ewald = 0.0;
+
+  assigned = false;
 
   // TODO recalculate coulomb vector every recalc_every
 
@@ -137,12 +141,8 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
 /* ---------------------------------------------------------------------- */
 
 ComputeConpVector::~ComputeConpVector() {
-  deallocate();
-
-  if (assigned) {
-    memory->destroy(mpos);
-  }
-
+  delete[] vector;
+  if (assigned) delete[] mpos;
   if (fp && comm->me == 0) fclose(fp);
 }
 
@@ -197,36 +197,28 @@ void ComputeConpVector::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpVector::setup() {
-  igroupnum = group->count(igroup);
-  ngroup = igroupnum;
+  ngroup = group->count(igroup);
 
   // TODO could be useful to assign homogenously all atoms in both groups to
   // all procs for calculating vector to distribute evenly the workload
-
-  // TODO would be nicer to have a local vector and gather it later
-  // to reduce a little bit the memory consumption ... However, for
-  // this wo work I think the atom ids must be from 1,...,N and consecutive
-
-  allocate();
-
+  vector = new double[ngroup]();  // init to zero
   // assign atom tags to vector locations and vice versa
-
-  matrix_assignment();
-
+  create_taglist();
   // initial calculation of coulomb matrix at setup of simulation
-
   compute_vector();
-  MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
 
-  if (fp && comm->me == 0) write_vector(fp, vector);
+  std::vector<tagint> mat_to_tag = mat2tag();
+  if (fp && comm->me == 0) write_vector(fp, vector, mat_to_tag);
 }
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpVector::compute_vector() {
+  update_mpos();
   for (int i = 0; i < ngroup; i++) vector[i] = 0.;
   if (pairflag) pair_contribution();
   if (kspaceflag) kspace->compute_vector(mpos, vector);
   if (boundaryflag) kspace->compute_vector_corr(mpos, vector);
+  MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -284,74 +276,49 @@ void ComputeConpVector::pair_contribution() {
   }
 }
 /* ---------------------------------------------------------------------- */
-void ComputeConpVector::matrix_assignment() {
-  // assign local matrix indices to local atoms on each proc
+
+void ComputeConpVector::create_taglist() {
+  // assign a tag to each matrix index
 
   int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-  int nall = atom->nghost + atom->nlocal;
-  int nprocs = comm->nprocs;
+  int const nlocal = atom->nlocal;
+  int const nprocs = comm->nprocs;
   tagint *tag = atom->tag;
-  int igroupnum_local = 0;
 
+  std::vector<int> taglist_local;
   for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) igroupnum_local++;
+    if (mask[i] & groupbit) taglist_local.push_back(tag[i]);
   }
+  int igroupnum_local = taglist_local.size();
 
   std::vector<int> idispls(nprocs);
   std::vector<int> igroupnum_list(nprocs);
-
   MPI_Allgather(&igroupnum_local, 1, MPI_INT, &igroupnum_list.front(), 1,
                 MPI_INT, world);
-
   idispls[0] = 0;
   for (int i = 1; i < nprocs; i++) {
     idispls[i] = idispls[i - 1] + igroupnum_list[i - 1];
   }
 
-  std::vector<int> itaglist_local(igroupnum_local);
-
-  igroupnum_local = 0;
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      itaglist_local[igroupnum_local] = tag[i];
-      igroupnum_local++;
-    }
-  }
-
-  std::vector<int> itaglist(igroupnum);
-
-  MPI_Allgatherv(&itaglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
-                 &itaglist.front(), &igroupnum_list.front(), &idispls.front(),
+  taglist = std::vector<int>(ngroup);
+  MPI_Allgatherv(&taglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
+                 &taglist.front(), &igroupnum_list.front(), &idispls.front(),
                  MPI_LMP_TAGINT, world);
+  std::sort(taglist.begin(), taglist.end());
+}
 
-  // sort individual group taglists, first igroup than jgroup
+/* ---------------------------------------------------------------------- */
 
-  std::sort(itaglist.begin(), itaglist.end());
-
-  // if local+ghost matrix assignment already created, recreate
-
-  if (assigned) {
-    memory->destroy(mpos);
-  }
-  memory->create(mpos, nall, "coul/vector:mpos");
-
+void ComputeConpVector::update_mpos() {
+  int const nall = atom->nlocal + atom->nghost;
+  int *tag = atom->tag;
+  if (assigned) delete[] mpos;
+  mpos = new bigint[nall];
   assigned = true;
-
-  // local+ghost non-matrix atoms are -1 in mpos
-
-  for (int i = 0; i < nall; i++) {
-    mpos[i] = -1;
-  }
-
-  // store which tag represents value in matrix
-
-  for (bigint i = 0; i < igroupnum; i++) mat2tag[i] = itaglist[i];
-
-  // create global matrix indices for local+ghost atoms
+  for (int i = 0; i < nall; i++) mpos[i] = -1;
   for (bigint ii = 0; ii < ngroup; ii++) {
     for (int i = 0; i < nall; i++) {
-      if (mat2tag[ii] == tag[i]) {
+      if (taglist[ii] == tag[i]) {
         mpos[i] = ii;
       }
     }
@@ -360,29 +327,34 @@ void ComputeConpVector::matrix_assignment() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeConpVector::allocate() {
-  memory->create(mat2tag, ngroup, "coul/vector:mat2tag");
-  vector = new double[ngroup]();  // init to zero
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpVector::deallocate() {
-  memory->destroy(mat2tag);
-  delete[] vector;
-}
-
-/* ---------------------------------------------------------------------- */
 double ComputeConpVector::calc_erfc(double x) {
   double expm2 = exp(-x * x);
   double t = 1.0 / (1.0 + EWALD_P * x);
   return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
+
 /* ---------------------------------------------------------------------- */
 
-void ComputeConpVector::write_vector(FILE *file, double *v) {
+std::vector<tagint> ComputeConpVector::mat2tag() {
+  update_mpos();
+  int *tag = atom->tag;
+  std::vector<tagint> m(ngroup, 0);
+  for (int i = 0; i < atom->nlocal; i++) {
+    if (mpos[i] >= 0) {
+      m[mpos[i]] = tag[i];
+    }
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &m.front(), ngroup, MPI_LMP_TAGINT, MPI_SUM,
+                world);
+  return m;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void ComputeConpVector::write_vector(FILE *file, double *v,
+                                     std::vector<tagint> mat_to_tag) {
   for (bigint i = 0; i < ngroup; i++) {
-    fprintf(file, "%d, %E\n", mat2tag[i], v[i]);
+    fprintf(file, "%d, %E\n", mat_to_tag[i], v[i]);
   }
   fprintf(file, "\n");
 }

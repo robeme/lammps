@@ -250,10 +250,6 @@ void ComputeConpMatrix::setup() {
   // TODO could be useful to assign homogenously all atoms in both groups to
   // all procs for calculating matrix to distribute evenly the workload
 
-  // TODO would be nicer to have a local matrix and gather it later
-  // to reduce a little bit the memory consumption ... However, for
-  // this wo work I think the atom ids must be from 1,...,N and consecutive
-
   allocate();
 
   // assign atom tags to matrix locations and vice versa
@@ -271,17 +267,8 @@ void ComputeConpMatrix::setup() {
 
   compute_array();
 
-  // reduce coulomb matrix with contributions from all procs
-  // all procs need to know full matrix for matrix inversion
-
-  for (int i = 0; i < ngroup; i++)
-    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
-                  world);
-
-  invert();
-
   if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
-  if (fp_inv && comm->me == 0) write_matrix(fp_inv, array); 
+  if (fp_inv && comm->me == 0) write_matrix(fp_inv, array);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -295,6 +282,14 @@ void ComputeConpMatrix::compute_array() {
   if (selfflag) self_contribution();
   if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
   if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
+
+  // reduce coulomb matrix with contributions from all procs
+  // all procs need to know full matrix for matrix inversion
+  for (int i = 0; i < ngroup; i++) {
+    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
+                  world);
+  }
+  invert();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -330,7 +325,7 @@ void ComputeConpMatrix::invert() {
       array[i][j] = gradQ_V_inv[idx];
     }
   }
-  delete [] gradQ_V_inv;
+  delete[] gradQ_V_inv;
 }
 
 /* ---------------------------------------------------------------------- */
