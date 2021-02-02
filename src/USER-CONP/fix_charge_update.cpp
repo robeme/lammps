@@ -1,6 +1,7 @@
 #include "fix_charge_update.h"
 
 #include <assert.h>
+#include <iostream>
 
 
 #include "atom.h"
@@ -14,6 +15,7 @@
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
+using namespace std;
 
 //     0        1   2             3
 // fix fxupdate all charge_update group1 pot1 group2 pot2 c_matrix c_vector
@@ -170,6 +172,7 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::pre_force(int) {
+  if (comm->me == 0) cout << "### PRE FORCE ###" << endl;
   std::vector<int> mpos = local_to_matrix();
   int const nlocal = atom->nlocal;
   double **a = array_compute->array;
