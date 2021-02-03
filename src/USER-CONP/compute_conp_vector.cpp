@@ -14,8 +14,6 @@
 
 #include "compute_conp_vector.h"
 
-#include <iostream>
-
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
@@ -29,7 +27,6 @@
 #include "pair.h"
 
 using namespace LAMMPS_NS;
-using namespace std;
 
 #define EWALD_P 0.3275911
 #define A1 0.254829592
@@ -206,9 +203,6 @@ void ComputeConpVector::setup() {
   create_taglist();
   // initial calculation of coulomb matrix at setup of simulation
   compute_vector();
-
-  std::vector<tagint> mat_to_tag = mat2tag();
-  if (fp && comm->me == 0) write_vector(fp, vector, mat_to_tag);
 }
 /* ---------------------------------------------------------------------- */
 
@@ -333,28 +327,3 @@ double ComputeConpVector::calc_erfc(double x) {
   return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
 
-/* ---------------------------------------------------------------------- */
-
-std::vector<tagint> ComputeConpVector::mat2tag() {
-  update_mpos();
-  int *tag = atom->tag;
-  std::vector<tagint> m(ngroup, 0);
-  for (int i = 0; i < atom->nlocal; i++) {
-    if (mpos[i] >= 0) {
-      m[mpos[i]] = tag[i];
-    }
-  }
-  MPI_Allreduce(MPI_IN_PLACE, &m.front(), ngroup, MPI_LMP_TAGINT, MPI_SUM,
-                world);
-  return m;
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpVector::write_vector(FILE *file, double *v,
-                                     std::vector<tagint> mat_to_tag) {
-  for (bigint i = 0; i < ngroup; i++) {
-    fprintf(file, "%d, %E\n", mat_to_tag[i], v[i]);
-  }
-  fprintf(file, "\n");
-}

@@ -53,10 +53,8 @@ class ComputeConpVector : public Compute {
 
   void create_taglist();
   void update_mpos();
-  std::vector<tagint> mat2tag();
 
   void pair_contribution();
-  void write_vector(FILE *, double *, std::vector<tagint>);
   double calc_erfc(double);
 };
 

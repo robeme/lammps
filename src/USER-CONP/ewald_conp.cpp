@@ -21,7 +21,6 @@
 #include "ewald_conp.h"
 
 #include <cmath>
-#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -35,7 +34,6 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
-using namespace std;
 
 #define SMALL 0.00001
 
@@ -1833,7 +1831,6 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
       memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
       kmax_created = kmax;
     }
-    if (comm->me == 0) cout << "Updating cs and sn" << endl;
     eikr_step = update->ntimestep;
     if (triclinic == 0)
       eik_dot_r();
