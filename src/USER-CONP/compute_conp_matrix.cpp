@@ -175,11 +175,10 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
       error->all(FLERR, "Illegal compute coul/matrix command");
   }
 
-  // print file comment lines
+  // open file handler for matrix output
   for (FILE *f : {fp, fp_inv}) {
     if (f && comm->me == 0) {
       clearerr(f);
-      fprintf(f, "# Constant potential coulomb matrix\n");
       if (ferror(f)) error->one(FLERR, "Error writing file header");
       filepos = ftell(f);
     }
@@ -563,11 +562,8 @@ void ComputeConpMatrix::deallocate() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::write_matrix(FILE *f, double **matrix) {
-  fprintf(f, "# atoms\n");
   for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
   fprintf(f, "\n");
-
-  fprintf(f, "# matrix\n");
   for (bigint i = 0; i < ngroup; i++) {
     for (bigint j = 0; j < ngroup; j++) {
       fprintf(f, "%E ", matrix[i][j]);
@@ -579,11 +575,8 @@ void ComputeConpMatrix::write_matrix(FILE *f, double **matrix) {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::write_matrix(FILE *f, double *matrix) {
-  fprintf(f, "# atoms\n");
   for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
   fprintf(f, "\n");
-
-  fprintf(f, "# matrix\n");
   for (bigint i = 0; i < ngroup; i++) {
     for (bigint j = 0; j < ngroup; j++) {
       fprintf(f, "%E ", matrix[i * ngroup + j]);
