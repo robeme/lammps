@@ -175,10 +175,11 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
       error->all(FLERR, "Illegal compute coul/matrix command");
   }
 
-  // open file handler for matrix output
+  // print file comment lines
   for (FILE *f : {fp, fp_inv}) {
     if (f && comm->me == 0) {
       clearerr(f);
+      fprintf(f, "# Constant potential coulomb matrix\n");
       if (ferror(f)) error->one(FLERR, "Error writing file header");
       filepos = ftell(f);
     }
@@ -255,20 +256,9 @@ void ComputeConpMatrix::setup() {
   // assign atom tags to matrix locations and vice versa
 
   matrix_assignment();
-
-  // setting all entries of coulomb matrix to zero
-
-  size_t nbytes = sizeof(double) * ngroup;
-
-  if (nbytes)
-    for (int i = 0; i < ngroup; i++) memset(&gradQ_V[i][0], 0, nbytes);
-
   // initial calculation of coulomb matrix at setup of simulation
 
   compute_array();
-
-  if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
-  if (fp_inv && comm->me == 0) write_matrix(fp_inv, array);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -278,6 +268,11 @@ void ComputeConpMatrix::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::compute_array() {
+  // setting all entries of coulomb matrix to zero
+  size_t nbytes = sizeof(double) * ngroup;
+  if (nbytes)
+    for (int i = 0; i < ngroup; i++) memset(&gradQ_V[i][0], 0, nbytes);
+
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
   if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
@@ -555,27 +550,3 @@ void ComputeConpMatrix::deallocate() {
 }
 
 /* ---------------------------------------------------------------------- */
-
-void ComputeConpMatrix::write_matrix(FILE *f, double **matrix) {
-  for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
-  fprintf(f, "\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(f, "%E ", matrix[i][j]);
-    }
-    fprintf(f, "\n");
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpMatrix::write_matrix(FILE *f, double *matrix) {
-  for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
-  fprintf(f, "\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(f, "%E ", matrix[i * ngroup + j]);
-    }
-    fprintf(f, "\n");
-  }
-}

@@ -58,8 +58,6 @@ class ComputeConpMatrix : public Compute {
   void matrix_assignment();
   void pair_contribution();
   void self_contribution();
-  void write_matrix(FILE *, double **);
-  void write_matrix(FILE *, double *);
   void allocate();
   void deallocate();
   double calc_erfc(double);

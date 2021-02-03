@@ -1,8 +1,9 @@
 #include "fix_charge_update.h"
 
 #include <assert.h>
-#include <iostream>
 
+#include <iostream>
+#include <numeric>
 
 #include "atom.h"
 #include "comm.h"
@@ -22,6 +23,7 @@ using namespace std;
 FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     : Fix(lmp, narg, arg) {
   array_compute = vector_compute = nullptr;
+  f_ela = f_vec = nullptr;
   assigned = false;
 
   int iarg = 3;
@@ -37,14 +39,39 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   assert(groups.size == group_bits.size);
   assert(groups.size == group_pots.size);
 
+  // read fix command
   std::vector<std::string> compute_ids;
   while (iarg < narg) {
     if ((strncmp(arg[iarg], "c_", 2) == 0)) {
       compute_ids.push_back(&arg[iarg][2]);
+    } else if ((strncmp(arg[iarg], "file", 4) == 0)) {
+      if (iarg + 2 > narg)
+        error->all(FLERR, "Illegal compute coul/matrix command");
+      if (comm->me == 0) {
+        if ((strcmp(arg[iarg], "file_elas") == 0)) {  // elastance matrix
+          f_ela = fopen(arg[++iarg], "w");
+          if (f_ela == nullptr)
+            error->one(FLERR,
+                       fmt::format("Cannot open elastance matrix file {}: {}",
+                                   arg[iarg], utils::getsyserror()));
+        } else if ((strcmp(arg[iarg], "file_vec") == 0)) {  // b vector
+          f_vec = fopen(arg[++iarg], "w");
+          if (f_vec == nullptr)
+            error->one(FLERR, fmt::format("Cannot open vector file {}: {}",
+                                          arg[iarg], utils::getsyserror()));
+        } else {
+          error->all(FLERR, "Illegal fix update_charge command");
+        }
+      } else {
+        iarg++;
+      }
+    } else {
+      error->all(FLERR, "Illegal fix update_charge command");
     }
     iarg++;
   }
 
+  // assign computes
   for (std::string id : compute_ids) {
     int i = modify->find_compute(id);
     if (i < 0)
@@ -86,6 +113,8 @@ void FixChargeUpdate::init() {
   int const nlocal = atom->nlocal;
   int *mask = atom->mask;
   ngroup = group->count(igroup);
+
+  // check groups are consistent
   int sum = 0;
   for (int i : groups) {
     sum += group->count(i);
@@ -107,11 +136,18 @@ void FixChargeUpdate::init() {
       }
     }
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::setup(int) {
+  int const nlocal = atom->nlocal;
+  int *mask = atom->mask;
 
   create_taglist();
+  // setup pots with target potentials
   std::vector<int> mpos = local_to_matrix();
-
-  double const evscale = 0.069447; // TODO do units properly
+  double const evscale = 0.069447;  // TODO do units properly
   pots = new double[ngroup]();
   for (int i = 0; i < nlocal; i++) {
     for (int g = 0; g < number_groups; g++) {
@@ -119,38 +155,79 @@ void FixChargeUpdate::init() {
     }
   }
   MPI_Allreduce(MPI_IN_PLACE, pots, ngroup, MPI_DOUBLE, MPI_SUM, world);
+
+  // initial elastance matrix and b vector
+  vector_compute->compute_vector();
+  array_compute->compute_array();  // TODO turn off automatic calc in compute
+  // write to files
+  if (comm->me == 0) {
+    if (f_vec) {
+      double *b = vector_compute->vector;
+      std::vector<std::vector<double>> vec(ngroup, std::vector<double>(1));
+      for (int i = 0; i < ngroup; i++) {
+        vec[group_idx[i]][0] = b[i];
+      }
+      write_2d_vector(f_vec, taglist_bygroup, vec);
+    }
+    if (f_ela) {
+      double **a = array_compute->array;
+      std::vector<std::vector<double>> mat(ngroup, std::vector<double>(ngroup));
+      for (bigint i = 0; i < ngroup; i++) {
+        bigint const gi = group_idx[i];
+        for (bigint j = 0; j < ngroup; j++) {
+          mat[gi][group_idx[j]] = a[i][j];
+        }
+      }
+      write_2d_vector(f_ela, taglist_bygroup, mat);
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::create_taglist() {
-  // assign a tag to each matrix index
-
+  // assign a tag to each matrix index sorted by group and by tag
   int *mask = atom->mask;
   int const nlocal = atom->nlocal;
   int const nprocs = comm->nprocs;
   tagint *tag = atom->tag;
 
-  std::vector<int> taglist_local;
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) taglist_local.push_back(tag[i]);
+  taglist_bygroup = std::vector<tagint>();
+  for (int gbit : group_bits) {
+    std::vector<tagint> taglist_local;
+    for (int i = 0; i < nlocal; i++) {
+      if (mask[i] & gbit) taglist_local.push_back(tag[i]);
+    }
+    // gather from all cpus for this group
+    int gnum_local = taglist_local.size();
+    std::vector<int> idispls(nprocs);
+    std::vector<int> gnum_list(nprocs);
+    MPI_Allgather(&gnum_local, 1, MPI_INT, &gnum_list.front(), 1, MPI_INT,
+                  world);
+    idispls[0] = 0;
+    for (int i = 1; i < nprocs; i++) {
+      idispls[i] = idispls[i - 1] + gnum_list[i - 1];
+    }
+    int const gnum = accumulate(gnum_list.begin(), gnum_list.end(), 0);
+    std::vector<tagint> taglist_all(gnum);
+    MPI_Allgatherv(&taglist_local.front(), gnum_local, MPI_LMP_TAGINT,
+                   &taglist_all.front(), &gnum_list.front(), &idispls.front(),
+                   MPI_LMP_TAGINT, world);
+    std::sort(taglist_all.begin(), taglist_all.end());
+    // add to list of all groups
+    for (tagint t : taglist_all) taglist_bygroup.push_back(t);
   }
-  int igroupnum_local = taglist_local.size();
-
-  std::vector<int> idispls(nprocs);
-  std::vector<int> igroupnum_list(nprocs);
-  MPI_Allgather(&igroupnum_local, 1, MPI_INT, &igroupnum_list.front(), 1,
-                MPI_INT, world);
-  idispls[0] = 0;
-  for (int i = 1; i < nprocs; i++) {
-    idispls[i] = idispls[i - 1] + igroupnum_list[i - 1];
-  }
-
-  taglist = std::vector<int>(ngroup);
-  MPI_Allgatherv(&taglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
-                 &taglist.front(), &igroupnum_list.front(), &idispls.front(),
-                 MPI_LMP_TAGINT, world);
+  taglist = taglist_bygroup;
   std::sort(taglist.begin(), taglist.end());
+  group_idx = vector<tagint>();
+  for (tagint t : taglist) {
+    for (size_t i = 0; i < taglist_bygroup.size(); i++) {
+      if (t == taglist_bygroup[i]) {
+        group_idx.push_back(i);
+        break;
+      }
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -172,7 +249,6 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::pre_force(int) {
-  if (comm->me == 0) cout << "### PRE FORCE ###" << endl;
   std::vector<int> mpos = local_to_matrix();
   int const nlocal = atom->nlocal;
   double **a = array_compute->array;
@@ -199,4 +275,20 @@ int FixChargeUpdate::setmask() {
   int mask = 0;
   mask |= PRE_FORCE;
   return mask;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::write_2d_vector(FILE *file, std::vector<tagint> tags,
+                                      std::vector<std::vector<double>> mat) {
+  fprintf(file, "# atoms\n");
+  for (tagint t : tags) fprintf(file, "%d ", t);
+  fprintf(file, "\n");
+  fprintf(file, "# matrix\n");
+  for (std::vector<double> vec : mat) {
+    for (double x : vec) {
+      fprintf(file, "%20.10f ", x);
+    }
+    fprintf(file, "\n");
+  }
 }
