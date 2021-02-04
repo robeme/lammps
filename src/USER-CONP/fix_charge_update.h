@@ -30,19 +30,21 @@ class FixChargeUpdate : public Fix {
   // void restart(char *);
 
  private:
-  FILE *f_ela, *f_vec;  // files for capacitance, eleastance and vector
+  FILE *f_ela, *f_vec, *f_in;  // files for capacitance, eleastance and vector
   class Compute *array_compute, *vector_compute;
   static int const number_groups = 2;
   std::vector<int> groups, group_bits;
   std::vector<double> group_pots;
   double *pots;
-  int ngroup;
+  double **matrix_from_file;
+  bigint ngroup;
   std::vector<tagint> taglist, taglist_bygroup, group_idx;
-  bool assigned;
+  bool read_matrix;
   void create_taglist();
   std::vector<int> local_to_matrix();
-  void write_2d_vector(FILE *, std::vector<tagint>,
-                       std::vector<std::vector<double> >);
+  void write_to_file(FILE *, std::vector<tagint>,
+                     std::vector<std::vector<double> >);
+  void read_from_file();
 };
 
 }  // namespace LAMMPS_NS
