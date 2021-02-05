@@ -36,11 +36,12 @@ class FixChargeUpdate : public Fix {
   std::vector<int> groups, group_bits;
   std::vector<double> group_pots;
   double *pots;
-  double **matrix_from_file;
+  double **elastance;
   bigint ngroup;
   std::vector<tagint> taglist, taglist_bygroup, group_idx;
   bool read_matrix;
   void create_taglist();
+  void invert(double **);
   std::vector<int> local_to_matrix();
   void write_to_file(FILE *, std::vector<tagint>,
                      std::vector<std::vector<double> >);

@@ -16,13 +16,20 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
+extern "C" {
+void dgetrf_(const int *M, const int *N, double *A, const int *lda, int *ipiv,
+             int *info);
+void dgetri_(const int *N, double *A, const int *lda, const int *ipiv,
+             double *work, const int *lwork, int *info);
+}
+
 //     0        1   2             3
 // fix fxupdate all charge_update group1 pot1 group2 pot2 c_matrix c_vector
 FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     : Fix(lmp, narg, arg) {
   array_compute = vector_compute = nullptr;
   f_ela = f_vec = nullptr;
-  matrix_from_file = nullptr;
+  elastance = nullptr;
   read_matrix = false;
 
   int iarg = 3;
@@ -125,11 +132,9 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   // init class arrays
   ngroup = group->count(igroup);
   pots = new double[ngroup]();
-  if (read_matrix) {
-    matrix_from_file = new double *[ngroup];
-    for (bigint i = 0; i < ngroup; i++)
-      matrix_from_file[i] = new double[ngroup]();
-  }
+
+  elastance = new double *[ngroup];
+  for (bigint i = 0; i < ngroup; i++) elastance[i] = new double[ngroup]();
   // TODO more checks for computes
 }
 
@@ -186,7 +191,8 @@ void FixChargeUpdate::setup(int) {
   if (read_matrix) {
     read_from_file();
   } else {
-    array_compute->compute_array();  // TODO turn off automatic calc in compute
+    array_compute->compute_array();
+    invert(array_compute->array);
   }
 
   // write to files, ordered by group
@@ -200,15 +206,45 @@ void FixChargeUpdate::setup(int) {
       write_to_file(f_vec, taglist_bygroup, vec);
     }
     if (f_ela) {
-      double **a = read_matrix ? matrix_from_file : array_compute->array;
       std::vector<std::vector<double>> mat(ngroup, std::vector<double>(ngroup));
       for (bigint i = 0; i < ngroup; i++) {
         bigint const gi = group_idx[i];
         for (bigint j = 0; j < ngroup; j++) {
-          mat[gi][group_idx[j]] = a[i][j];
+          mat[gi][group_idx[j]] = elastance[i][j];
         }
       }
       write_to_file(f_ela, taglist_bygroup, mat);
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::invert(double **capacitance) {
+  if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
+  int m = ngroup, n = ngroup, lda = ngroup;
+  std::vector<int> ipiv(ngroup + 1);
+  int const lwork = ngroup * ngroup;
+  std::vector<double> work(lwork);
+  std::vector<double> tmp(lwork);
+
+  for (int i = 0; i < ngroup; i++) {
+    for (int j = 0; j < ngroup; j++) {
+      int idx = i * ngroup + j;
+      tmp[idx] = capacitance[i][j];
+    }
+  }
+
+  int info_rf, info_ri;
+  dgetrf_(&m, &n, &tmp.front(), &lda, &ipiv.front(), &info_rf);
+  dgetri_(&n, &tmp.front(), &lda, &ipiv.front(), &work.front(), &lwork,
+          &info_ri);
+  if (info_rf != 0 || info_ri != 0)
+    error->all(FLERR, "CONP matrix inversion failed!");
+  for (int i = 0; i < ngroup; i++) {
+    for (int j = 0; j < ngroup; j++) {
+      int idx = i * ngroup + j;
+      elastance[i][j] = tmp[idx];
     }
   }
 }
@@ -285,7 +321,6 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 void FixChargeUpdate::pre_force(int) {
   std::vector<int> mpos = local_to_matrix();
   int const nmax = atom->nmax;
-  double **a = read_matrix ? matrix_from_file : array_compute->array;
   vector_compute->compute_vector();
   double *b = vector_compute->vector;
   for (int i = 0; i < nmax; i++) {
@@ -293,7 +328,7 @@ void FixChargeUpdate::pre_force(int) {
     if (pos < 0) continue;
     double q_tmp = 0;
     for (int j = 0; j < ngroup; j++) {
-      q_tmp += a[pos][j] * (pots[j] - b[j]);
+      q_tmp += elastance[pos][j] * (pots[j] - b[j]);
     }
     atom->q[i] = q_tmp;
   }
@@ -304,8 +339,8 @@ void FixChargeUpdate::pre_force(int) {
 FixChargeUpdate::~FixChargeUpdate() {
   delete[] pots;
   if (read_matrix) {
-    for (bigint i = 0; i < ngroup; i++) delete[] matrix_from_file[i];
-    delete[] matrix_from_file;
+    for (bigint i = 0; i < ngroup; i++) delete[] elastance[i];
+    delete[] elastance;
   }
 }
 
@@ -396,7 +431,7 @@ void FixChargeUpdate::read_from_file() {
   MPI_Bcast(matrix_1d, ngroup * ngroup, MPI_DOUBLE, 0, world);
   for (bigint i = 0; i < ngroup; i++) {
     for (bigint j = 0; j < ngroup; j++)
-      matrix_from_file[i][j] = matrix_1d[i * ngroup + j];
+      elastance[i][j] = matrix_1d[i * ngroup + j];
   }
   delete[] matrix_1d;
 }

@@ -40,7 +40,7 @@ class ComputeConpMatrix : public Compute {
   int othergroupbit;
   bigint ngroup;
   int recalc_every;
-  double **cutsq, **gradQ_V;
+  double **cutsq;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag, selfflag;
   bool assigned;
@@ -54,7 +54,6 @@ class ComputeConpMatrix : public Compute {
 
   long filepos;
 
-  void invert();
   void matrix_assignment();
   void pair_contribution();
   void self_contribution();

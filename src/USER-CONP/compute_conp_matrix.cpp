@@ -47,22 +47,12 @@ using namespace MathConst;
 #define A4 -1.453152027
 #define A5 1.061405429
 
-extern "C" {
-void dgetrf_(const int *M, const int *N, double *A, const int *lda, int *ipiv,
-             int *info);
-void dgetri_(const int *N, double *A, const int *lda, const int *ipiv,
-             double *work, const int *lwork, int *info);
-}
 enum { OFF, INTER, INTRA };
 
 /* ---------------------------------------------------------------------- */
 
 ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
-    : Compute(lmp, narg, arg),
-      gradQ_V(nullptr),
-      mpos(nullptr),
-      fp(nullptr),
-      fp_inv(nullptr) {
+    : Compute(lmp, narg, arg), mpos(nullptr), fp(nullptr), fp_inv(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/matrix command");
 
   array_flag = 1;
@@ -73,7 +63,7 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
 
   fp = nullptr;
   fp_inv = nullptr;
-  gradQ_V = nullptr;
+  array = nullptr;
   mpos = nullptr;
 
   pairflag = 1;
@@ -265,55 +255,19 @@ void ComputeConpMatrix::compute_array() {
   // setting all entries of coulomb matrix to zero
   size_t nbytes = sizeof(double) * ngroup;
   if (nbytes)
-    for (int i = 0; i < ngroup; i++) memset(&gradQ_V[i][0], 0, nbytes);
+    for (int i = 0; i < ngroup; i++) memset(&array[i][0], 0, nbytes);
 
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
-  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
-  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
+  if (kspaceflag) kspace->compute_matrix(mpos, array);
+  if (boundaryflag) kspace->compute_matrix_corr(mpos, array);
 
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
   for (int i = 0; i < ngroup; i++) {
-    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
+    MPI_Allreduce(MPI_IN_PLACE, &array[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
                   world);
   }
-  invert();
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpMatrix::invert() {
-  if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
-  int m = ngroup, n = ngroup, lda = ngroup;
-  int *ipiv = new int[ngroup + 1];
-  int info_rf, info_ri;
-  int lwork = ngroup * ngroup;
-  double *work = new double[lwork];
-  double *gradQ_V_inv = new double[ngroup * ngroup];
-
-  for (int i = 0; i < ngroup; i++) {
-    for (int j = 0; j < ngroup; j++) {
-      int idx = i * ngroup + j;
-      gradQ_V_inv[idx] = gradQ_V[i][j];
-    }
-  }
-
-  dgetrf_(&m, &n, gradQ_V_inv, &lda, ipiv, &info_rf);
-  dgetri_(&n, gradQ_V_inv, &lda, ipiv, work, &lwork, &info_ri);
-  delete[] ipiv;
-  ipiv = NULL;
-  delete[] work;
-  work = NULL;
-  if (info_rf != 0 || info_ri != 0)
-    error->all(FLERR, "CONP matrix inversion failed!");
-  for (int i = 0; i < ngroup; i++) {
-    for (int j = 0; j < ngroup; j++) {
-      int idx = i * ngroup + j;
-      array[i][j] = gradQ_V_inv[idx];
-    }
-  }
-  delete[] gradQ_V_inv;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -412,8 +366,8 @@ void ComputeConpMatrix::pair_contribution() {
         // newton on or off?
 
         if (!(newton_pair || j < nlocal)) aij *= 0.5;
-        gradQ_V[mpos[i]][jpos] += aij;
-        gradQ_V[jpos][mpos[i]] += aij;
+        array[mpos[i]][jpos] += aij;
+        array[jpos][mpos[i]] += aij;
       }
     }
   }
@@ -431,7 +385,7 @@ void ComputeConpMatrix::self_contribution() {
   // TODO infer eta from pair_coeffs
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
-      gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
+      array[mpos[i]][mpos[i]] += preta * eta - selfint;
     }
 }
 
@@ -504,7 +458,7 @@ void ComputeConpMatrix::matrix_assignment() {
 
   // create global matrix indices for local+ghost atoms
   for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nlocal; i++) // TODO should this be nmax?
+    for (int i = 0; i < nlocal; i++)  // TODO should this be nmax?
       if (mat2tag[ii] == tag[i]) mpos[i] = ii;
 
   memory->destroy(igroupnum_list);
@@ -517,23 +471,15 @@ void ComputeConpMatrix::matrix_assignment() {
 
 void ComputeConpMatrix::allocate() {
   memory->create(mat2tag, ngroup, "coul/matrix:mat2tag");
-  gradQ_V = new double *[ngroup];
   array = new double *[ngroup];
-  for (bigint i = 0; i < ngroup; i++) {
-    gradQ_V[i] = new double[ngroup];
-    array[i] = new double[ngroup];
-  }
+  for (bigint i = 0; i < ngroup; i++) array[i] = new double[ngroup];
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::deallocate() {
   memory->destroy(mat2tag);
-  for (bigint i = 0; i < ngroup; i++) {
-    delete[] gradQ_V[i];
-    delete[] array[i];
-  }
-  delete[] gradQ_V;
+  for (bigint i = 0; i < ngroup; i++) delete[] array[i];
   delete[] array;
 }
 
