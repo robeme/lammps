@@ -267,11 +267,11 @@ void FixChargeUpdate::create_taglist() {
 /* ---------------------------------------------------------------------- */
 
 std::vector<int> FixChargeUpdate::local_to_matrix() {
-  int const nall = atom->nlocal + atom->nghost;
+  int const nmax = atom->nmax;
   int *tag = atom->tag;
-  std::vector<int> mpos(nall, -1);
+  std::vector<int> mpos(nmax, -1);
   for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nall; i++) {
+    for (int i = 0; i < nmax; i++) {
       if (taglist[ii] == tag[i]) {
         mpos[i] = ii;
       }
@@ -284,11 +284,11 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 
 void FixChargeUpdate::pre_force(int) {
   std::vector<int> mpos = local_to_matrix();
-  int const nall = atom->nlocal + atom->nghost;
+  int const nmax = atom->nmax;
   double **a = read_matrix ? matrix_from_file : array_compute->array;
   vector_compute->compute_vector();
   double *b = vector_compute->vector;
-  for (int i = 0; i < nall; i++) {
+  for (int i = 0; i < nmax; i++) {
     int const pos = mpos[i];
     if (pos < 0) continue;
     double q_tmp = 0;
