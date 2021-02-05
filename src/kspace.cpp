@@ -67,7 +67,7 @@ KSpace::KSpace(LAMMPS *lmp) : Pointers(lmp)
   gewaldflag_6 = 0;
   auto_disp_flag = 0;
 
-  slabflag = 0;
+  slabflag = wireflag = 0;
   differentiation_flag = 0;
   slab_volfactor = 1;
   wire_volfactor = 1;
