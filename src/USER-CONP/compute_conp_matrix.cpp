@@ -87,10 +87,6 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
 
   g_ewald = 0.0;
 
-  // get jgroup; igroup defined in parent class
-
-  // TODO recalculate coulomb matrix every recalc_every
-
   // TODO infer from pair_style!
   eta = utils::numeric(FLERR, arg[3], false, lmp);
 
@@ -288,7 +284,6 @@ void ComputeConpMatrix::compute_array() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::invert() {
-  // TODO use vectors for ipiv and work?
   if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
   int m = ngroup, n = ngroup, lda = ngroup;
   int *ipiv = new int[ngroup + 1];
@@ -487,12 +482,9 @@ void ComputeConpMatrix::matrix_assignment() {
   }
 
   memory->create(itaglist, ngroup, "coul/matrix:itaglist");
-
   MPI_Allgatherv(itaglist_local, igroupnum_local, MPI_LMP_TAGINT, itaglist,
                  igroupnum_list, idispls, MPI_LMP_TAGINT, world);
-
-  // sort individual group taglists, first igroup than jgroup
-
+  // must be sorted for compatibility with fix_charge_update
   std::sort(itaglist, itaglist + ngroup);
 
   // if local+ghost matrix assignment already created, recreate
@@ -508,13 +500,11 @@ void ComputeConpMatrix::matrix_assignment() {
   if (nbytes) memset(mpos, -1, nbytes);
 
   // store which tag represents value in matrix
-
   for (bigint i = 0; i < ngroup; i++) mat2tag[i] = itaglist[i];
 
   // create global matrix indices for local+ghost atoms
-
   for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nlocal; i++)
+    for (int i = 0; i < nlocal; i++) // TODO should this be nmax?
       if (mat2tag[ii] == tag[i]) mpos[i] = ii;
 
   memory->destroy(igroupnum_list);

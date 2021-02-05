@@ -60,8 +60,6 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
 
   assigned = false;
 
-  // TODO recalculate coulomb vector every recalc_every
-
   eta =
       utils::numeric(FLERR, arg[3], false, lmp);  // TODO infer from pair_style!
 
@@ -297,6 +295,7 @@ void ComputeConpVector::create_taglist() {
   MPI_Allgatherv(&taglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
                  &taglist.front(), &igroupnum_list.front(), &idispls.front(),
                  MPI_LMP_TAGINT, world);
+  // must be sorted for compatibility with fix_charge_update
   std::sort(taglist.begin(), taglist.end());
 }
 
