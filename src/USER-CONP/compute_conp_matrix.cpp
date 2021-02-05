@@ -91,11 +91,10 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
 
   // TODO recalculate coulomb matrix every recalc_every
 
-  recalc_every = utils::inumeric(FLERR, arg[3], false, lmp);
   // TODO infer from pair_style!
-  eta = utils::numeric(FLERR, arg[4], false, lmp);
+  eta = utils::numeric(FLERR, arg[3], false, lmp);
 
-  int iarg = 5;
+  int iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "pair") == 0) {
       if (iarg + 2 > narg)
@@ -245,8 +244,7 @@ void ComputeConpMatrix::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::setup() {
-  igroupnum = group->count(igroup);
-  ngroup = igroupnum;
+  ngroup = group->count(igroup);
 
   // TODO could be useful to assign homogenously all atoms in both groups to
   // all procs for calculating matrix to distribute evenly the workload
@@ -488,14 +486,14 @@ void ComputeConpMatrix::matrix_assignment() {
     }
   }
 
-  memory->create(itaglist, igroupnum, "coul/matrix:itaglist");
+  memory->create(itaglist, ngroup, "coul/matrix:itaglist");
 
   MPI_Allgatherv(itaglist_local, igroupnum_local, MPI_LMP_TAGINT, itaglist,
                  igroupnum_list, idispls, MPI_LMP_TAGINT, world);
 
   // sort individual group taglists, first igroup than jgroup
 
-  std::sort(itaglist, itaglist + igroupnum);
+  std::sort(itaglist, itaglist + ngroup);
 
   // if local+ghost matrix assignment already created, recreate
 
@@ -511,7 +509,7 @@ void ComputeConpMatrix::matrix_assignment() {
 
   // store which tag represents value in matrix
 
-  for (bigint i = 0; i < igroupnum; i++) mat2tag[i] = itaglist[i];
+  for (bigint i = 0; i < ngroup; i++) mat2tag[i] = itaglist[i];
 
   // create global matrix indices for local+ghost atoms
 

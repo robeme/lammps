@@ -62,11 +62,10 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
 
   // TODO recalculate coulomb vector every recalc_every
 
-  recalc_every = utils::inumeric(FLERR, arg[3], false, lmp);
   eta =
-      utils::numeric(FLERR, arg[4], false, lmp);  // TODO infer from pair_style!
+      utils::numeric(FLERR, arg[3], false, lmp);  // TODO infer from pair_style!
 
-  int iarg = 5;
+  int iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "pair") == 0) {
       if (iarg + 2 > narg)
@@ -224,7 +223,7 @@ void ComputeConpVector::pair_contribution() {
   int *mask = atom->mask;
   neighbor->build_one(list);
   int const nlocal = atom->nlocal;
-  int const nall = atom->nghost + nlocal;
+  int const nmax = atom->nmax;
   int const inum = list->inum;
   int *ilist = list->ilist;
   int *numneigh = list->numneigh;
@@ -263,7 +262,7 @@ void ComputeConpVector::pair_contribution() {
       }
       if (i_in_electrode && (i < nlocal)) {
         vector[mpos[i]] += aij * q[j];
-      } else if (j_in_electrode && (j < nall)) {
+      } else if (j_in_electrode && (j < nmax)) {
         vector[mpos[j]] += aij * q[i];
       }
     }
@@ -304,14 +303,14 @@ void ComputeConpVector::create_taglist() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpVector::update_mpos() {
-  int const nall = atom->nlocal + atom->nghost;
+  int const nmax = atom->nmax;
   int *tag = atom->tag;
   if (assigned) delete[] mpos;
-  mpos = new bigint[nall];
+  mpos = new bigint[nmax];
   assigned = true;
-  for (int i = 0; i < nall; i++) mpos[i] = -1;
+  for (int i = 0; i < nmax; i++) mpos[i] = -1;
   for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nall; i++) {
+    for (int i = 0; i < nmax; i++) {
       if (taglist[ii] == tag[i]) {
         mpos[i] = ii;
       }

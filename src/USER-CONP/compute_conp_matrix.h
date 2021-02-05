@@ -38,7 +38,7 @@ class ComputeConpMatrix : public Compute {
 
  private:
   int othergroupbit;
-  bigint igroupnum, ngroup;
+  bigint ngroup;
   int recalc_every;
   double **cutsq, **gradQ_V;
   double g_ewald, eta;
