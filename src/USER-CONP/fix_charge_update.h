@@ -30,17 +30,17 @@ class FixChargeUpdate : public Fix {
   // void restart(char *);
 
  private:
-  FILE *f_ela, *f_vec, *f_cap;  // files for capacitance, eleastance and vector
-  std::string input_file_elas, input_file_cap;
+  FILE *f_inv, *f_vec, *f_mat;  // files for capacitance, eleastance and vector
+  std::string input_file_inv, input_file_mat;
   class Compute *array_compute, *vector_compute;
   static int const number_groups = 2;
   std::vector<int> groups, group_bits;
-  std::vector<double> group_pots;
-  std::vector<double> pots;
+  std::vector<double> group_psi;
+  std::vector<double> psi;
   std::vector<std::vector<double> > elastance;
   bigint ngroup;
   std::vector<tagint> taglist, taglist_bygroup, group_idx;
-  bool read_elas, read_cap;
+  bool read_inv, read_mat;
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
   std::vector<int> local_to_matrix();

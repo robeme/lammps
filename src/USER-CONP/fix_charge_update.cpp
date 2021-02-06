@@ -31,8 +31,8 @@ void dgetri_(const int *N, double *A, const int *lda, const int *ipiv,
 FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     : Fix(lmp, narg, arg) {
   array_compute = vector_compute = nullptr;
-  f_ela = f_cap = f_vec = nullptr;
-  read_elas = read_cap = false;
+  f_inv = f_mat = f_vec = nullptr;
+  read_inv = read_mat = false;
 
   int iarg = 3;
   for (int i = 0; i < number_groups; i++) {
@@ -42,39 +42,39 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     if (id < 0) error->all(FLERR, "Group does not exist");
     groups.push_back(id);
     group_bits.push_back(group->bitmask[id]);
-    group_pots.push_back(pot);
+    group_psi.push_back(pot);
   }
   assert(groups.size == group_bits.size);
-  assert(groups.size == group_pots.size);
+  assert(groups.size == group_psi.size);
 
   // read fix command
   std::vector<std::string> compute_ids;
   while (iarg < narg) {
     if ((strncmp(arg[iarg], "c_", 2) == 0)) {
       compute_ids.push_back(&arg[iarg][2]);
-    } else if ((strncmp(arg[iarg], "file", 4) == 0)) {
+    } else if ((strncmp(arg[iarg], "write", 4) == 0)) {
       if (iarg + 2 > narg)
         error->all(FLERR, "Illegal compute coul/matrix command");
       if (comm->me == 0) {
-        if ((strcmp(arg[iarg], "file_elas") == 0)) {  // elastance matrix
-          f_ela = fopen(arg[++iarg], "w");
-          if (f_ela == nullptr)
+        if ((strcmp(arg[iarg], "write_inv") == 0)) {  // elastance matrix
+          f_inv = fopen(arg[++iarg], "w");
+          if (f_inv == nullptr)
             error->one(FLERR,
                        fmt::format("Cannot open elastance matrix file {}: {}",
                                    arg[iarg], utils::getsyserror()));
-        } else if ((strcmp(arg[iarg], "file_cap") == 0)) {  // b vector
-          f_cap = fopen(arg[++iarg], "w");
-          if (f_cap == nullptr)
+        } else if ((strcmp(arg[iarg], "write_mat") == 0)) {  // b vector
+          f_mat = fopen(arg[++iarg], "w");
+          if (f_mat == nullptr)
             error->one(FLERR,
                        fmt::format("Cannot open capacitance matrix file {}: {}",
                                    arg[iarg], utils::getsyserror()));
-        } else if ((strcmp(arg[iarg], "file_vec") == 0)) {  // b vector
+        } else if ((strcmp(arg[iarg], "write_vec") == 0)) {  // b vector
           f_vec = fopen(arg[++iarg], "w");
           if (f_vec == nullptr)
             error->one(FLERR, fmt::format("Cannot open vector file {}: {}",
                                           arg[iarg], utils::getsyserror()));
         } else {
-          error->all(FLERR, "Illegal fix update_charge command");
+          error->all(FLERR, "Illegal fix update_charge command with write");
         }
       } else {
         iarg++;
@@ -82,12 +82,12 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     } else if ((strncmp(arg[iarg], "read", 4) == 0)) {
       if (iarg + 2 > narg)
         error->all(FLERR, "Illegal compute coul/matrix command");
-      if ((strcmp(arg[iarg], "read_elas") == 0)) {
-        read_elas = true;
-        input_file_elas = arg[++iarg];
-      } else if ((strcmp(arg[iarg], "read_cap") == 0)) {
-        read_cap = true;
-        input_file_cap = arg[++iarg];
+      if ((strcmp(arg[iarg], "read_inv") == 0)) {
+        read_inv = true;
+        input_file_inv = arg[++iarg];
+      } else if ((strcmp(arg[iarg], "read_mat") == 0)) {
+        read_mat = true;
+        input_file_mat = arg[++iarg];
       } else {
         error->all(FLERR, "Illegal fix update_charge command");
       }
@@ -104,7 +104,7 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
       error->all(FLERR, "Compute ID for fix charge_update does not exist");
     Compute *c = modify->compute[i];
     if (c->array_flag) {
-      if (read_elas || read_cap)
+      if (read_inv || read_mat)
         error->all(FLERR,
                    "Fix charge_update is set to read array but a compute was "
                    "found, too");
@@ -123,8 +123,8 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     }
   }
   // error checks
-  if (array_compute == nullptr && !(read_elas || read_cap)) {
-    error->all(FLERR, "Fix charge_update needs one array compute");
+  if (array_compute == nullptr && !(read_inv || read_mat)) {
+    error->all(FLERR, "Fix charge_update needs one matrix compute");
   } else {
   }
   if (vector_compute == nullptr)
@@ -136,11 +136,11 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
           "Group of fix charge update does not match group of its compute");
     }
   }
-  if (read_elas && read_cap)
+  if (read_inv && read_mat)
     error->all(FLERR, "Cannot read matrix from two files");
-  if (f_cap && read_elas)
+  if (f_mat && read_inv)
     error->all(FLERR,
-               "Cannot write capacitance matrix if reading elastance matrix "
+               "Cannot write coulomb matrix if reading elastance matrix "
                "from file");
 
   // init class arrays
@@ -187,25 +187,24 @@ void FixChargeUpdate::setup(int) {
 
   create_taglist();
 
-  // setup pots with target potentials
+  // setup psi with target potentials
   std::vector<int> mpos = local_to_matrix();
-  pots = std::vector<double>(ngroup);
+  psi = std::vector<double>(ngroup);
   double const evscale = 0.069447;  // TODO do units properly
   for (int i = 0; i < nlocal; i++) {
     for (int g = 0; g < number_groups; g++) {
-      if (mask[i] & group_bits[g]) pots[mpos[i]] = group_pots[g] * evscale;
+      if (mask[i] & group_bits[g]) psi[mpos[i]] = group_psi[g] * evscale;
     }
   }
-  MPI_Allreduce(MPI_IN_PLACE, &pots.front(), ngroup, MPI_DOUBLE, MPI_SUM,
-                world);
+  MPI_Allreduce(MPI_IN_PLACE, &psi.front(), ngroup, MPI_DOUBLE, MPI_SUM, world);
 
   // initial elastance matrix and b vector
   vector_compute->compute_vector();
   std::vector<std::vector<double>> capacitance;
-  if (read_elas) {
-    elastance = read_from_file(input_file_elas);
-  } else if (read_cap) {
-    capacitance = read_from_file(input_file_cap);
+  if (read_inv) {
+    elastance = read_from_file(input_file_inv);
+  } else if (read_mat) {
+    capacitance = read_from_file(input_file_mat);
     invert(capacitance);
   } else {
     array_compute->compute_array();
@@ -242,11 +241,11 @@ void FixChargeUpdate::setup(int) {
       }
       write_to_file(f_vec, taglist_bygroup, vec);
     }
-    if (f_ela) {
-      write_to_file(f_ela, taglist_bygroup, order_matrix(group_idx, elastance));
+    if (f_inv) {
+      write_to_file(f_inv, taglist_bygroup, order_matrix(group_idx, elastance));
     }
-    if (f_cap && !(read_elas)) {
-      write_to_file(f_cap, taglist_bygroup,
+    if (f_mat && !(read_inv)) {
+      write_to_file(f_mat, taglist_bygroup,
                     order_matrix(group_idx, capacitance));
     }
   }
@@ -364,7 +363,7 @@ void FixChargeUpdate::pre_force(int) {
     if (pos < 0) continue;
     double q_tmp = 0;
     for (int j = 0; j < ngroup; j++) {
-      q_tmp += elastance[pos][j] * (pots[j] - b[j]);
+      q_tmp += elastance[pos][j] * (psi[j] - b[j]);
     }
     atom->q[i] = q_tmp;
   }
@@ -386,9 +385,8 @@ int FixChargeUpdate::setmask() {
 
 void FixChargeUpdate::write_to_file(FILE *file, std::vector<tagint> tags,
                                     std::vector<std::vector<double>> mat) {
-  fprintf(file, "# atoms\n");
   for (tagint t : tags) fprintf(file, "%20d", t);
-  fprintf(file, "\n# matrix\n");
+  fprintf(file, "\n");
   for (std::vector<double> vec : mat) {
     for (double x : vec) fprintf(file, "%20.11e", x);
     fprintf(file, "\n");
