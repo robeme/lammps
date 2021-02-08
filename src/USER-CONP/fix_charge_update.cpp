@@ -34,6 +34,9 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   f_inv = f_mat = f_vec = nullptr;
   read_inv = read_mat = false;
 
+  groups = std::vector<int>();
+  group_bits = std::vector<int>();
+  group_psi = std::vector<double>();
   int iarg = 3;
   for (int i = 0; i < number_groups; i++) {
     int id = group->find(arg[iarg++]);
@@ -44,8 +47,8 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     group_bits.push_back(group->bitmask[id]);
     group_psi.push_back(pot);
   }
-  assert(groups.size == group_bits.size);
-  assert(groups.size == group_psi.size);
+  assert(groups.size() == group_bits.size());
+  assert(groups.size() == group_psi.size());
 
   // read fix command
   std::vector<std::string> compute_ids;
