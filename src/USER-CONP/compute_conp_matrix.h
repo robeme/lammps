@@ -37,11 +37,10 @@ class ComputeConpMatrix : public Compute {
   tagint *mat2tag;  // stores tag of matrix position
 
  private:
-  char *group2;
-  int jgroup, jgroupbit, othergroupbit;
-  bigint jgroupnum, igroupnum, ngroup;
+  int othergroupbit;
+  bigint ngroup;
   int recalc_every;
-  double **cutsq, **gradQ_V, *gradQ_V_inv;
+  double **cutsq;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag, selfflag;
   bool assigned;
@@ -55,12 +54,9 @@ class ComputeConpMatrix : public Compute {
 
   long filepos;
 
-  void invert();
   void matrix_assignment();
   void pair_contribution();
   void self_contribution();
-  void write_matrix(FILE*, double **);
-  void write_matrix(FILE*, double *);
   void allocate();
   void deallocate();
   double calc_erfc(double);

@@ -85,6 +85,9 @@ class EwaldConp : public KSpace {
   void wirecorr_groups(int, int, int);
   void allocate_groups();
   void deallocate_groups();
+ 
+ private:
+  int eikr_step;
 };
 
 }  // namespace LAMMPS_NS

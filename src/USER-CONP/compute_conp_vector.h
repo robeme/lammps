@@ -33,20 +33,16 @@ class ComputeConpVector : public Compute {
   void init_list(int, class NeighList *);
   void compute_vector();
 
- protected:
-  tagint *mat2tag;  // stores tag of matrix position
-
  private:
-  char *group2;
-  int jgroup, jgroupbit, othergroupbit;
-  bigint jgroupnum, igroupnum, ngroup;
+  bigint ngroup;
   int recalc_every;
   double **cutsq;
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag;
-  bool assigned;
   int overwrite, gaussians;
-  bigint *mpos;  // locally stored matrix index of each local+ghost atom
+  std::vector<int> taglist;
+  bigint *mpos;
+  bool assigned;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
@@ -55,12 +51,10 @@ class ComputeConpVector : public Compute {
 
   long filepos;
 
-  void matrix_assignment();
+  void create_taglist();
+  void update_mpos();
+
   void pair_contribution();
-  void pair_contribution_corr();
-  void write_vector(FILE *, double *);
-  void allocate();
-  void deallocate();
   double calc_erfc(double);
 };
 

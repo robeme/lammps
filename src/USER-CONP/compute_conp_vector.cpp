@@ -36,7 +36,7 @@ using namespace LAMMPS_NS;
 #define A5 1.061405429
 
 ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
-    : Compute(lmp, narg, arg), group2(nullptr), mpos(nullptr), fp(nullptr) {
+    : Compute(lmp, narg, arg), mpos(nullptr), fp(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/vector command");
 
   vector_flag = 1;
@@ -55,28 +55,15 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
   gaussians = 1;
   recalc_every = 0;
   overwrite = 1;
-  assigned = false;
 
   g_ewald = 0.0;
 
-  // get jgroup; igroup defined in parent class
+  assigned = false;
 
-  int n = strlen(arg[3]) + 1;
-  group2 = new char[n];
-  strcpy(group2, arg[3]);
-
-  jgroup = group->find(group2);
-  if (jgroup == -1)
-    error->all(FLERR, "Compute coul/vector group ID does not exist");
-  jgroupbit = group->bitmask[jgroup];
-
-  // TODO recalculate coulomb vector every recalc_every
-
-  recalc_every = utils::inumeric(FLERR, arg[4], false, lmp);
   eta =
-      utils::numeric(FLERR, arg[5], false, lmp);  // TODO infer from pair_style!
+      utils::numeric(FLERR, arg[3], false, lmp);  // TODO infer from pair_style!
 
-  int iarg = 6;
+  int iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "pair") == 0) {
       if (iarg + 2 > narg)
@@ -148,14 +135,8 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
 /* ---------------------------------------------------------------------- */
 
 ComputeConpVector::~ComputeConpVector() {
-  delete[] group2;
-
-  deallocate();
-
-  if (assigned) {
-    memory->destroy(mpos);
-  }
-
+  delete[] vector;
+  if (assigned) delete[] mpos;
   if (fp && comm->me == 0) fclose(fp);
 }
 
@@ -197,13 +178,6 @@ void ComputeConpVector::init() {
   } else
     kspace = nullptr;
 
-  // recheck that group 2 has not been deleted
-
-  jgroup = group->find(group2);
-  if (jgroup == -1)
-    error->all(FLERR, "Compute coul/vector group ID does not exist");
-  jgroupbit = group->bitmask[jgroup];
-
   // need an occasional half neighbor list
 
   if (pairflag) {
@@ -217,37 +191,25 @@ void ComputeConpVector::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpVector::setup() {
-  igroupnum = group->count(igroup);
-  jgroupnum = group->count(jgroup);
-  ngroup = igroupnum + jgroupnum;
+  ngroup = group->count(igroup);
 
   // TODO could be useful to assign homogenously all atoms in both groups to
   // all procs for calculating vector to distribute evenly the workload
-
-  // TODO would be nicer to have a local vector and gather it later
-  // to reduce a little bit the memory consumption ... However, for
-  // this wo work I think the atom ids must be from 1,...,N and consecutive
-
-  allocate();
-
+  vector = new double[ngroup]();  // init to zero
   // assign atom tags to vector locations and vice versa
-
-  matrix_assignment();
-
+  create_taglist();
   // initial calculation of coulomb matrix at setup of simulation
-
   compute_vector();
-  MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
-
-  if (fp && comm->me == 0) write_vector(fp, vector);
 }
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpVector::compute_vector() {
+  update_mpos();
   for (int i = 0; i < ngroup; i++) vector[i] = 0.;
   if (pairflag) pair_contribution();
   if (kspaceflag) kspace->compute_vector(mpos, vector);
   if (boundaryflag) kspace->compute_vector_corr(mpos, vector);
+  MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -259,7 +221,7 @@ void ComputeConpVector::pair_contribution() {
   int *mask = atom->mask;
   neighbor->build_one(list);
   int const nlocal = atom->nlocal;
-  int const nall = atom->nghost + nlocal;
+  int const nmax = atom->nmax;
   int const inum = list->inum;
   int *ilist = list->ilist;
   int *numneigh = list->numneigh;
@@ -267,7 +229,7 @@ void ComputeConpVector::pair_contribution() {
 
   for (int ii = 0; ii < inum; ii++) {
     int const i = ilist[ii];
-    bool const i_in_electrode = (mask[i] & groupbit || mask[i] & jgroupbit);
+    bool const i_in_electrode = (mask[i] & groupbit);
     double const xtmp = x[i][0];
     double const ytmp = x[i][1];
     double const ztmp = x[i][2];
@@ -276,7 +238,7 @@ void ComputeConpVector::pair_contribution() {
     int jnum = numneigh[i];
     for (int jj = 0; jj < jnum; jj++) {
       int const j = jlist[jj] & NEIGHMASK;
-      bool const j_in_electrode = (mask[j] & groupbit || mask[j] & jgroupbit);
+      bool const j_in_electrode = (mask[j] & groupbit);
       if (i_in_electrode == j_in_electrode) continue;
 
       double const delx = xtmp - x[j][0];  // neighlists take care of pbc
@@ -298,101 +260,57 @@ void ComputeConpVector::pair_contribution() {
       }
       if (i_in_electrode && (i < nlocal)) {
         vector[mpos[i]] += aij * q[j];
-      } else if (j_in_electrode && (j < nall)) {
+      } else if (j_in_electrode && (j < nmax)) {
         vector[mpos[j]] += aij * q[i];
       }
     }
   }
 }
 /* ---------------------------------------------------------------------- */
-void ComputeConpVector::matrix_assignment() {
-  // assign local matrix indices to local atoms on each proc
+
+void ComputeConpVector::create_taglist() {
+  // assign a tag to each matrix index
 
   int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-  int nall = atom->nghost + atom->nlocal;
-  int nprocs = comm->nprocs;
+  int const nlocal = atom->nlocal;
+  int const nprocs = comm->nprocs;
   tagint *tag = atom->tag;
-  int igroupnum_local = 0, jgroupnum_local = 0;
 
+  std::vector<int> taglist_local;
   for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit && mask[i] & jgroupbit)
-      error->all(FLERR, "Same atom in both groups in compute coul/matrix");
-    else if (mask[i] & groupbit)
-      igroupnum_local++;
-    else if (mask[i] & jgroupbit)
-      jgroupnum_local++;
+    if (mask[i] & groupbit) taglist_local.push_back(tag[i]);
   }
+  int igroupnum_local = taglist_local.size();
 
   std::vector<int> idispls(nprocs);
-  std::vector<int> jdispls(nprocs);
   std::vector<int> igroupnum_list(nprocs);
-  std::vector<int> jgroupnum_list(nprocs);
-
   MPI_Allgather(&igroupnum_local, 1, MPI_INT, &igroupnum_list.front(), 1,
                 MPI_INT, world);
-  MPI_Allgather(&jgroupnum_local, 1, MPI_INT, &jgroupnum_list.front(), 1,
-                MPI_INT, world);
-
-  idispls[0] = jdispls[0] = 0;
+  idispls[0] = 0;
   for (int i = 1; i < nprocs; i++) {
     idispls[i] = idispls[i - 1] + igroupnum_list[i - 1];
-    jdispls[i] = jdispls[i - 1] + jgroupnum_list[i - 1];
   }
 
-  std::vector<int> itaglist_local(igroupnum_local);
-  std::vector<int> jtaglist_local(jgroupnum_local);
-
-  igroupnum_local = jgroupnum_local = 0;
-  for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit) {
-      itaglist_local[igroupnum_local] = tag[i];
-      igroupnum_local++;
-    } else if (mask[i] & jgroupbit) {
-      jtaglist_local[jgroupnum_local] = tag[i];
-      jgroupnum_local++;
-    }
-  }
-
-  std::vector<int> itaglist(igroupnum);
-  std::vector<int> jtaglist(jgroupnum);
-
-  MPI_Allgatherv(&itaglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
-                 &itaglist.front(), &igroupnum_list.front(), &idispls.front(),
+  taglist = std::vector<int>(ngroup);
+  MPI_Allgatherv(&taglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
+                 &taglist.front(), &igroupnum_list.front(), &idispls.front(),
                  MPI_LMP_TAGINT, world);
-  MPI_Allgatherv(&jtaglist_local.front(), jgroupnum_local, MPI_LMP_TAGINT,
-                 &jtaglist.front(), &jgroupnum_list.front(), &jdispls.front(),
-                 MPI_LMP_TAGINT, world);
+  // must be sorted for compatibility with fix_charge_update
+  std::sort(taglist.begin(), taglist.end());
+}
 
-  // sort individual group taglists, first igroup than jgroup
+/* ---------------------------------------------------------------------- */
 
-  std::sort(itaglist.begin(), itaglist.end());
-  std::sort(jtaglist.begin(), jtaglist.end());
-
-  // if local+ghost matrix assignment already created, recreate
-
-  if (assigned) {
-    memory->destroy(mpos);
-  }
-  memory->create(mpos, nall, "coul/vector:mpos");
-
+void ComputeConpVector::update_mpos() {
+  int const nmax = atom->nmax;
+  int *tag = atom->tag;
+  if (assigned) delete[] mpos;
+  mpos = new bigint[nmax];
   assigned = true;
-
-  // local+ghost non-matrix atoms are -1 in mpos
-
-  for (int i = 0; i < nall; i++) {
-    mpos[i] = -1;
-  }
-
-  // store which tag represents value in matrix
-
-  for (bigint i = 0; i < igroupnum; i++) mat2tag[i] = itaglist[i];
-  for (bigint j = 0; j < jgroupnum; j++) mat2tag[igroupnum + j] = jtaglist[j];
-
-  // create global matrix indices for local+ghost atoms
+  for (int i = 0; i < nmax; i++) mpos[i] = -1;
   for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nall; i++) {
-      if (mat2tag[ii] == tag[i]) {
+    for (int i = 0; i < nmax; i++) {
+      if (taglist[ii] == tag[i]) {
         mpos[i] = ii;
       }
     }
@@ -401,29 +319,9 @@ void ComputeConpVector::matrix_assignment() {
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeConpVector::allocate() {
-  memory->create(mat2tag, ngroup, "coul/vector:mat2tag");
-  vector = new double[ngroup]();  // init to zero
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpVector::deallocate() {
-  memory->destroy(mat2tag);
-  delete[] vector;
-}
-
-/* ---------------------------------------------------------------------- */
 double ComputeConpVector::calc_erfc(double x) {
   double expm2 = exp(-x * x);
   double t = 1.0 / (1.0 + EWALD_P * x);
   return t * (A1 + t * (A2 + t * (A3 + t * (A4 + t * A5)))) * expm2;
 }
-/* ---------------------------------------------------------------------- */
 
-void ComputeConpVector::write_vector(FILE *file, double *v) {
-  for (bigint i = 0; i < ngroup; i++) {
-    fprintf(file, "%d, %E\n", mat2tag[i], v[i]);
-  }
-  fprintf(file, "\n");
-}

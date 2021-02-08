@@ -47,24 +47,12 @@ using namespace MathConst;
 #define A4 -1.453152027
 #define A5 1.061405429
 
-extern "C" {
-void dgetrf_(const int *M, const int *N, double *A, const int *lda, int *ipiv,
-             int *info);
-void dgetri_(const int *N, double *A, const int *lda, const int *ipiv,
-             double *work, const int *lwork, int *info);
-}
 enum { OFF, INTER, INTRA };
 
 /* ---------------------------------------------------------------------- */
 
 ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
-    : Compute(lmp, narg, arg),
-      group2(nullptr),
-      gradQ_V(nullptr),
-      gradQ_V_inv(nullptr),
-      mpos(nullptr),
-      fp(nullptr),
-      fp_inv(nullptr) {
+    : Compute(lmp, narg, arg), mpos(nullptr), fp(nullptr), fp_inv(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/matrix command");
 
   array_flag = 1;
@@ -75,8 +63,7 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
 
   fp = nullptr;
   fp_inv = nullptr;
-  gradQ_V = nullptr;
-  gradQ_V_inv = nullptr;
+  array = nullptr;
   mpos = nullptr;
 
   pairflag = 1;
@@ -90,24 +77,10 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
 
   g_ewald = 0.0;
 
-  // get jgroup; igroup defined in parent class
-
-  int n = strlen(arg[3]) + 1;
-  group2 = new char[n];
-  strcpy(group2, arg[3]);
-
-  jgroup = group->find(group2);
-  if (jgroup == -1)
-    error->all(FLERR, "Compute coul/matrix group ID does not exist");
-  jgroupbit = group->bitmask[jgroup];
-
-  // TODO recalculate coulomb matrix every recalc_every
-
-  recalc_every = utils::inumeric(FLERR, arg[4], false, lmp);
   // TODO infer from pair_style!
-  eta = utils::numeric(FLERR, arg[5], false, lmp);  
+  eta = utils::numeric(FLERR, arg[3], false, lmp);
 
-  int iarg = 6;
+  int iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "pair") == 0) {
       if (iarg + 2 > narg)
@@ -200,8 +173,6 @@ ComputeConpMatrix::ComputeConpMatrix(LAMMPS *lmp, int narg, char **arg)
 /* ---------------------------------------------------------------------- */
 
 ComputeConpMatrix::~ComputeConpMatrix() {
-  delete[] group2;
-
   deallocate();
 
   if (assigned) memory->destroy(mpos);
@@ -245,13 +216,6 @@ void ComputeConpMatrix::init() {
   } else
     kspace = nullptr;
 
-  // recheck that group 2 has not been deleted
-
-  jgroup = group->find(group2);
-  if (jgroup == -1)
-    error->all(FLERR, "Compute coul/matrix group ID does not exist");
-  jgroupbit = group->bitmask[jgroup];
-
   // need an occasional half neighbor list
 
   if (pairflag) {
@@ -265,45 +229,19 @@ void ComputeConpMatrix::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::setup() {
-  igroupnum = group->count(igroup);
-  jgroupnum = group->count(jgroup);
-  ngroup = igroupnum + jgroupnum;
+  ngroup = group->count(igroup);
 
   // TODO could be useful to assign homogenously all atoms in both groups to
   // all procs for calculating matrix to distribute evenly the workload
-
-  // TODO would be nicer to have a local matrix and gather it later
-  // to reduce a little bit the memory consumption ... However, for
-  // this wo work I think the atom ids must be from 1,...,N and consecutive
 
   allocate();
 
   // assign atom tags to matrix locations and vice versa
 
   matrix_assignment();
-
-  // setting all entries of coulomb matrix to zero
-
-  size_t nbytes = sizeof(double) * ngroup;
-
-  if (nbytes)
-    for (int i = 0; i < ngroup; i++) memset(&gradQ_V[i][0], 0, nbytes);
-
   // initial calculation of coulomb matrix at setup of simulation
 
   compute_array();
-
-  // reduce coulomb matrix with contributions from all procs
-  // all procs need to know full matrix for matrix inversion
-
-  for (int i = 0; i < ngroup; i++)
-    MPI_Allreduce(MPI_IN_PLACE, &gradQ_V[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
-                  world);
-
-  invert();
-
-  if (fp && comm->me == 0) write_matrix(fp, gradQ_V);
-  if (fp_inv && comm->me == 0) write_matrix(fp_inv, gradQ_V_inv);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -313,37 +251,22 @@ void ComputeConpMatrix::init_list(int /*id*/, NeighList *ptr) { list = ptr; }
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::compute_array() {
+  // setting all entries of coulomb matrix to zero
+  size_t nbytes = sizeof(double) * ngroup;
+  if (nbytes)
+    for (int i = 0; i < ngroup; i++) memset(&array[i][0], 0, nbytes);
+
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
-  if (kspaceflag) kspace->compute_matrix(mpos, gradQ_V);
-  if (boundaryflag) kspace->compute_matrix_corr(mpos, gradQ_V);
-}
+  if (kspaceflag) kspace->compute_matrix(mpos, array);
+  if (boundaryflag) kspace->compute_matrix_corr(mpos, array);
 
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpMatrix::invert() {
-  // TODO use vectors for ipiv and work?
-  if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
-  int m = ngroup, n = ngroup, lda = ngroup;
-  int *ipiv = new int[ngroup + 1];
-  int info_rf, info_ri;
-  int lwork = ngroup * ngroup;
-  double *work = new double[lwork];
-
+  // reduce coulomb matrix with contributions from all procs
+  // all procs need to know full matrix for matrix inversion
   for (int i = 0; i < ngroup; i++) {
-    for (int j = 0; j < ngroup; j++) {
-      int idx = i * ngroup + j;
-      gradQ_V_inv[idx] = gradQ_V[i][j];
-    }
+    MPI_Allreduce(MPI_IN_PLACE, &array[i][0], ngroup, MPI_DOUBLE, MPI_SUM,
+                  world);
   }
-
-  dgetrf_(&m, &n, gradQ_V_inv, &lda, ipiv, &info_rf);
-  dgetri_(&n, gradQ_V_inv, &lda, ipiv, work, &lwork, &info_ri);
-  delete[] ipiv;
-  ipiv = NULL;
-  delete[] work;
-  work = NULL;
-  if (info_rf != 0 || info_ri != 0) error->all(FLERR, "CONP matrix inversion failed!");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -381,7 +304,7 @@ void ComputeConpMatrix::pair_contribution() {
   for (int ii = 0; ii < inum; ii++) {
     int i = ilist[ii];
     // skip if atom I is not in either group
-    if (!(mask[i] & groupbit || mask[i] & jgroupbit)) continue;
+    if (!(mask[i] & groupbit)) continue;
 
     xtmp = x[i][0];
     ytmp = x[i][1];
@@ -396,7 +319,7 @@ void ComputeConpMatrix::pair_contribution() {
       int j = jlist[jj];
       j &= NEIGHMASK;
       // skip if atom J is not in either group
-      if (!(mask[j] & groupbit || mask[j] & jgroupbit)) continue;
+      if (!(mask[j] & groupbit)) continue;
 
       delx = xtmp - x[j][0];  // neighlists take care of pbc
       dely = ytmp - x[j][1];
@@ -442,8 +365,8 @@ void ComputeConpMatrix::pair_contribution() {
         // newton on or off?
 
         if (!(newton_pair || j < nlocal)) aij *= 0.5;
-        gradQ_V[mpos[i]][jpos] += aij;
-        gradQ_V[jpos][mpos[i]] += aij;
+        array[mpos[i]][jpos] += aij;
+        array[jpos][mpos[i]] += aij;
       }
     }
   }
@@ -460,8 +383,8 @@ void ComputeConpMatrix::self_contribution() {
 
   // TODO infer eta from pair_coeffs
   for (int i = 0; i < nlocal; i++)
-    if (mask[i] & groupbit || mask[i] & jgroupbit) {
-      gradQ_V[mpos[i]][mpos[i]] += preta * eta - selfint;
+    if (mask[i] & groupbit) {
+      array[mpos[i]][mpos[i]] += preta * eta - selfint;
     }
 }
 
@@ -481,63 +404,41 @@ void ComputeConpMatrix::matrix_assignment() {
   tagint *tag = atom->tag;
 
   tagint *itaglist, *itaglist_local;
-  tagint *jtaglist, *jtaglist_local;
-  int igroupnum_local, jgroupnum_local;
-  int *igroupnum_list, *jgroupnum_list;
-  int *idispls, *jdispls;
+  int igroupnum_local;
+  int *igroupnum_list;
+  int *idispls;
 
-  igroupnum_local = jgroupnum_local = 0;
+  igroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
-    if (mask[i] & groupbit && mask[i] & jgroupbit)
-      error->all(FLERR, "Same atom in both groups in compute coul/matrix");
-    else if (mask[i] & groupbit)
-      igroupnum_local++;
-    else if (mask[i] & jgroupbit)
-      jgroupnum_local++;
+    if (mask[i] & groupbit) igroupnum_local++;
   }
 
   memory->create(idispls, nprocs, "coul/matrix:idispls");
-  memory->create(jdispls, nprocs, "coul/matrix:jdispls");
   memory->create(igroupnum_list, nprocs, "coul/matrix:ilist");
-  memory->create(jgroupnum_list, nprocs, "coul/matrix:jlist");
 
   MPI_Allgather(&igroupnum_local, 1, MPI_INT, igroupnum_list, 1, MPI_INT,
                 world);
-  MPI_Allgather(&jgroupnum_local, 1, MPI_INT, jgroupnum_list, 1, MPI_INT,
-                world);
 
-  idispls[0] = jdispls[0] = 0;
+  idispls[0] = 0;
   for (int i = 1; i < nprocs; i++) {
     idispls[i] = idispls[i - 1] + igroupnum_list[i - 1];
-    jdispls[i] = jdispls[i - 1] + jgroupnum_list[i - 1];
   }
 
   memory->create(itaglist_local, igroupnum_local, "coul/matrix:itaglist_local");
-  memory->create(jtaglist_local, jgroupnum_local, "coul/matrix:jtaglist_local");
 
-  igroupnum_local = jgroupnum_local = 0;
+  igroupnum_local = 0;
   for (int i = 0; i < nlocal; i++) {
     if (mask[i] & groupbit) {
       itaglist_local[igroupnum_local] = tag[i];
       igroupnum_local++;
-    } else if (mask[i] & jgroupbit) {
-      jtaglist_local[jgroupnum_local] = tag[i];
-      jgroupnum_local++;
     }
   }
 
-  memory->create(itaglist, igroupnum, "coul/matrix:itaglist");
-  memory->create(jtaglist, jgroupnum, "coul/matrix:jtaglist");
-
+  memory->create(itaglist, ngroup, "coul/matrix:itaglist");
   MPI_Allgatherv(itaglist_local, igroupnum_local, MPI_LMP_TAGINT, itaglist,
                  igroupnum_list, idispls, MPI_LMP_TAGINT, world);
-  MPI_Allgatherv(jtaglist_local, jgroupnum_local, MPI_LMP_TAGINT, jtaglist,
-                 jgroupnum_list, jdispls, MPI_LMP_TAGINT, world);
-
-  // sort individual group taglists, first igroup than jgroup
-
-  std::sort(itaglist, itaglist + igroupnum);
-  std::sort(jtaglist, jtaglist + jgroupnum);
+  // must be sorted for compatibility with fix_charge_update
+  std::sort(itaglist, itaglist + ngroup);
 
   // if local+ghost matrix assignment already created, recreate
 
@@ -552,66 +453,32 @@ void ComputeConpMatrix::matrix_assignment() {
   if (nbytes) memset(mpos, -1, nbytes);
 
   // store which tag represents value in matrix
-
-  for (bigint i = 0; i < igroupnum; i++) mat2tag[i] = itaglist[i];
-  for (bigint j = 0; j < jgroupnum; j++) mat2tag[igroupnum + j] = jtaglist[j];
+  for (bigint i = 0; i < ngroup; i++) mat2tag[i] = itaglist[i];
 
   // create global matrix indices for local+ghost atoms
-
   for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nlocal; i++)
+    for (int i = 0; i < nlocal; i++)  
       if (mat2tag[ii] == tag[i]) mpos[i] = ii;
 
   memory->destroy(igroupnum_list);
-  memory->destroy(jgroupnum_list);
   memory->destroy(idispls);
-  memory->destroy(jdispls);
   memory->destroy(itaglist_local);
-  memory->destroy(jtaglist_local);
   memory->destroy(itaglist);
-  memory->destroy(jtaglist);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::allocate() {
   memory->create(mat2tag, ngroup, "coul/matrix:mat2tag");
-  gradQ_V_inv = new double[ngroup * ngroup];
-  gradQ_V = new double *[ngroup];
-  for (bigint i = 0; i < ngroup; i++) gradQ_V[i] = new double[ngroup];
+  array = new double *[ngroup];
+  for (bigint i = 0; i < ngroup; i++) array[i] = new double[ngroup];
 }
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::deallocate() {
   memory->destroy(mat2tag);
-  delete[] gradQ_V_inv;
-  for (bigint i = 0; i < ngroup; i++) delete[] gradQ_V[i];
-  delete[] gradQ_V;
+  for (bigint i = 0; i < ngroup; i++) delete[] array[i];
+  delete[] array;
 }
 
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpMatrix::write_matrix(FILE *f, double **matrix) {
-  for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
-  fprintf(f, "\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(f, "%E ", matrix[i][j]);
-    }
-    fprintf(f, "\n");
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void ComputeConpMatrix::write_matrix(FILE *f, double *matrix) {
-  for (bigint i = 0; i < ngroup; i++) fprintf(f, "%d ", mat2tag[i]);
-  fprintf(f, "\n");
-  for (bigint i = 0; i < ngroup; i++) {
-    for (bigint j = 0; j < ngroup; j++) {
-      fprintf(f, "%E ", matrix[i * ngroup + j]);
-    }
-    fprintf(f, "\n");
-  }
-}
