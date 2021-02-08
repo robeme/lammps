@@ -458,7 +458,7 @@ void ComputeConpMatrix::matrix_assignment() {
 
   // create global matrix indices for local+ghost atoms
   for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nlocal; i++)  // TODO should this be nmax?
+    for (int i = 0; i < nlocal; i++)  
       if (mat2tag[ii] == tag[i]) mpos[i] = ii;
 
   memory->destroy(igroupnum_list);
