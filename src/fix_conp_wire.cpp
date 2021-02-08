@@ -98,6 +98,7 @@ FixConpWire::FixConpWire(LAMMPS *lmp, int narg, char **arg) :
   csk = snk = NULL;
   aaa_all = NULL;
   bbb_all = NULL;
+  sss_all = NULL;
   tag2eleall = eleall2tag = curr_tag2eleall = ele2tag = NULL;
   Btime = cgtime = Ctime = Ktime = 0;
   runstage = 0; //after operation
@@ -113,6 +114,7 @@ FixConpWire::~FixConpWire()
   memory->destroy3d_offset(sn,-kmax_created);
   delete [] aaa_all;
   delete [] bbb_all;
+  delete [] sss_all;
   delete [] curr_tag2eleall;
   delete [] tag2eleall;
   delete [] eleall2tag;
@@ -243,6 +245,7 @@ void FixConpWire::setup(int vflag)
     eleall2tag = new int[elenum_all];
     aaa_all = new double[elenum_all*elenum_all];
     bbb_all = new double[elenum_all];
+    sss_all = new double[elenum_all * elenum_all];
     ele2tag = new int[elenum];
     for (i = 0; i < natoms+1; i++) tag2eleall[i] = -1;
     for (i = 0; i < natoms+1; i++) curr_tag2eleall[i] = -1;
@@ -467,6 +470,7 @@ void FixConpWire::a_read()
   }
   MPI_Bcast(eleall2tag,elenum_all,MPI_INT,0,world);
   MPI_Bcast(aaa_all,elenum_all*elenum_all,MPI_DOUBLE,0,world);
+  s_cal();
 
   int tagi;
   for (i = 0; i < elenum_all; i++) {
@@ -969,8 +973,41 @@ void FixConpWire::inv()
       }
       fclose(outinva);
     }
+    s_cal();
   }
   if (runstage == 2) runstage = 3;
+}
+/* ---------------------------------------------------------------------- */
+void FixConpWire::s_cal() {
+  // S matrix to enforce charge neutrality constraint
+  
+  if (comm->me == 0) printf("CONP calculating S");
+  
+  double sum_aaa = 0;
+  for (int i = 0; i < elenum_all * elenum_all; i++) {
+    sum_aaa += aaa_all[i];
+  }
+  for (int i = 0; i < elenum_all; i++) {
+    for (int j = 0; j < elenum_all; j++) {
+      double x = 0;
+      for (int k = 0; k < elenum_all; k++) {
+        for (int l = 0; l < elenum_all; l++) {
+          int idx1 = i * elenum_all + k;
+          int idx2 = l * elenum_all + j;
+          x += aaa_all[idx1] * aaa_all[idx2];
+        }
+      }
+      int idx = i * elenum_all + j;
+      sss_all[idx] = aaa_all[idx] - x / sum_aaa;
+    }
+    if (comm->me == 0) printf("(%d/%d)",i+1,elenum_all);
+  }
+  
+  if (comm->me == 0) printf("CONP finished with S");
+  
+  // for (int i = 0; i < elenum_all * elenum_all; i++) {
+  // sss_all[i] = aaa_all[i] + sss_all[i] / sum_aaa;
+  //}
 }
 /* ---------------------------------------------------------------------- */
 void FixConpWire::update_charge()
@@ -992,7 +1029,7 @@ void FixConpWire::update_charge()
         eleallq_i = 0.0;
         for (j = 0; j < elenum_all; j++) {
           idx1d=elealli*elenum_all+j;
-          eleallq_i += aaa_all[idx1d]*bbb_all[j];
+          eleallq_i += sss_all[idx1d]*bbb_all[j];
         }
         q[i] = eleallq_i;
       } 
