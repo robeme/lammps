@@ -245,7 +245,7 @@ void FixConpWire::setup(int vflag)
     eleall2tag = new int[elenum_all];
     aaa_all = new double[elenum_all*elenum_all];
     bbb_all = new double[elenum_all];
-    sss_all = new double[elenum_all * elenum_all];
+    sss_all = new double[elenum_all*elenum_all];
     ele2tag = new int[elenum];
     for (i = 0; i < natoms+1; i++) tag2eleall[i] = -1;
     for (i = 0; i < natoms+1; i++) curr_tag2eleall[i] = -1;
@@ -260,7 +260,6 @@ void FixConpWire::setup(int vflag)
     }
     runstage = 1;
     }
-  if (comm->me == 0) printf("CONP initialized\n");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -980,8 +979,6 @@ void FixConpWire::inv()
 /* ---------------------------------------------------------------------- */
 void FixConpWire::s_cal() {
   // S matrix to enforce charge neutrality constraint
-  if (comm->me == 0) printf("CONP using charge neutrality restrain\n");
-
   double *AinvE = new double[elenum_all];
   double *E = new double[elenum_all]; 
   double EAinvE = 0.0;
@@ -1001,14 +998,12 @@ void FixConpWire::s_cal() {
     double iAinvE = AinvE[i];
     for (int j = 0; j < elenum_all; j++) {
        int idx1d = i*elenum_all+j;
-       aaa_all[idx1d] = aaa_all[idx1d] - AinvE[j] * iAinvE / EAinvE;
+       sss_all[idx1d] = aaa_all[idx1d] - AinvE[j] * iAinvE / EAinvE;
     }
   }
 
   delete [] AinvE;
   delete [] E;
-  
-  if (comm->me == 0) printf("CONP finished with S\n");
 }
 /* ---------------------------------------------------------------------- */
 void FixConpWire::update_charge()

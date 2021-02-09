@@ -982,27 +982,31 @@ void FixConp::inv() {
 /* ---------------------------------------------------------------------- */
 void FixConp::s_cal() {
   // S matrix to enforce charge neutrality constraint
-  double sum_aaa = 0;
-  for (int i = 0; i < elenum_all * elenum_all; i++) {
-    sum_aaa += aaa_all[i];
-  }
+  double *AinvE = new double[elenum_all];
+  double *E = new double[elenum_all]; 
+  double EAinvE = 0.0;
+  
+  memset(AinvE, 0.0, sizeof(double) * elenum_all);
+  memset(E, 1.0, sizeof(double) * elenum_all);
+  
   for (int i = 0; i < elenum_all; i++) {
     for (int j = 0; j < elenum_all; j++) {
-      double x = 0;
-      for (int k = 0; k < elenum_all; k++) {
-        for (int l = 0; l < elenum_all; l++) {
-          int idx1 = i * elenum_all + k;
-          int idx2 = l * elenum_all + j;
-          x += aaa_all[idx1] * aaa_all[idx2];
-        }
-      }
-      int idx = i * elenum_all + j;
-      sss_all[idx] = aaa_all[idx] - x / sum_aaa;
+      int idx1d = i*elenum_all+j;
+      AinvE[i] += aaa_all[idx1d];
+    }
+    EAinvE += AinvE[i];
+  }
+  
+  for (int i = 0; i < elenum_all; i++) {
+    double iAinvE = AinvE[i];
+    for (int j = 0; j < elenum_all; j++) {
+       int idx1d = i*elenum_all+j;
+       sss_all[idx1d] = aaa_all[idx1d] - AinvE[j] * iAinvE / EAinvE;
     }
   }
-  // for (int i = 0; i < elenum_all * elenum_all; i++) {
-  // sss_all[i] = aaa_all[i] + sss_all[i] / sum_aaa;
-  //}
+
+  delete [] AinvE;
+  delete [] E;
 }
 /* ---------------------------------------------------------------------- */
 void FixConp::update_charge() {
