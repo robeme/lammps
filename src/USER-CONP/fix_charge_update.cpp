@@ -3,13 +3,14 @@
 #include <assert.h>
 
 #include <fstream>
-#include <iostream>
 #include <numeric>
 #include <sstream>
 
 #include "atom.h"
 #include "comm.h"
 #include "compute.h"
+#include "compute_conp_matrix.h"
+#include "compute_conp_vector.h"
 #include "error.h"
 #include "force.h"
 #include "group.h"
@@ -26,38 +27,32 @@ void dgetri_(const int *N, double *A, const int *lda, const int *ipiv,
              double *work, const int *lwork, int *info);
 }
 
-//     0        1   2             3
-// fix fxupdate all charge_update group1 pot1 group2 pot2 c_matrix c_vector
+//     0        1      2             3    4
+// fix fxupdate group1 charge_update pot1 eta couple group2 pot2
 FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     : Fix(lmp, narg, arg) {
-  array_compute = vector_compute = nullptr;
+  // array_compute = vector_compute = nullptr;
   f_inv = f_mat = f_vec = nullptr;
   read_inv = read_mat = false;
 
-  groups = std::vector<int>();
-  group_bits = std::vector<int>();
-  group_psi = std::vector<double>();
-  int iarg = 3;
-  for (int i = 0; i < number_groups; i++) {
-    int id = group->find(arg[iarg++]);
-    double pot = utils::numeric(FLERR, arg[iarg++], false,
-                                lmp);  //* force->qe2f; // V -> kcal / (mol e)
-    if (id < 0) error->all(FLERR, "Group does not exist");
-    groups.push_back(id);
-    group_bits.push_back(group->bitmask[id]);
-    group_psi.push_back(pot);
-  }
-  assert(groups.size() == group_bits.size());
-  assert(groups.size() == group_psi.size());
-
   // read fix command
-  std::vector<std::string> compute_ids;
+  groups = std::vector<int>(1, igroup);
+  group_bits = std::vector<int>(1, groupbit);
+  group_psi = std::vector<double>(1, utils::numeric(FLERR, arg[3], false, lmp));
+  char *eta = arg[4];  // TODO set via pair
+  int iarg = 5;
   while (iarg < narg) {
-    if ((strncmp(arg[iarg], "c_", 2) == 0)) {
-      compute_ids.push_back(&arg[iarg][2]);
+    if ((strcmp(arg[iarg], "couple") == 0)) {
+      if (iarg + 3 > narg)
+        error->all(FLERR, "Need two arguments after couple keyword");
+      int id = group->find(arg[++iarg]);
+      if (id < 0) error->all(FLERR, "Group does not exist");
+      groups.push_back(id);
+      group_bits.push_back(group->bitmask[id]);
+      group_psi.push_back(utils::numeric(FLERR, arg[++iarg], false, lmp));
     } else if ((strncmp(arg[iarg], "write", 4) == 0)) {
       if (iarg + 2 > narg)
-        error->all(FLERR, "Illegal compute coul/matrix command");
+        error->all(FLERR, "Need one argument after write command");
       if (comm->me == 0) {
         if ((strcmp(arg[iarg], "write_inv") == 0)) {  // elastance matrix
           f_inv = fopen(arg[++iarg], "w");
@@ -84,7 +79,7 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
       }
     } else if ((strncmp(arg[iarg], "read", 4) == 0)) {
       if (iarg + 2 > narg)
-        error->all(FLERR, "Illegal compute coul/matrix command");
+        error->all(FLERR, "Need one argument after read command");
       if ((strcmp(arg[iarg], "read_inv") == 0)) {
         read_inv = true;
         input_file_inv = arg[++iarg];
@@ -100,45 +95,46 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     iarg++;
   }
 
-  // assign computes
-  for (std::string id : compute_ids) {
-    int i = modify->find_compute(id);
-    if (i < 0)
-      error->all(FLERR, "Compute ID for fix charge_update does not exist");
-    Compute *c = modify->compute[i];
-    if (c->array_flag) {
-      if (read_inv || read_mat)
-        error->all(FLERR,
-                   "Fix charge_update is set to read array but a compute was "
-                   "found, too");
-      if (array_compute == nullptr) {
-        array_compute = c;
-      } else {
-        error->all(FLERR, "Fix charge_update can only use one array compute");
-      }
-    }
-    if (c->vector_flag) {
-      if (vector_compute == nullptr) {
-        vector_compute = c;
-      } else {
-        error->all(FLERR, "Fix charge_update can only use one vector compute");
-      }
-    }
+  // union of all coupled groups
+  std::string union_group = "conp_group";
+  std::string group_cmd = union_group + " union";
+  for (int g : groups) {
+    group_cmd += " ";
+    group_cmd += group->names[g];
   }
+  group->assign(group_cmd);
+  int union_id = group->find(union_group);
+  if (union_id < 0) error->all(FLERR, "Failed to create union of groups");
+  // construct computes
+  int const narg_compute = 4;
+  int iarg_compute = 0;
+  char **vector_arg = new char *[narg_compute];
+  vector_arg[iarg_compute++] = (char *)"conp_vec";
+  vector_arg[iarg_compute++] = (char *)group->names[union_id];
+  vector_arg[iarg_compute++] = (char *)"conp/vector";
+  vector_arg[iarg_compute++] = eta;
+  assert(iarg_compute == narg_compute);
+  vector_compute =
+      new LAMMPS_NS::ComputeConpVector(lmp, narg_compute, vector_arg);
+  delete[] vector_arg;
+  if (!(read_inv || read_mat)) {
+    iarg_compute = 0;
+    char **matrix_arg = new char *[narg_compute];
+    matrix_arg[iarg_compute++] = (char *)"conp_mat";
+    matrix_arg[iarg_compute++] = (char *)group->names[union_id];
+    matrix_arg[iarg_compute++] = (char *)"conp/matrix";
+    matrix_arg[iarg_compute++] = eta;
+    assert(iarg_compute == narg_compute);
+    array_compute =
+        new LAMMPS_NS::ComputeConpMatrix(lmp, narg_compute, matrix_arg);
+    delete[] matrix_arg;
+  }
+
   // error checks
-  if (array_compute == nullptr && !(read_inv || read_mat)) {
-    error->all(FLERR, "Fix charge_update needs one matrix compute");
-  } else {
-  }
-  if (vector_compute == nullptr)
-    error->all(FLERR, "Fix charge_update needs one vector compute");
-  for (Compute *c : {array_compute, vector_compute}) {
-    if (c != nullptr && igroup != c->igroup) {
-      error->all(
-          FLERR,
-          "Group of fix charge update does not match group of its compute");
-    }
-  }
+  assert(groups.size() == group_bits.size());
+  assert(groups.size() == group_psi.size());
+  assert(union_id == vector_compute->igroup);
+  if (!(read_mat || read_inv)) assert(union_id == array_compute->igroup);
   if (read_inv && read_mat)
     error->all(FLERR, "Cannot read matrix from two files");
   if (f_mat && read_inv)
@@ -146,45 +142,34 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
                "Cannot write coulomb matrix if reading elastance matrix "
                "from file");
 
-  // init class arrays
-  ngroup = group->count(igroup);
-
-  // TODO more checks for computes
+  // check groups are consistent
+  int *mask = atom->mask;
+  for (int i = 0; i < atom->nlocal; i++) {
+    int m = mask[i];
+    int matches = 0;
+    for (int bit : group_bits)
+      if (m & bit) matches++;
+    if (matches > 1) {
+      error->all(FLERR, "Groups may not overlap");
+    } else {
+      assert((matches == 0) == (m & group->bitmask[union_id]) == 0);
+    }
+  }
+  ngroup = group->count(union_id);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::init() {
-  int const nlocal = atom->nlocal;
-  int *mask = atom->mask;
-
-  // check groups are consistent
-  int sum = 0;
-  for (int i : groups) {
-    sum += group->count(i);
-  }
-  if (sum != ngroup) {
-    error->all(FLERR,
-               "Count of igroup not equal to sum of counts of other groups");
-  }
-  for (int i = 0; i < nlocal; i++) {
-    int m = mask[i];
-    if (m & groupbit) {
-      int matches = 0;
-      for (int bit : group_bits)
-        if (m & bit) matches++;
-      if (matches != 1) {
-        error->all(
-            FLERR,
-            "All atoms in igroup must occur exactly once in other groups");
-      }
-    }
-  }
+  vector_compute->init();
+  if (!(read_mat || read_inv)) array_compute->init();
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::setup(int) {
+  vector_compute->setup();
+  if (!(read_mat || read_inv)) array_compute->setup();
   int const nlocal = atom->nlocal;
   int *mask = atom->mask;
 
@@ -259,7 +244,7 @@ void FixChargeUpdate::setup(int) {
 void FixChargeUpdate::invert(std::vector<std::vector<double>> capacitance) {
   if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
   int m = ngroup, n = ngroup, lda = ngroup;
-  std::vector<int> ipiv(ngroup + 1);
+  std::vector<int> ipiv(ngroup);
   int const lwork = ngroup * ngroup;
   std::vector<double> work(lwork);
   std::vector<double> tmp(lwork);
@@ -374,7 +359,10 @@ void FixChargeUpdate::pre_force(int) {
 
 /* ---------------------------------------------------------------------- */
 
-FixChargeUpdate::~FixChargeUpdate() {}
+FixChargeUpdate::~FixChargeUpdate() {
+  if (!(read_mat || read_inv)) delete array_compute;
+  delete vector_compute;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -410,7 +398,6 @@ std::vector<std::vector<double>> FixChargeUpdate::read_from_file(
       error->all(FLERR, fmt::format("Cannot open {} for reading", input_file));
     for (std::string line; getline(input, line);) {
       if (line.compare(0, 1, "#") == 0) continue;
-      std::cout << line << std::endl;
       std::istringstream stream(line);
       std::string word;
       if (!got_tags) {
