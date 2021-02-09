@@ -34,6 +34,7 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   // array_compute = vector_compute = nullptr;
   f_inv = f_mat = f_vec = nullptr;
   read_inv = read_mat = false;
+  symm = false;
 
   // read fix command
   groups = std::vector<int>(1, igroup);
@@ -50,6 +51,19 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
       groups.push_back(id);
       group_bits.push_back(group->bitmask[id]);
       group_psi.push_back(utils::numeric(FLERR, arg[++iarg], false, lmp));
+    } else if ((strncmp(arg[iarg], "symm", 4) == 0)) {
+      if (iarg + 2 > narg)
+        error->all(FLERR, "Need yes/no command after symm keyword");
+      char *symm_arg = arg[++iarg];
+      if ((strcmp(symm_arg, "yes") == 0) || (strcmp(symm_arg, "on") == 0)) {
+        symm = true;
+      } else if ((strcmp(symm_arg, "no") == 0) ||
+                 (strcmp(symm_arg, "off") == 0)) {
+        symm = false;
+      } else {
+        error->all(FLERR, "Invalid argument after symm keyword");
+      }
+
     } else if ((strncmp(arg[iarg], "write", 4) == 0)) {
       if (iarg + 2 > narg)
         error->all(FLERR, "Need one argument after write command");
@@ -206,6 +220,7 @@ void FixChargeUpdate::setup(int) {
     }
     invert(capacitance);
   }
+  if (symm) symmetrize();
 
   // write to files, ordered by group
   auto const order_matrix = [](std::vector<tagint> order,
@@ -268,6 +283,26 @@ void FixChargeUpdate::invert(std::vector<std::vector<double>> capacitance) {
     for (int j = 0; j < ngroup; j++) {
       int idx = i * ngroup + j;
       elastance[i][j] = tmp[idx];
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::symmetrize() {
+  // S matrix to enforce charge neutrality constraint
+  std::vector<double>AinvE(ngroup, 0.);
+  double EAinvE = 0.0;
+  for (int i = 0; i < ngroup; i++) {
+    for (double e : elastance[i]) {
+      AinvE[i] += e;
+    }
+    EAinvE += AinvE[i];
+  }
+  for (int i = 0; i < ngroup; i++) {
+    double iAinvE = AinvE[i];
+    for (int j = 0; j < ngroup; j++) {
+      elastance[i][j] -= AinvE[j] * iAinvE / EAinvE;
     }
   }
 }
