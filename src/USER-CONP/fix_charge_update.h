@@ -42,8 +42,10 @@ class FixChargeUpdate : public Fix {
   bigint ngroup;
   std::vector<tagint> taglist, taglist_bygroup, group_idx;
   bool read_inv, read_mat;
+  bool symm;  // symmetrize elastance for charge neutrality
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
+  void symmetrize();
   std::vector<int> local_to_matrix();
   void write_to_file(FILE *, std::vector<tagint>,
                      std::vector<std::vector<double> >);
