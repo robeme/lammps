@@ -233,15 +233,10 @@ void ComputeConpMatrix::setup() {
 
   // TODO could be useful to assign homogenously all atoms in both groups to
   // all procs for calculating matrix to distribute evenly the workload
-
   allocate();
 
   // assign atom tags to matrix locations and vice versa
-
   matrix_assignment();
-  // initial calculation of coulomb matrix at setup of simulation
-
-  compute_array();
 }
 
 /* ---------------------------------------------------------------------- */
