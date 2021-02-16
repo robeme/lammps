@@ -1896,6 +1896,7 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
 
 void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
   // check cs and sn are up to date
+  // TODO put this in separate method
   if (eikr_step < update->ntimestep) {
     // extend size of per-atom arrays if necessary
     if (atom->nmax > nmax) {
@@ -1914,19 +1915,70 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
     else
       eik_dot_r_triclinic();
   }
-  // TODO 2D correction
+  if (wireflag) {
+    error->all(FLERR, "wire correction not implemented for b vector");
+  }
   int const nlocal = atom->nlocal;
+  int const nprocs = comm->nprocs;
   double **x = atom->x;
   double *q = atom->q;
-  double dipole = 0.;
-  for (int i = 0; i < nlocal; i++) {
-    if (imat[i] < 0) dipole += q[i] * x[i][2];
-  }
-  MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
-  dipole *= 4.0 * MY_PI / volume;  // TODO why 4? should be 2
-  for (int i = 0; i < nlocal; i++) {
-    int const pos = imat[i];
-    if (pos >= 0) vec[pos] += x[i][2] * dipole;
+  if (slabflag == 1) {
+    // use EW3DC slab correction
+    double dipole = 0.;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) dipole += q[i] * x[i][2];
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
+    dipole *= 4.0 * MY_PI / volume;  // TODO why 4? should be 2
+    for (int i = 0; i < nlocal; i++) {
+      int const pos = imat[i];
+      if (pos >= 0) vec[pos] += x[i][2] * dipole;
+    }
+  } else if (slabflag == 3) {
+    // TODO find better variable names
+    std::vector<double> nprd_local;
+    std::vector<double> nprq_local;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) {
+        nprd_local.push_back(x[i][2]);
+        nprq_local.push_back(q[i]);
+      }
+    }
+
+    bigint n_electrolyte_local = nprd_local.size();
+    bigint n_electrolyte;
+    MPI_Allreduce(&n_electrolyte_local, &n_electrolyte, 1, MPI_LMP_BIGINT,
+                  MPI_SUM, world);
+
+    std::vector<double> nprd_all = std::vector<double>(n_electrolyte);
+    std::vector<double> nprq_all = std::vector<double>(n_electrolyte);
+    std::vector<int> recvcounts = std::vector<int>(nprocs);
+    std::vector<int> displs = std::vector<int>(nprocs, 0);
+    MPI_Allgather(&n_electrolyte_local, 1, MPI_LMP_BIGINT, &recvcounts.front(),
+                  1, MPI_LMP_BIGINT, world);
+    for (int i = 1; i < nprocs; i++) {
+      displs[i] = displs[i - 1] + recvcounts[i - 1];
+    }
+    MPI_Allgatherv(&nprd_local.front(), n_electrolyte_local, MPI_DOUBLE,
+                   &nprd_all.front(), &recvcounts.front(), &displs.front(),
+                   MPI_DOUBLE, world);
+    MPI_Allgatherv(&nprq_local.front(), n_electrolyte_local, MPI_DOUBLE,
+                   &nprq_all.front(), &recvcounts.front(), &displs.front(),
+                   MPI_DOUBLE, world);
+    double const prefac = 2 * MY_PIS / area;
+    for (int i = 0; i < nlocal; i++) {
+      bigint imati = imat[i];
+      if (imati < 0) continue;
+      double b = 0;
+      double zi = x[i][2];
+      for (size_t j = 0; j < nprd_all.size(); j++) {
+        double dij = abs(nprd_all[j] - zi);
+        double gdij = g_ewald * dij;
+        b += nprq_all[j] * exp(-(gdij * gdij)) / g_ewald +
+             MY_PIS * dij * erf(gdij);
+      }
+      vec[imati] += prefac * b;  // TODO plus or minus?
+    }
   }
 }
 
