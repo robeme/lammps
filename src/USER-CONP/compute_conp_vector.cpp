@@ -198,8 +198,6 @@ void ComputeConpVector::setup() {
   vector = new double[ngroup]();  // init to zero
   // assign atom tags to vector locations and vice versa
   create_taglist();
-  // initial calculation of coulomb matrix at setup of simulation
-  compute_vector();
 }
 /* ---------------------------------------------------------------------- */
 

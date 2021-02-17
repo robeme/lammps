@@ -1935,49 +1935,43 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
       if (pos >= 0) vec[pos] += x[i][2] * dipole;
     }
   } else if (slabflag == 3) {
-    // TODO find better variable names
-    std::vector<double> nprd_local;
-    std::vector<double> nprq_local;
+    std::vector<double> z_local;  // z coordinates of electrolyte atoms
+    std::vector<double> q_local;  // charges of electrolyte atoms
     for (int i = 0; i < nlocal; i++) {
       if (imat[i] < 0) {
-        nprd_local.push_back(x[i][2]);
-        nprq_local.push_back(q[i]);
+        z_local.push_back(x[i][2]);
+        q_local.push_back(q[i]);
       }
     }
 
-    bigint n_electrolyte_local = nprd_local.size();
-    bigint n_electrolyte;
-    MPI_Allreduce(&n_electrolyte_local, &n_electrolyte, 1, MPI_LMP_BIGINT,
-                  MPI_SUM, world);
-
-    std::vector<double> nprd_all = std::vector<double>(n_electrolyte);
-    std::vector<double> nprq_all = std::vector<double>(n_electrolyte);
+    int n_local = z_local.size();
+    int n_electrolyte;
+    MPI_Allreduce(&n_local, &n_electrolyte, 1, MPI_INT, MPI_SUM, world);
+    std::vector<double> z_all = std::vector<double>(n_electrolyte);
+    std::vector<double> q_all = std::vector<double>(n_electrolyte);
     std::vector<int> recvcounts = std::vector<int>(nprocs);
     std::vector<int> displs = std::vector<int>(nprocs, 0);
-    MPI_Allgather(&n_electrolyte_local, 1, MPI_LMP_BIGINT, &recvcounts.front(),
-                  1, MPI_LMP_BIGINT, world);
+    MPI_Allgather(&n_local, 1, MPI_INT, &recvcounts.front(), 1, MPI_INT, world);
     for (int i = 1; i < nprocs; i++) {
       displs[i] = displs[i - 1] + recvcounts[i - 1];
     }
-    MPI_Allgatherv(&nprd_local.front(), n_electrolyte_local, MPI_DOUBLE,
-                   &nprd_all.front(), &recvcounts.front(), &displs.front(),
-                   MPI_DOUBLE, world);
-    MPI_Allgatherv(&nprq_local.front(), n_electrolyte_local, MPI_DOUBLE,
-                   &nprq_all.front(), &recvcounts.front(), &displs.front(),
-                   MPI_DOUBLE, world);
+    MPI_Allgatherv(&z_local.front(), n_local, MPI_DOUBLE, &z_all.front(),
+                   &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
+    MPI_Allgatherv(&q_local.front(), n_local, MPI_DOUBLE, &q_all.front(),
+                   &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
     double const prefac = 2 * MY_PIS / area;
     for (int i = 0; i < nlocal; i++) {
-      bigint imati = imat[i];
-      if (imati < 0) continue;
+      bigint ii = imat[i];
+      if (ii < 0) continue;
       double b = 0;
       double zi = x[i][2];
-      for (size_t j = 0; j < nprd_all.size(); j++) {
-        double dij = abs(nprd_all[j] - zi);
-        double gdij = g_ewald * dij;
-        b += nprq_all[j] * exp(-(gdij * gdij)) / g_ewald +
-             MY_PIS * dij * erf(gdij);
+      for (size_t j = 0; j < z_all.size(); j++) {
+        double zij = z_all[j] - zi;
+        double gdij = g_ewald * zij;
+        b += q_all[j] *
+             (exp(-(gdij * gdij)) / g_ewald + MY_PIS * zij * erf(gdij));
       }
-      vec[imati] += prefac * b;  // TODO plus or minus?
+      vec[ii] -= prefac * b;
     }
   }
 }
