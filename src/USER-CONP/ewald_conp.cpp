@@ -1859,9 +1859,6 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
 
 void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
   update_eikr();
-  if (wireflag) {
-    error->all(FLERR, "wire correction not implemented for b vector");
-  }
   int const nlocal = atom->nlocal;
   int const nprocs = comm->nprocs;
   double **x = atom->x;
@@ -1917,6 +1914,19 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
              (exp(-(gzij * gzij)) / g_ewald + MY_PIS * zij * erf(gzij));
       }
       vec[ii] -= prefac * b;
+    }
+  } else if (wireflag) {
+    double dipole[2] = {0., 0.};  // dipole in x and y direction
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) {
+        for (int dim : {0, 1}) dipole[dim] += q[i] * x[i][dim];
+      }
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &dipole, 2, MPI_DOUBLE, MPI_SUM, world);
+    for (double &d : dipole) d *= MY_2PI / volume;
+    for (int i = 0; i < nlocal; i++) {
+      int const pos = imat[i];
+      if (pos >= 0) vec[pos] += x[i][0] * dipole[0] + x[i][1] * dipole[1];
     }
   }
 }
