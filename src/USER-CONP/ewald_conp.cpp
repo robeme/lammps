@@ -403,26 +403,7 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   if (qsqsum == 0.0) return;
 
-  // extend size of per-atom arrays if necessary
-
-  if (atom->nmax > nmax) {
-    memory->destroy(ek);
-    memory->destroy3d_offset(cs, -kmax_created);
-    memory->destroy3d_offset(sn, -kmax_created);
-    nmax = atom->nmax;
-    memory->create(ek, nmax, 3, "ewald/conp:ek");
-    memory->create3d_offset(cs, -kmax, kmax, 3, nmax, "ewald/conp:cs");
-    memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
-    kmax_created = kmax;
-  }
-
-  // partial structure factors on each processor
-  // total structure factor by summing over procs
-
-  if (triclinic == 0)
-    eik_dot_r();
-  else
-    eik_dot_r_triclinic();
+  update_eikr();
 
   MPI_Allreduce(sfacrl, sfacrl_all, kcount, MPI_DOUBLE, MPI_SUM, world);
   MPI_Allreduce(sfacim, sfacim_all, kcount, MPI_DOUBLE, MPI_SUM, world);
@@ -1818,25 +1799,7 @@ void EwaldConp::deallocate_groups() {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_vector(bigint *imat, double *vector) {
-  // check cs and sn are up to date
-  if (eikr_step < update->ntimestep) {
-    // extend size of per-atom arrays if necessary
-    if (atom->nmax > nmax) {
-      memory->destroy(ek);
-      memory->destroy3d_offset(cs, -kmax_created);
-      memory->destroy3d_offset(sn, -kmax_created);
-      nmax = atom->nmax;
-      memory->create(ek, nmax, 3, "ewald/conp:ek");
-      memory->create3d_offset(cs, -kmax, kmax, 3, nmax, "ewald/conp:cs");
-      memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
-      kmax_created = kmax;
-    }
-    eikr_step = update->ntimestep;
-    if (triclinic == 0)
-      eik_dot_r();
-    else
-      eik_dot_r_triclinic();
-  }
+  update_eikr();
 
   int const nlocal = atom->nlocal;
   double *q = atom->q;
@@ -1895,38 +1858,76 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
-  // check cs and sn are up to date
-  if (eikr_step < update->ntimestep) {
-    // extend size of per-atom arrays if necessary
-    if (atom->nmax > nmax) {
-      memory->destroy(ek);
-      memory->destroy3d_offset(cs, -kmax_created);
-      memory->destroy3d_offset(sn, -kmax_created);
-      nmax = atom->nmax;
-      memory->create(ek, nmax, 3, "ewald/conp:ek");
-      memory->create3d_offset(cs, -kmax, kmax, 3, nmax, "ewald/conp:cs");
-      memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
-      kmax_created = kmax;
-    }
-    eikr_step = update->ntimestep;
-    if (triclinic == 0)
-      eik_dot_r();
-    else
-      eik_dot_r_triclinic();
-  }
-  // TODO 2D correction
+  update_eikr();
   int const nlocal = atom->nlocal;
+  int const nprocs = comm->nprocs;
   double **x = atom->x;
   double *q = atom->q;
-  double dipole = 0.;
-  for (int i = 0; i < nlocal; i++) {
-    if (imat[i] < 0) dipole += q[i] * x[i][2];
-  }
-  MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
-  dipole *= 4.0 * MY_PI / volume;  // TODO why 4? should be 2
-  for (int i = 0; i < nlocal; i++) {
-    int const pos = imat[i];
-    if (pos >= 0) vec[pos] += x[i][2] * dipole;
+  if (slabflag == 1) {
+    // use EW3DC slab correction
+    double dipole = 0.;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) dipole += q[i] * x[i][2];
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
+    dipole *= 4.0 * MY_PI / volume;
+    for (int i = 0; i < nlocal; i++) {
+      int const pos = imat[i];
+      if (pos >= 0) vec[pos] += x[i][2] * dipole;
+    }
+  } else if (slabflag == 3) {
+    // use EW2D infinite boundary correction
+    std::vector<double> z_local;  // z coordinates of electrolyte atoms
+    std::vector<double> q_local;  // charges of electrolyte atoms
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) {
+        z_local.push_back(x[i][2]);
+        q_local.push_back(q[i]);
+      }
+    }
+
+    int n_local = z_local.size();
+    int n_electrolyte;
+    MPI_Allreduce(&n_local, &n_electrolyte, 1, MPI_INT, MPI_SUM, world);
+    std::vector<double> z_all = std::vector<double>(n_electrolyte);
+    std::vector<double> q_all = std::vector<double>(n_electrolyte);
+    std::vector<int> recvcounts = std::vector<int>(nprocs);
+    std::vector<int> displs = std::vector<int>(nprocs, 0);
+    MPI_Allgather(&n_local, 1, MPI_INT, &recvcounts.front(), 1, MPI_INT, world);
+    for (int i = 1; i < nprocs; i++) {
+      displs[i] = displs[i - 1] + recvcounts[i - 1];
+    }
+    MPI_Allgatherv(&z_local.front(), n_local, MPI_DOUBLE, &z_all.front(),
+                   &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
+    MPI_Allgatherv(&q_local.front(), n_local, MPI_DOUBLE, &q_all.front(),
+                   &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
+    double const prefac = 2 * MY_PIS / area;
+    for (int i = 0; i < nlocal; i++) {
+      bigint ii = imat[i];
+      if (ii < 0) continue;
+      double b = 0;
+      double zi = x[i][2];
+      for (size_t j = 0; j < z_all.size(); j++) {
+        double zij = z_all[j] - zi;
+        double gzij = g_ewald * zij;
+        b += q_all[j] *
+             (exp(-(gzij * gzij)) / g_ewald + MY_PIS * zij * erf(gzij));
+      }
+      vec[ii] -= prefac * b;
+    }
+  } else if (wireflag) {
+    double dipole[2] = {0., 0.};  // dipole in x and y direction
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) {
+        for (int dim : {0, 1}) dipole[dim] += q[i] * x[i][dim];
+      }
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &dipole, 2, MPI_DOUBLE, MPI_SUM, world);
+    for (double &d : dipole) d *= MY_2PI / volume;
+    for (int i = 0; i < nlocal; i++) {
+      int const pos = imat[i];
+      if (pos >= 0) vec[pos] += x[i][0] * dipole[0] + x[i][1] * dipole[1];
+    }
   }
 }
 
@@ -1937,25 +1938,7 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
-  // check cs and sn are up to date
-  if (eikr_step < update->ntimestep) {
-    // extend size of per-atom arrays if necessary
-    if (atom->nmax > nmax) {
-      memory->destroy(ek);
-      memory->destroy3d_offset(cs, -kmax_created);
-      memory->destroy3d_offset(sn, -kmax_created);
-      nmax = atom->nmax;
-      memory->create(ek, nmax, 3, "ewald/conp:ek");
-      memory->create3d_offset(cs, -kmax, kmax, 3, nmax, "ewald/conp:cs");
-      memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
-      kmax_created = kmax;
-    }
-    eikr_step = update->ntimestep;
-    if (triclinic == 0)
-      eik_dot_r();
-    else
-      eik_dot_r_triclinic();
-  }
+  update_eikr();
   int nlocal = atom->nlocal;
   int nprocs = comm->nprocs;
 
@@ -2146,25 +2129,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
-  // check cs and sn are up to date
-  if (eikr_step < update->ntimestep) {
-    // extend size of per-atom arrays if necessary
-    if (atom->nmax > nmax) {
-      memory->destroy(ek);
-      memory->destroy3d_offset(cs, -kmax_created);
-      memory->destroy3d_offset(sn, -kmax_created);
-      nmax = atom->nmax;
-      memory->create(ek, nmax, 3, "ewald/conp:ek");
-      memory->create3d_offset(cs, -kmax, kmax, 3, nmax, "ewald/conp:cs");
-      memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
-      kmax_created = kmax;
-    }
-    eikr_step = update->ntimestep;
-    if (triclinic == 0)
-      eik_dot_r();
-    else
-      eik_dot_r_triclinic();
-  }
+  update_eikr();
   if (slabflag && triclinic)
     error->all(FLERR,
                "Cannot (yet) use K-space slab "
@@ -2335,3 +2300,27 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
   memory->destroy(jmat);
   memory->destroy(jmat_local);
 }
+
+/* ---------------------------------------------------------------------- */
+
+void EwaldConp::update_eikr() {
+  if (eikr_step < update->ntimestep) {
+    // extend size of per-atom arrays if necessary
+    if (atom->nmax > nmax) {
+      memory->destroy(ek);
+      memory->destroy3d_offset(cs, -kmax_created);
+      memory->destroy3d_offset(sn, -kmax_created);
+      nmax = atom->nmax;
+      memory->create(ek, nmax, 3, "ewald/conp:ek");
+      memory->create3d_offset(cs, -kmax, kmax, 3, nmax, "ewald/conp:cs");
+      memory->create3d_offset(sn, -kmax, kmax, 3, nmax, "ewald/conp:sn");
+      kmax_created = kmax;
+    }
+    eikr_step = update->ntimestep;
+    if (triclinic == 0)
+      eik_dot_r();
+    else
+      eik_dot_r_triclinic();
+  }
+}
+
