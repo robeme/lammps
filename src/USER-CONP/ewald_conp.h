@@ -89,7 +89,6 @@ class EwaldConp : public KSpace {
  private:
   int eikr_step;
   void update_eikr(bool);
-  void update_eikr();
 };
 
 }  // namespace LAMMPS_NS

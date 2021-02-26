@@ -46,6 +46,7 @@ class FixChargeUpdate : public Fix {
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
   void symmetrize();
+  void forces_and_energies();
   std::vector<int> local_to_matrix();
   void write_to_file(FILE *, std::vector<tagint>,
                      std::vector<std::vector<double> >);
