@@ -21,6 +21,7 @@
 #include "ewald_conp.h"
 
 #include <cmath>
+#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -34,6 +35,7 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
+using namespace std;
 
 #define SMALL 0.00001
 
@@ -249,11 +251,13 @@ void EwaldConp::setup() {
   double xprd_wire = xprd * wire_volfactor;
   double yprd_wire = yprd * wire_volfactor;
   double zprd_slab = zprd * slab_volfactor;
-  volume = xprd_wire * yprd_wire * zprd_slab;
+  //volume = xprd_wire * yprd_wire * zprd_slab;
+  volume = xprd * yprd * zprd_slab; // TODO depends on flags?
 
   // area required for EW2D
 
-  area = xprd_wire * yprd_wire;
+  // area = xprd_wire * yprd_wire;
+  area = xprd * yprd; // TODO depends on flags?
 
   unitk[0] = 2.0 * MY_PI / xprd_wire;
   unitk[1] = 2.0 * MY_PI / yprd_wire;
@@ -458,10 +462,11 @@ void EwaldConp::compute(int eflag, int vflag) {
     f[i][0] += qscale * q[i] * ek[i][0];
     f[i][1] += qscale * q[i] * ek[i][1];
     if (slabflag != 2) f[i][2] += qscale * q[i] * ek[i][2];
-    if (wireflag != 2) {
+    // TODO to fix slab 3.0
+    /*if (wireflag != 2) {
       f[i][0] += qscale * q[i] * ek[i][0];
       f[i][1] += qscale * q[i] * ek[i][1];
-    }
+    }*/
   }
 
   // sum global energy across Kspace vevs and add in volume-dependent term
