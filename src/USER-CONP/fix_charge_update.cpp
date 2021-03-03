@@ -16,6 +16,7 @@
 #include "group.h"
 #include "memory.h"
 #include "modify.h"
+#include "update.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -201,7 +202,6 @@ void FixChargeUpdate::setup(int) {
   MPI_Allreduce(MPI_IN_PLACE, &psi.front(), ngroup, MPI_DOUBLE, MPI_SUM, world);
 
   // initial elastance matrix and b vector
-  vector_compute->compute_vector();
   std::vector<std::vector<double>> capacitance;
   if (read_inv) {
     elastance = read_from_file(input_file_inv);
@@ -235,6 +235,7 @@ void FixChargeUpdate::setup(int) {
     }
     return ordered_mat;
   };
+  vector_compute->compute_vector(); // TODO crash with "if (f_vec)"
   if (comm->me == 0) {
     if (f_vec) {
       double *b = vector_compute->vector;
@@ -291,7 +292,7 @@ void FixChargeUpdate::invert(std::vector<std::vector<double>> capacitance) {
 
 void FixChargeUpdate::symmetrize() {
   // S matrix to enforce charge neutrality constraint
-  std::vector<double>AinvE(ngroup, 0.);
+  std::vector<double> AinvE(ngroup, 0.);
   double EAinvE = 0.0;
   for (int i = 0; i < ngroup; i++) {
     for (double e : elastance[i]) {
