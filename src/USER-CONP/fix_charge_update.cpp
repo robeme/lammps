@@ -16,7 +16,6 @@
 #include "group.h"
 #include "memory.h"
 #include "modify.h"
-#include "update.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
