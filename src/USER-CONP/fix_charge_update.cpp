@@ -15,11 +15,17 @@
 #include "error.h"
 #include "force.h"
 #include "group.h"
+#include "kspace.h"
+#include "math_const.h"
 #include "memory.h"
 #include "modify.h"
+#include "neigh_list.h"
+#include "pair.h"
+#include "pointers.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
+using namespace MathConst;
 using namespace std;
 
 extern "C" {
@@ -37,12 +43,14 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   f_inv = f_mat = f_vec = nullptr;
   read_inv = read_mat = false;
   symm = false;
+  scalar_flag = 1;
 
   // read fix command
   groups = std::vector<int>(1, igroup);
   group_bits = std::vector<int>(1, groupbit);
   group_psi = std::vector<double>(1, utils::numeric(FLERR, arg[3], false, lmp));
-  char *eta = arg[4];  // TODO set via pair
+  char *eta_str = arg[4];
+  eta = utils::numeric(FLERR, eta_str, false, lmp);
   int iarg = 5;
   while (iarg < narg) {
     if ((strcmp(arg[iarg], "couple") == 0)) {
@@ -128,7 +136,7 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   vector_arg[iarg_compute++] = (char *)"conp_vec";
   vector_arg[iarg_compute++] = (char *)group->names[igroup];
   vector_arg[iarg_compute++] = (char *)"conp/vector";
-  vector_arg[iarg_compute++] = eta;
+  vector_arg[iarg_compute++] = eta_str;
   assert(iarg_compute == narg_compute);
   vector_compute =
       new LAMMPS_NS::ComputeConpVector(lmp, narg_compute, vector_arg);
@@ -139,7 +147,7 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
     matrix_arg[iarg_compute++] = (char *)"conp_mat";
     matrix_arg[iarg_compute++] = (char *)group->names[igroup];
     matrix_arg[iarg_compute++] = (char *)"conp/matrix";
-    matrix_arg[iarg_compute++] = eta;
+    matrix_arg[iarg_compute++] = eta_str;
     assert(iarg_compute == narg_compute);
     array_compute =
         new LAMMPS_NS::ComputeConpMatrix(lmp, narg_compute, matrix_arg);
@@ -197,7 +205,7 @@ void FixChargeUpdate::setup(int) {
   psi = std::vector<double>(ngroup);
   double const evscale = 0.069447;  // TODO do units properly
   for (int i = 0; i < nlocal; i++) {
-    for (int g = 0; g < number_groups; g++) {
+    for (size_t g = 0; g < groups.size(); g++) {
       if (mask[i] & group_bits[g]) psi[mpos[i]] = group_psi[g] * evscale;
     }
   }
@@ -237,7 +245,7 @@ void FixChargeUpdate::setup(int) {
     }
     return ordered_mat;
   };
-  vector_compute->compute_vector();  // TODO crash with "if (f_vec)"
+  vector_compute->compute_vector();
   if (comm->me == 0) {
     if (f_vec) {
       double *b = vector_compute->vector;
@@ -380,6 +388,13 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::pre_force(int) {
+  update_charges();
+  short_range_correction(true);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::update_charges() {
   int *mask = atom->mask;
   std::vector<int> mpos = local_to_matrix();
   int const nall = atom->nlocal + atom->nghost;
@@ -393,12 +408,126 @@ void FixChargeUpdate::pre_force(int) {
     }
     atom->q[i] = q_tmp;
   }
-  forces_and_energies();
 }
 
 /* ---------------------------------------------------------------------- */
 
-void FixChargeUpdate::forces_and_energies() {}
+double FixChargeUpdate::compute_scalar() {
+  // cout << "Computing scalar" << endl;
+  return electrode_energy(local_to_matrix()) + short_range_correction(false);
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixChargeUpdate::electrode_energy(vector<int> mpos) {
+  // corrections to energy due to self interaction and potential psi
+  double const qqrd2e = force->qqrd2e;
+  int const nlocal = atom->nlocal;
+  int *mask = atom->mask;
+  double *q = atom->q;
+  double energy_self = 0, energy_potential = 0;
+  for (int i = 0; i < nlocal; i++) {
+    bool i_in_ele = groupbit & mask[i];
+    if (i_in_ele) {
+      energy_potential -= q[i] * psi[mpos[i]];
+      energy_self += q[i] * q[i];
+    }
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &energy_self, 1, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Allreduce(MPI_IN_PLACE, &energy_potential, 1, MPI_DOUBLE, MPI_SUM, world);
+  energy_self *= eta / sqrt(MY_2PI) * qqrd2e;
+  energy_potential *= qqrd2e;
+  // cout << "e self, pot: " << energy_self << ", " << energy_potential << endl;
+  return energy_self + energy_potential;
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixChargeUpdate::short_range_correction(bool fflag) {
+  // correction to short range interaction due to eta
+  // TODO call in setup for time = 0 energies
+  // TODO set evflag
+
+  double const qqrd2e = force->qqrd2e;
+  int const nlocal = atom->nlocal;
+  int *mask = atom->mask;
+  double *q = atom->q;
+  double **x = atom->x;
+  double **f = atom->f;
+  int *type = atom->type;
+  int newton_pair = force->newton_pair;
+  NeighList *neigh_list = force->pair->list;
+  int inum = neigh_list->inum;
+  int *ilist = neigh_list->ilist;
+  int *numneigh = neigh_list->numneigh;
+  int **firstneigh = neigh_list->firstneigh;
+  double energy_sr = 0.;
+  for (int ii = 0; ii < inum; ii++) {
+    int i = ilist[ii];
+    bool i_in_ele = groupbit & mask[i];
+    double qtmp = q[i];
+    double xtmp = x[i][0];
+    double ytmp = x[i][1];
+    double ztmp = x[i][2];
+    int itype = type[i];
+    int *jlist = firstneigh[i];
+    int jnum = numneigh[i];
+
+    for (int jj = 0; jj < jnum; jj++) {
+      int const j = jlist[jj] & NEIGHMASK;
+      bool j_in_ele = groupbit & mask[j];
+      if (!(i_in_ele || j_in_ele)) continue;
+      double eta_ij = (i_in_ele && j_in_ele) ? eta / MY_SQRT2 : eta;
+
+      double delx = xtmp - x[j][0];
+      double dely = ytmp - x[j][1];
+      double delz = ztmp - x[j][2];
+      double rsq = delx * delx + dely * dely + delz * delz;
+      int jtype = type[j];
+
+      if (rsq < force->pair->cutsq[itype][jtype]) {
+        double r2inv = 1.0 / rsq;
+
+        // if (rsq < cut_coulsq) { // TODO this is protected
+        double r = sqrt(rsq);
+        double eta_r_ij = eta_ij * r;
+        double expm2 = exp(-eta_r_ij * eta_r_ij);
+        double erfc_etar = erfc(eta_r_ij);
+        double prefactor = qqrd2e * qtmp * q[j] / r;
+        //} else
+        // forcecoul = 0.0;
+        energy_sr -= prefactor * erfc_etar;
+
+        double forcecoul =
+            prefactor * (erfc_etar + 2 / MY_PIS * eta_r_ij * expm2);
+        double fpair = -forcecoul * r2inv;
+        if (fflag) {
+          f[i][0] += delx * fpair;
+          f[i][1] += dely * fpair;
+          f[i][2] += delz * fpair;
+          if (newton_pair || j < nlocal) {
+            f[j][0] -= delx * fpair;
+            f[j][1] -= dely * fpair;
+            f[j][2] -= delz * fpair;
+          }
+        }
+
+        double ecoul = 0.;
+        // if (rsq < cut_coulsq) { // TODO this is protected
+        ecoul = -prefactor * erfc_etar;
+        //} else
+        // ecoul = 0.0;
+
+        if (evflag)  // TODO
+          force->pair->ev_tally(i, j, nlocal, newton_pair, 0., ecoul, fpair,
+                                delx, dely, delz);
+      }
+    }
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &energy_sr, 1, MPI_DOUBLE, MPI_SUM, world);
+  // cout << "e-sr-eta: " << energy_sr << endl;
+  return energy_sr;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -412,6 +541,7 @@ FixChargeUpdate::~FixChargeUpdate() {
 int FixChargeUpdate::setmask() {
   int mask = 0;
   mask |= PRE_FORCE;
+  mask |= THERMO_ENERGY;
   return mask;
 }
 

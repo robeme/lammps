@@ -22,6 +22,7 @@ class FixChargeUpdate : public Fix {
   void setup(int);
   // void setup_pre_force(int);
   void pre_force(int);
+  double compute_scalar();
   // void post_run();
   // void setup_pre_force_respa(int,int);
   // void pre_force_respa(int,int,int);
@@ -34,7 +35,6 @@ class FixChargeUpdate : public Fix {
   std::string input_file_inv, input_file_mat;
   class ComputeConpMatrix *array_compute;
   class ComputeConpVector *vector_compute;
-  static int const number_groups = 2;
   std::vector<int> groups, group_bits;
   std::vector<double> group_psi;
   std::vector<double> psi;
@@ -43,10 +43,13 @@ class FixChargeUpdate : public Fix {
   std::vector<tagint> taglist, taglist_bygroup, group_idx;
   bool read_inv, read_mat;
   bool symm;  // symmetrize elastance for charge neutrality
+  double eta;
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
   void symmetrize();
-  void forces_and_energies();
+  double short_range_correction(bool);
+  void update_charges();
+  double electrode_energy(std::vector<int>mpos);
   std::vector<int> local_to_matrix();
   void write_to_file(FILE *, std::vector<tagint>,
                      std::vector<std::vector<double> >);
