@@ -158,7 +158,6 @@ void EwaldConp::init() {
   scale = 1.0;
   qqrd2e = force->qqrd2e;
   qsum_qsq();
-  natoms_original = atom->natoms;
 
   // set accuracy (force units) from accuracy_relative or accuracy_absolute
 
@@ -250,8 +249,6 @@ void EwaldConp::setup() {
   double yprd_wire = yprd * wire_volfactor;
   double zprd_slab = zprd * slab_volfactor;
   volume = xprd_wire * yprd_wire * zprd_slab;
-
-  // area required for EW2D
 
   area = xprd_wire * yprd_wire;
 
@@ -385,25 +382,15 @@ double EwaldConp::rms(int km, double prd, bigint natoms, double q2) {
 ------------------------------------------------------------------------- */
 
 void EwaldConp::compute(int eflag, int vflag) {
-  int i, j, k;
-
   // set energy/virial flags
-
   ev_init(eflag, vflag);
 
-  // if atom count has changed, update qsum and qsqsum
-  // and fetch new z positions if necessary
-
-  if (atom->natoms != natoms_original) {
-    qsum_qsq();
-    natoms_original = atom->natoms;
-  }
+  qsum_qsq(0);
 
   // return if there are no charges
-
   if (qsqsum == 0.0) return;
 
-  update_eikr();
+  update_eikr(true);
 
   MPI_Allreduce(sfacrl, sfacrl_all, kcount, MPI_DOUBLE, MPI_SUM, world);
   MPI_Allreduce(sfacim, sfacim_all, kcount, MPI_DOUBLE, MPI_SUM, world);
@@ -419,18 +406,18 @@ void EwaldConp::compute(int eflag, int vflag) {
   int kx, ky, kz;
   double cypz, sypz, exprl, expim, partial, partial_peratom;
 
-  for (i = 0; i < nlocal; i++) {
+  for (int i = 0; i < nlocal; i++) {
     ek[i][0] = 0.0;
     ek[i][1] = 0.0;
     ek[i][2] = 0.0;
   }
 
-  for (k = 0; k < kcount; k++) {
+  for (int k = 0; k < kcount; k++) {
     kx = kxvecs[k];
     ky = kyvecs[k];
     kz = kzvecs[k];
 
-    for (i = 0; i < nlocal; i++) {
+    for (int i = 0; i < nlocal; i++) {
       cypz = cs[ky][1][i] * cs[kz][2][i] - sn[ky][1][i] * sn[kz][2][i];
       sypz = sn[ky][1][i] * cs[kz][2][i] + cs[ky][1][i] * sn[kz][2][i];
       exprl = cs[kx][0][i] * cypz - sn[kx][0][i] * sypz;
@@ -444,7 +431,7 @@ void EwaldConp::compute(int eflag, int vflag) {
         partial_peratom = exprl * sfacrl_all[k] + expim * sfacim_all[k];
         if (eflag_atom) eatom[i] += q[i] * ug[k] * partial_peratom;
         if (vflag_atom)
-          for (j = 0; j < 6; j++)
+          for (int j = 0; j < 6; j++)
             vatom[i][j] += ug[k] * vg[k][j] * partial_peratom;
       }
     }
@@ -454,20 +441,20 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   const double qscale = qqrd2e * scale;
 
-  for (i = 0; i < nlocal; i++) {
-    f[i][0] += qscale * q[i] * ek[i][0];
-    f[i][1] += qscale * q[i] * ek[i][1];
-    if (slabflag != 2) f[i][2] += qscale * q[i] * ek[i][2];
+  for (int i = 0; i < nlocal; i++) {
     if (wireflag != 2) {
       f[i][0] += qscale * q[i] * ek[i][0];
       f[i][1] += qscale * q[i] * ek[i][1];
+    }
+    if (slabflag != 2) {
+      f[i][2] += qscale * q[i] * ek[i][2];
     }
   }
 
   // sum global energy across Kspace vevs and add in volume-dependent term
 
   if (eflag_global) {
-    for (k = 0; k < kcount; k++)
+    for (int k = 0; k < kcount; k++)
       energy += ug[k] *
                 (sfacrl_all[k] * sfacrl_all[k] + sfacim_all[k] * sfacim_all[k]);
 
@@ -480,12 +467,12 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   if (vflag_global) {
     double uk;
-    for (k = 0; k < kcount; k++) {
+    for (int k = 0; k < kcount; k++) {
       uk = ug[k] *
            (sfacrl_all[k] * sfacrl_all[k] + sfacim_all[k] * sfacim_all[k]);
-      for (j = 0; j < 6; j++) virial[j] += uk * vg[k][j];
+      for (int j = 0; j < 6; j++) virial[j] += uk * vg[k][j];
     }
-    for (j = 0; j < 6; j++) virial[j] *= qscale;
+    for (int j = 0; j < 6; j++) virial[j] *= qscale;
   }
 
   // per-atom energy/virial
@@ -493,7 +480,7 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   if (evflag_atom) {
     if (eflag_atom) {
-      for (i = 0; i < nlocal; i++) {
+      for (int i = 0; i < nlocal; i++) {
         eatom[i] -= g_ewald * q[i] * q[i] / MY_PIS +
                     MY_PI2 * q[i] * qsum / (g_ewald * g_ewald * volume);
         eatom[i] *= qscale;
@@ -501,8 +488,8 @@ void EwaldConp::compute(int eflag, int vflag) {
     }
 
     if (vflag_atom)
-      for (i = 0; i < nlocal; i++)
-        for (j = 0; j < 6; j++) vatom[i][j] *= q[i] * qscale;
+      for (int i = 0; i < nlocal; i++)
+        for (int j = 0; j < 6; j++) vatom[i][j] *= q[i] * qscale;
   }
 
   // 2d slab correction
@@ -547,8 +534,10 @@ void EwaldConp::eik_dot_r() {
         cstr1 += q[i] * cs[1][ic][i];
         sstr1 += q[i] * sn[1][ic][i];
       }
-      sfacrl[n] = cstr1;
-      sfacim[n++] = sstr1;
+      if (slabflag != 3 || ic < 2) {  // skip (0, 0, m) for ew2d
+        sfacrl[n] = cstr1;
+        sfacim[n++] = sstr1;
+      }
     }
   }
 
@@ -568,8 +557,10 @@ void EwaldConp::eik_dot_r() {
           cstr1 += q[i] * cs[m][ic][i];
           sstr1 += q[i] * sn[m][ic][i];
         }
-        sfacrl[n] = cstr1;
-        sfacim[n++] = sstr1;
+        if (slabflag != 3 || ic < 2) {  // skip (0, 0, m) for ew2d
+          sfacrl[n] = cstr1;
+          sfacim[n++] = sstr1;
+        }
       }
     }
   }
@@ -799,7 +790,7 @@ void EwaldConp::coeffs() {
 
   kcount = 0;
 
-  // (k,0,0), (0,l,0), (0,0,m), skip (0,0) in case os EW2D
+  // (k,0,0), (0,l,0), (0,0,m), skip (0,0) in case of EW2D (slabflag == 3)
   for (m = 1; m <= kmax; m++) {
     sqk = (m * unitk[0]) * (m * unitk[0]);
     if (sqk <= gsqmx) {
@@ -1259,8 +1250,9 @@ void EwaldConp::slabcorr() {
   double ffact = qscale * (-4.0 * MY_PI / volume);
   double **f = atom->f;
 
-  for (int i = 0; i < nlocal; i++)
+  for (int i = 0; i < nlocal; i++) {
     f[i][2] += ffact * q[i] * (dipole_all - qsum * x[i][2]);
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1277,7 +1269,7 @@ void EwaldConp::ew2dcorr() {
   int nprocs = comm->nprocs;
 
   int *recvcounts, *displs;
-  double *nprd, *nprd_all, *q_all;
+  double *z, *z_all, *q_all;
 
   // gather q and non-periodic positions on all procs
 
@@ -1290,66 +1282,55 @@ void EwaldConp::ew2dcorr() {
   for (int i = 1; i < nprocs; i++)
     displs[i] = displs[i - 1] + recvcounts[i - 1];
 
-  memory->create(nprd, nlocal, "ewald/conp:nprd");
+  memory->create(z, nlocal, "ewald/conp:z");
 
-  for (int i = 0; i < nlocal; i++) nprd[i] = x[i][2];
+  for (int i = 0; i < nlocal; i++) z[i] = x[i][2];
 
-  memory->create(nprd_all, natoms, "ewald/conp:nprd_all");
+  memory->create(z_all, natoms, "ewald/conp:z_all");
   memory->create(q_all, natoms, "ewald/conp:q_all");
 
   MPI_Allgatherv(q, nlocal, MPI_DOUBLE, q_all, recvcounts, displs, MPI_DOUBLE,
                  world);
-  MPI_Allgatherv(nprd, nlocal, MPI_DOUBLE, nprd_all, recvcounts, displs,
-                 MPI_DOUBLE, world);
+  MPI_Allgatherv(z, nlocal, MPI_DOUBLE, z_all, recvcounts, displs, MPI_DOUBLE,
+                 world);
 
-  memory->destroy(nprd);
+  memory->destroy(z);
   memory->destroy(recvcounts);
   memory->destroy(displs);
 
   const double g_ewald_inv = 1.0 / g_ewald;
-  const double g_ewald_sq = g_ewald * g_ewald;
   const double qscale = qqrd2e * scale;
-  const double efact = 2.0 * MY_PIS / area;
   const double ffact = qscale * MY_2PI / area;
+  const double efact = qscale * MY_PIS / area;
 
-  double pot_ij, aij, dij, e_keq0_all;
-
-  // loop over ALL atom interactions
-
-  double e_keq0 = 0.0;
+  double e_keq0 = 0;
   for (int i = 0; i < nlocal; i++) {
-    pot_ij = 0.0;
+    double pot_ij = 0.0;
 
-    // TODO check if we are double counting the interactions here?
     for (bigint j = 0; j < natoms; j++) {
-      dij = nprd_all[j] - x[i][2];
+      double const zij = z_all[j] - x[i][2];
+      double const g_zij = g_ewald * zij;
 
-      // resembles (aij) matrix component in constant potential
-      aij = efact * (exp(-dij * dij * g_ewald_sq) * g_ewald_inv +
-                     MY_PIS * dij * erf(dij * g_ewald));
       // coulomb potential; see eq. (4) in metalwalls parallelization doc
-      pot_ij += q_all[j] * aij;
-
-      // add on force corrections
-
-      f[i][2] -= ffact * q[i] * q_all[j] * erf(g_ewald * dij);
+      // TODO * 0.5 for diagonal? energies look correct though
+      pot_ij += q_all[j] *
+                (exp(-g_zij * g_zij) * g_ewald_inv + MY_PIS * zij * erf(g_zij));
+      f[i][2] -= ffact * q[i] * q_all[j] * erf(g_zij);
     }
 
     // per-atom energy; see eq. (20) in metalwalls ewald doc
-
-    if (eflag_atom) eatom[i] -= qscale * q[i] * pot_ij * 0.5;
-
-    e_keq0 += q[i] * pot_ij;
+    if (eflag_atom)
+      eatom[i] -= efact * q[i] * pot_ij;  // TODO check if 0.5 factor
+    if (eflag_global) e_keq0 -= q[i] * pot_ij;
   }
 
-  memory->destroy(nprd_all);
+  memory->destroy(z_all);
   memory->destroy(q_all);
 
-  // sum local contributions; see eq. (20) in metalwalls ewald doc
-
-  MPI_Allreduce(&e_keq0, &e_keq0_all, 1, MPI_DOUBLE, MPI_SUM, world);
-
-  if (eflag_global) energy -= qscale * e_keq0_all * 0.5;
+  if (eflag_global) {
+    MPI_Allreduce(MPI_IN_PLACE, &e_keq0, 1, MPI_DOUBLE, MPI_SUM, world);
+    energy += efact * e_keq0;
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1553,8 +1534,10 @@ void EwaldConp::compute_group_group(int groupbit_A, int groupbit_B,
   for (k = 0; k < kcount; k++) {
     partial_group =
         sfacim_A_all[k] * sfacrl_B_all[k] - sfacrl_A_all[k] * sfacim_B_all[k];
-    f2group[0] += eg[k][0] * partial_group;
-    f2group[1] += eg[k][1] * partial_group;
+    if (wireflag != 2) {
+      f2group[0] += eg[k][0] * partial_group;
+      f2group[1] += eg[k][1] * partial_group;
+    }
     if (slabflag != 2) f2group[2] += eg[k][2] * partial_group;
   }
 
@@ -1799,7 +1782,7 @@ void EwaldConp::deallocate_groups() {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_vector(bigint *imat, double *vector) {
-  update_eikr();
+  update_eikr(false);
 
   int const nlocal = atom->nlocal;
   double *q = atom->q;
@@ -1858,7 +1841,7 @@ void EwaldConp::compute_vector(bigint *imat, double *vector) {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
-  update_eikr();
+  update_eikr(false);
   int const nlocal = atom->nlocal;
   int const nprocs = comm->nprocs;
   double **x = atom->x;
@@ -1938,7 +1921,7 @@ void EwaldConp::compute_vector_corr(bigint *imat, double *vec) {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
-  update_eikr();
+  update_eikr(false);
   int nlocal = atom->nlocal;
   int nprocs = comm->nprocs;
 
@@ -2129,7 +2112,7 @@ void EwaldConp::compute_matrix(bigint *imat, double **matrix) {
  ------------------------------------------------------------------------- */
 
 void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
-  update_eikr();
+  update_eikr(false);
   if (slabflag && triclinic)
     error->all(FLERR,
                "Cannot (yet) use K-space slab "
@@ -2214,7 +2197,8 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
           if (jmat[j] > imat[i]) continue;
           aij = prefac * x[i][2] * nprd_all[j];
 
-          // TODO add ELC corrections, needs sum over all kpoints but not (0,0)
+          // TODO add ELC corrections, needs sum over all kpoints but not
+          // (0,0)
 
           matrix[imat[i]][jmat[j]] += aij;
           if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
@@ -2304,7 +2288,13 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 /* ---------------------------------------------------------------------- */
 
 void EwaldConp::update_eikr() {
-  if (eikr_step < update->ntimestep) {
+  update_eikr(false);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void EwaldConp::update_eikr(bool force_update) {
+  if (eikr_step < update->ntimestep || force_update) {
     // extend size of per-atom arrays if necessary
     if (atom->nmax > nmax) {
       memory->destroy(ek);
