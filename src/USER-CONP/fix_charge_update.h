@@ -20,6 +20,7 @@ class FixChargeUpdate : public Fix {
   // void post_constructor();
   void init();
   void setup(int);
+  void setup_post_neighbor();
   // void setup_pre_force(int);
   void pre_force(int);
   double compute_scalar();

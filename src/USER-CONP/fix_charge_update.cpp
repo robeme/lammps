@@ -192,12 +192,11 @@ void FixChargeUpdate::init() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixChargeUpdate::setup(int) {
+void FixChargeUpdate::setup_post_neighbor() {
   vector_compute->setup();
   if (!(read_mat || read_inv)) array_compute->setup();
   int const nlocal = atom->nlocal;
   int *mask = atom->mask;
-
   create_taglist();
 
   // setup psi with target potentials
@@ -211,7 +210,7 @@ void FixChargeUpdate::setup(int) {
   }
   MPI_Allreduce(MPI_IN_PLACE, &psi.front(), ngroup, MPI_DOUBLE, MPI_SUM, world);
 
-  // initial elastance matrix and b vector
+  // elastance matrix
   std::vector<std::vector<double>> capacitance;
   if (read_inv) {
     elastance = read_from_file(input_file_inv);
@@ -232,6 +231,9 @@ void FixChargeUpdate::setup(int) {
   }
   if (symm) symmetrize();
 
+  // initial charges and b vector
+  update_charges();
+
   // write to files, ordered by group
   auto const order_matrix = [](std::vector<tagint> order,
                                std::vector<std::vector<double>> mat) {
@@ -245,7 +247,6 @@ void FixChargeUpdate::setup(int) {
     }
     return ordered_mat;
   };
-  vector_compute->compute_vector();
   if (comm->me == 0) {
     if (f_vec) {
       double *b = vector_compute->vector;
@@ -263,6 +264,12 @@ void FixChargeUpdate::setup(int) {
                     order_matrix(group_idx, capacitance));
     }
   }
+}
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::setup(int) {
+  // correct forces for initial timestep
+  short_range_correction(true);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -413,7 +420,6 @@ void FixChargeUpdate::update_charges() {
 /* ---------------------------------------------------------------------- */
 
 double FixChargeUpdate::compute_scalar() {
-  // cout << "Computing scalar" << endl;
   return electrode_energy(local_to_matrix()) + short_range_correction(false);
 }
 
@@ -427,8 +433,7 @@ double FixChargeUpdate::electrode_energy(vector<int> mpos) {
   double *q = atom->q;
   double energy_self = 0, energy_potential = 0;
   for (int i = 0; i < nlocal; i++) {
-    bool i_in_ele = groupbit & mask[i];
-    if (i_in_ele) {
+    if (groupbit & mask[i]) {
       energy_potential -= q[i] * psi[mpos[i]];
       energy_self += q[i] * q[i];
     }
@@ -437,7 +442,6 @@ double FixChargeUpdate::electrode_energy(vector<int> mpos) {
   MPI_Allreduce(MPI_IN_PLACE, &energy_potential, 1, MPI_DOUBLE, MPI_SUM, world);
   energy_self *= eta / sqrt(MY_2PI) * qqrd2e;
   energy_potential *= qqrd2e;
-  // cout << "e self, pot: " << energy_self << ", " << energy_potential << endl;
   return energy_self + energy_potential;
 }
 
@@ -445,7 +449,6 @@ double FixChargeUpdate::electrode_energy(vector<int> mpos) {
 
 double FixChargeUpdate::short_range_correction(bool fflag) {
   // correction to short range interaction due to eta
-  // TODO call in setup for time = 0 energies
   // TODO set evflag
 
   double const qqrd2e = force->qqrd2e;
@@ -525,7 +528,6 @@ double FixChargeUpdate::short_range_correction(bool fflag) {
     }
   }
   MPI_Allreduce(MPI_IN_PLACE, &energy_sr, 1, MPI_DOUBLE, MPI_SUM, world);
-  // cout << "e-sr-eta: " << energy_sr << endl;
   return energy_sr;
 }
 
@@ -540,6 +542,7 @@ FixChargeUpdate::~FixChargeUpdate() {
 
 int FixChargeUpdate::setmask() {
   int mask = 0;
+  mask |= POST_NEIGHBOR;
   mask |= PRE_FORCE;
   mask |= THERMO_ENERGY;
   return mask;
