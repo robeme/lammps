@@ -48,9 +48,10 @@ class FixChargeUpdate : public Fix {
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
   void symmetrize();
-  double short_range_correction(bool);
+  double gausscorr(bool);
   void update_charges();
-  double electrode_energy(std::vector<int>mpos);
+  double potential_energy(std::vector<int>mpos);
+  double self_energy();
   std::vector<int> local_to_matrix();
   void write_to_file(FILE *, std::vector<tagint>,
                      std::vector<std::vector<double> >);

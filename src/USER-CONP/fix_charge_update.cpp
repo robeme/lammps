@@ -3,7 +3,6 @@
 #include <assert.h>
 
 #include <fstream>
-#include <iostream>
 #include <numeric>
 #include <sstream>
 
@@ -26,7 +25,6 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 using namespace MathConst;
-using namespace std;
 
 extern "C" {
 void dgetrf_(const int *M, const int *N, double *A, const int *lda, int *ipiv,
@@ -269,7 +267,7 @@ void FixChargeUpdate::setup_post_neighbor() {
 
 void FixChargeUpdate::setup(int) {
   // correct forces for initial timestep
-  short_range_correction(true);
+  gausscorr(true);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -396,7 +394,7 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 
 void FixChargeUpdate::pre_force(int) {
   update_charges();
-  short_range_correction(true);
+  gausscorr(true);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -420,34 +418,47 @@ void FixChargeUpdate::update_charges() {
 /* ---------------------------------------------------------------------- */
 
 double FixChargeUpdate::compute_scalar() {
-  return electrode_energy(local_to_matrix()) + short_range_correction(false);
+  return self_energy() + potential_energy(local_to_matrix()) + gausscorr(false);
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixChargeUpdate::electrode_energy(vector<int> mpos) {
-  // corrections to energy due to self interaction and potential psi
+double FixChargeUpdate::potential_energy(std::vector<int> mpos) {
+  // corrections to energy due to potential psi
   double const qqrd2e = force->qqrd2e;
   int const nlocal = atom->nlocal;
   int *mask = atom->mask;
   double *q = atom->q;
-  double energy_self = 0, energy_potential = 0;
+  double energy = 0;
   for (int i = 0; i < nlocal; i++) {
     if (groupbit & mask[i]) {
-      energy_potential -= q[i] * psi[mpos[i]];
-      energy_self += q[i] * q[i];
+      energy -= q[i] * psi[mpos[i]];
     }
   }
-  MPI_Allreduce(MPI_IN_PLACE, &energy_self, 1, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(MPI_IN_PLACE, &energy_potential, 1, MPI_DOUBLE, MPI_SUM, world);
-  energy_self *= eta / sqrt(MY_2PI) * qqrd2e;
-  energy_potential *= qqrd2e;
-  return energy_self + energy_potential;
+  MPI_Allreduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, world);
+  return energy * qqrd2e;
+}
+/* ---------------------------------------------------------------------- */
+
+double FixChargeUpdate::self_energy() {
+  // corrections to energy due to self interaction
+  double const qqrd2e = force->qqrd2e;
+  int const nlocal = atom->nlocal;
+  int *mask = atom->mask;
+  double *q = atom->q;
+  double energy = 0;
+  for (int i = 0; i < nlocal; i++) {
+    if (groupbit & mask[i]) {
+      energy += q[i] * q[i];
+    }
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, world);
+  return energy * eta / sqrt(MY_2PI) * qqrd2e;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixChargeUpdate::short_range_correction(bool fflag) {
+double FixChargeUpdate::gausscorr(bool fflag) {
   // correction to short range interaction due to eta
   // TODO set evflag
 
