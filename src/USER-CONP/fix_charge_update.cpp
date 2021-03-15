@@ -265,9 +265,11 @@ void FixChargeUpdate::setup_post_neighbor() {
 }
 /* ---------------------------------------------------------------------- */
 
-void FixChargeUpdate::setup(int) {
+void FixChargeUpdate::setup_pre_reverse(int eflag, int /*vflag*/) {
   // correct forces for initial timestep
-  gausscorr(true);
+  gausscorr(eflag, true);
+  self_energy(eflag);
+  potential_energy(eflag, local_to_matrix());
 }
 
 /* ---------------------------------------------------------------------- */
@@ -392,9 +394,14 @@ std::vector<int> FixChargeUpdate::local_to_matrix() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixChargeUpdate::pre_force(int) {
-  update_charges();
-  gausscorr(true);
+void FixChargeUpdate::pre_force(int) { update_charges(); }
+
+/* ---------------------------------------------------------------------- */
+
+void FixChargeUpdate::pre_reverse(int eflag, int /*vflag*/) {
+  gausscorr(eflag, true);
+  self_energy(eflag);
+  potential_energy(eflag, local_to_matrix());
 }
 
 /* ---------------------------------------------------------------------- */
@@ -418,12 +425,12 @@ void FixChargeUpdate::update_charges() {
 /* ---------------------------------------------------------------------- */
 
 double FixChargeUpdate::compute_scalar() {
-  return self_energy() + potential_energy(local_to_matrix()) + gausscorr(false);
+  return potential_energy(0, local_to_matrix());
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixChargeUpdate::potential_energy(std::vector<int> mpos) {
+double FixChargeUpdate::potential_energy(int eflag, std::vector<int> mpos) {
   // corrections to energy due to potential psi
   double const qqrd2e = force->qqrd2e;
   int const nlocal = atom->nlocal;
@@ -432,36 +439,47 @@ double FixChargeUpdate::potential_energy(std::vector<int> mpos) {
   double energy = 0;
   for (int i = 0; i < nlocal; i++) {
     if (groupbit & mask[i]) {
-      energy -= q[i] * psi[mpos[i]];
+      double e = -qqrd2e * q[i] * psi[mpos[i]];
+      energy = e;
+      if (eflag) {
+        force->pair->ev_tally(i, i, nlocal, force->newton_pair, 0., e, 0, 0, 0,
+                              0);  // 0 evdwl, 0 fpair, 0 delxyz
+      }
     }
   }
   MPI_Allreduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, world);
-  return energy * qqrd2e;
+  return energy;
 }
 /* ---------------------------------------------------------------------- */
 
-double FixChargeUpdate::self_energy() {
+double FixChargeUpdate::self_energy(int eflag) {
   // corrections to energy due to self interaction
   double const qqrd2e = force->qqrd2e;
   int const nlocal = atom->nlocal;
+  double const pre = eta / sqrt(MY_2PI) * qqrd2e;
   int *mask = atom->mask;
   double *q = atom->q;
   double energy = 0;
   for (int i = 0; i < nlocal; i++) {
     if (groupbit & mask[i]) {
-      energy += q[i] * q[i];
+      double e = pre * q[i] * q[i];
+      energy += e;
+      if (eflag) {
+        force->pair->ev_tally(i, i, nlocal, force->newton_pair, 0., e, 0, 0, 0,
+                              0);  // 0 evdwl, 0 fpair, 0 delxyz
+      }
     }
   }
   MPI_Allreduce(MPI_IN_PLACE, &energy, 1, MPI_DOUBLE, MPI_SUM, world);
-  return energy * eta / sqrt(MY_2PI) * qqrd2e;
+  return energy;
 }
 
 /* ---------------------------------------------------------------------- */
 
-double FixChargeUpdate::gausscorr(bool fflag) {
+double FixChargeUpdate::gausscorr(int eflag, bool fflag) {
   // correction to short range interaction due to eta
-  // TODO set evflag
 
+  int evflag = force->pair->evflag;
   double const qqrd2e = force->qqrd2e;
   int const nlocal = atom->nlocal;
   int *mask = atom->mask;
@@ -527,17 +545,21 @@ double FixChargeUpdate::gausscorr(bool fflag) {
         }
 
         double ecoul = 0.;
-        // if (rsq < cut_coulsq) { // TODO this is protected
-        ecoul = -prefactor * erfc_etar;
-        //} else
-        // ecoul = 0.0;
+        if (eflag) {
+          // if (rsq < cut_coulsq) { // TODO this is protected
+          ecoul = -prefactor * erfc_etar;
+          //} else
+          // ecoul = 0.0;
+        }
 
-        if (evflag)  // TODO
+        if (evflag) {
           force->pair->ev_tally(i, j, nlocal, newton_pair, 0., ecoul, fpair,
                                 delx, dely, delz);
+        }
       }
     }
   }
+
   MPI_Allreduce(MPI_IN_PLACE, &energy_sr, 1, MPI_DOUBLE, MPI_SUM, world);
   return energy_sr;
 }
@@ -555,6 +577,7 @@ int FixChargeUpdate::setmask() {
   int mask = 0;
   mask |= POST_NEIGHBOR;
   mask |= PRE_FORCE;
+  mask |= PRE_REVERSE;
   mask |= THERMO_ENERGY;
   return mask;
 }

@@ -19,10 +19,12 @@ class FixChargeUpdate : public Fix {
   int setmask();
   // void post_constructor();
   void init();
-  void setup(int);
+  // void setup(int);
   void setup_post_neighbor();
   // void setup_pre_force(int);
+  void setup_pre_reverse(int, int);
   void pre_force(int);
+  void pre_reverse(int, int);
   double compute_scalar();
   // void post_run();
   // void setup_pre_force_respa(int,int);
@@ -48,10 +50,10 @@ class FixChargeUpdate : public Fix {
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
   void symmetrize();
-  double gausscorr(bool);
+  double gausscorr(int, bool);
   void update_charges();
-  double potential_energy(std::vector<int>mpos);
-  double self_energy();
+  double potential_energy(int, std::vector<int>);
+  double self_energy(int);
   std::vector<int> local_to_matrix();
   void write_to_file(FILE *, std::vector<tagint>,
                      std::vector<std::vector<double> >);
