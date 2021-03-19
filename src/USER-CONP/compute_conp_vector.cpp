@@ -219,11 +219,11 @@ void ComputeConpVector::pair_contribution() {
   int *mask = atom->mask;
   neighbor->build_one(list);
   int const nlocal = atom->nlocal;
-  int const nmax = atom->nmax;
   int const inum = list->inum;
   int *ilist = list->ilist;
   int *numneigh = list->numneigh;
   int **firstneigh = list->firstneigh;
+  int newton_pair = force->newton_pair;
 
   for (int ii = 0; ii < inum; ii++) {
     int const i = ilist[ii];
@@ -238,7 +238,6 @@ void ComputeConpVector::pair_contribution() {
       int const j = jlist[jj] & NEIGHMASK;
       bool const j_in_electrode = (mask[j] & groupbit);
       if (i_in_electrode == j_in_electrode) continue;
-
       double const delx = xtmp - x[j][0];  // neighlists take care of pbc
       double const dely = ytmp - x[j][1];
       double const delz = ztmp - x[j][2];
@@ -256,9 +255,10 @@ void ComputeConpVector::pair_contribution() {
           aij -= calc_erfc(eta * r) * rinv;
         }
       }
-      if (i_in_electrode && (i < nlocal)) {
+      if (!(newton_pair || j < nlocal)) aij *= 0.5;
+      if (i_in_electrode) {
         vector[mpos[i]] += aij * q[j];
-      } else if (j_in_electrode && (j < nmax)) {
+      } else if (j_in_electrode) {
         vector[mpos[j]] += aij * q[i];
       }
     }
