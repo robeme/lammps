@@ -58,6 +58,9 @@ class PPPMConp : public KSpace {
   virtual int timing_3d(int, double &);
   virtual double memory_usage();
 
+  void compute_matrix(bigint *, double **);
+  void compute_matrix_corr(bigint *, double **);
+
   virtual void compute_group_group(int, int, int);
 
  protected:
