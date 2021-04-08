@@ -710,6 +710,9 @@ void PPPMConp::compute(int eflag, int vflag) {
 
   poisson();
 
+  cout << "flag: " << eflag_global << endl;
+  cout << "POISSON ENERGY: " << energy << endl;
+
   // all procs communicate E-field values
   // to fill ghost cells surrounding their 3d bricks
 
@@ -804,14 +807,32 @@ void PPPMConp::compute(int eflag, int vflag) {
 /* ----------------------------------------------------------------------
 ------------------------------------------------------------------------- */
 
+double PPPMConp::debug_fft(int ix, int iy, int iz) {
+  int n = 0;
+  double out = 0.;
+  for (int kz = nzlo_fft; kz <= nzhi_fft; kz++)
+    for (int ky = nylo_fft; ky <= nyhi_fft; ky++)
+      for (int kx = nxlo_fft; kx <= nxhi_fft; kx++) {
+        double z = MY_2PI * kz * iz * 1. / nz_pppm;
+        double y = MY_2PI * ky * iy * 1. / ny_pppm;
+        double x = MY_2PI * kx * ix * 1. / nx_pppm;
+        out += (cos(x) * cos(y) * cos(z) - cos(x) * sin(y) * sin(z) -
+                sin(x) * cos(y) * sin(z) - sin(x) * sin(y) * cos(z)) *
+               greensfn[n++];
+      }
+  return out;
+}
+
+/* ----------------------------------------------------------------------
+------------------------------------------------------------------------- */
+
 void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   cout << "MATRIX calculation" << endl;
-  cout << "volume: " << volume << endl;
   // TODO verify energies from real and k space are the same
 
   // TODO replace compute with required setup
   setup();
-  compute(0, 0);
+  compute(1, 0);
 
   FFT_SCALAR ***greens_real;
   memory->create3d_offset(greens_real, nzlo_out, nzhi_out, nylo_out, nyhi_out,
@@ -826,16 +847,57 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   for (int k = nzlo_in, n = 0; k <= nzhi_in; k++)
     for (int j = nylo_in; j <= nyhi_in; j++)
       for (int i = nxlo_in; i <= nxhi_in; i++) {
+        // cout << n << ", " << work2[n] << ", " << work2[n + 1] << endl;
         greens_real[k][j][i] = work2[n];
         n += 2;
       }
+
+  // debugging check fft
+  for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
+    for (int iy = nylo_in; iy <= nyhi_in; iy++) {
+      for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
+        cout << "greens: " << greens_real[iz][iy][ix] << endl;
+        cout << "Manual: " << debug_fft(ix, iy, iz) << endl << endl;
+      }
+    }
+  }
+
+  // debugging: verify energy U = rho^T A^mesh rho
+  /*
+   *make_rho();
+   *double mesh_energy = 0.;
+   *for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
+   *  for (int iy = nylo_in; iy <= nyhi_in; iy++) {
+   *    for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
+   *      double rhoi = density_brick[iz][iy][ix];
+   *      for (int jz = nzlo_in; jz <= nzhi_in; jz++) {
+   *        for (int jy = nylo_in; jy <= nyhi_in; jy++) {
+   *          for (int jx = nxlo_in; jx <= nxhi_in; jx++) {
+   *            int z = jz - iz;
+   *            int y = jy - iy;
+   *            int x = jx - ix;
+   *            if (z < 0) z = -z;
+   *            if (y < 0) y = -y;
+   *            if (x < 0) x = -x;
+   *            mesh_energy +=
+   *                rhoi * density_brick[jz][jy][jx] * greens_real[z][y][x];
+   *          }
+   *        }
+   *      }
+   *    }
+   *  }
+   *}
+
+  cout << "scaleinv " << 1.0 / (nx_pppm * ny_pppm * nz_pppm) << endl;
+  cout << "volume " << volume << endl;
+  cout << "MESH ENERGY: " << mesh_energy << endl;
+   */
 
   // map green's function in real space from mesh to particle positions
   // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
   // (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
   double **x = atom->x;
-
   int nlocal = atom->nlocal;
 
   for (int i = 0; i < nlocal; i++) {
@@ -885,17 +947,14 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
                   int mx = mjx - mix;
                   double jx0 = jy0 * rho1d[0][lj];
                   // TODO diffs of indices out of bounds, really completely
-                  // symmetric?
+                  // symmetric? for now skip uncertain cases
                   /*
                    *if (mz < 0) mz = -mz;
                    *if (my < 0) my = -my;
                    *if (mx < 0) mx = -mx;
                    */
                   skip[j] = skip[j] || (mx < 0 || my < 0 || mz < 0);
-                  if (skip[j]) {
-                    aij = 0.;
-                    continue;
-                  }
+                  if (skip[j]) continue;
                   aij += ix0 * jx0 * greens_real[mz][my][mx];
                 }
               }
@@ -912,6 +971,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   }
 
   memory->destroy3d_offset(greens_real, nzlo_out, nylo_out, nxlo_out);
+  cout << "MATRIX DONE" << endl;
 }
 /* ----------------------------------------------------------------------
 ------------------------------------------------------------------------- */
@@ -2687,7 +2747,7 @@ void PPPMConp::fieldforce_ik() {
     // convert E-field to force
 
     const double qfactor = qqrd2e * scale * q[i];
-    f[i][0] += qfactor * ekx;
+    f[i][0] += qfactor * ekx;  // TODO remove?
     if (wireflag != 2) {
       f[i][0] += qfactor * ekx;
       f[i][1] += qfactor * eky;
