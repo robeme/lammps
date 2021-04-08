@@ -214,6 +214,10 @@ class PPPMConp : public KSpace {
     double s = sx*sy*sz;
     return s*s;
   };
+ private:
+  // debugging
+  double debug_fft(int, int, int);
+
 };
 
 }
