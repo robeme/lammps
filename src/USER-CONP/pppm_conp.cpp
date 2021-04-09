@@ -945,13 +945,19 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 << ", "
        << debug_energy * s2 * 0.5 * scale * qqrd2e << endl;
 
-  // map green's function in real space from mesh to particle positions
+  // create weight brick for each electrode atom, (i.e. density_brick per atom
+  // w/0 charge)
   // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
   // (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
-  double **x = atom->x;
+  cout << "NLOWER, NUPPER: " << nlower << ", " << nupper << endl;
+  int const nstencil = nupper - nlower + 1;
   int nlocal = atom->nlocal;
-
+  vector<vector<vector<vector<double>>>> weight_bricks(
+      nlocal, vector<vector<vector<double>>>(
+                  nstencil, vector<vector<double>>(
+                                nstencil, vector<double>(nstencil, 0.))));
+  double **x = atom->x;
   for (int i = 0; i < nlocal; i++) {
     int ipos = imat[i];
     if (ipos < 0) continue;
@@ -966,14 +972,34 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     compute_rho1d(dix, diy, diz);
     // vector<bool> skip(nlocal, false);
     for (int ni = nlower; ni <= nupper; ni++) {
-      int miz = ni + niz;
       double iz0 = rho1d[2][ni];
       for (int mi = nlower; mi <= nupper; mi++) {
-        int miy = mi + niy;
         double iy0 = iz0 * rho1d[1][mi];
         for (int li = nlower; li <= nupper; li++) {
-          int mix = li + nix;
           double ix0 = iy0 * rho1d[0][li];
+          // TODO index with ipos
+          weight_bricks[i][li - nlower][mi - nlower][ni - nlower] = ix0;
+        }
+      }
+    }
+  }
+
+  // map green's function in real space from mesh to particle positions
+  for (int i = 0; i < nlocal; i++) {
+    int ipos = imat[i];
+    if (ipos < 0) continue;
+    // cout << "ipos " << ipos << endl;
+    int nix = part2grid[i][0];
+    int niy = part2grid[i][1];
+    int niz = part2grid[i][2];
+    // vector<bool> skip(nlocal, false);
+    for (int ni = nlower; ni <= nupper; ni++) {
+      int miz = ni + niz;
+      for (int mi = nlower; mi <= nupper; mi++) {
+        int miy = mi + niy;
+        for (int li = nlower; li <= nupper; li++) {
+          int mix = li + nix;
+          double ix0 = weight_bricks[i][li - nlower][mi - nlower][ni - nlower];
 
           for (int j = 0; j < nlocal; j++) {  // TODO parallelize
             double aij = 0.;
@@ -982,22 +1008,17 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
             int njx = part2grid[j][0];
             int njy = part2grid[j][1];
             int njz = part2grid[j][2];
-            int djx = njx + shiftone - (x[j][0] - boxlo[0]) * delxinv;
-            int djy = njy + shiftone - (x[j][1] - boxlo[1]) * delyinv;
-            int djz = njz + shiftone - (x[j][2] - boxlo[2]) * delzinv;
-            compute_rho1d(djx, djy, djz);
             for (int nj = nlower; nj <= nupper; nj++) {
               int mjz = nj + njz;
               int mz = mjz - miz;
-              double jz0 = rho1d[2][nj];
               for (int mj = nlower; mj <= nupper; mj++) {
                 int mjy = mj + njy;
                 int my = mjy - miy;
-                double jy0 = jz0 * rho1d[1][mj];
                 for (int lj = nlower; lj <= nupper; lj++) {
                   int mjx = lj + njx;
                   int mx = mjx - mix;
-                  double jx0 = jy0 * rho1d[0][lj];
+                  double jx0 =
+                      weight_bricks[j][lj - nlower][mj - nlower][nj - nlower];
                   // TODO diffs of indices out of bounds, really completely
                   // symmetric? for now skip uncertain cases
                   // skip[j] = skip[j] || (mx < 0 || my < 0 || mz < 0);
