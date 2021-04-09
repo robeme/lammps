@@ -961,7 +961,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
         double iy0 = iz0 * rho1d[1][mi];
         for (int li = nlower; li <= nupper; li++) {
           double ix0 = iy0 * rho1d[0][li];
-          // TODO index with ipos and 
+          // TODO index with ipos and
           weight_bricks[i][li - nlower][mi - nlower][ni - nlower] = ix0;
         }
       }
@@ -1034,12 +1034,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
 
   memory->destroy3d_offset(greens_real, nzlo_out, nylo_out, nxlo_out);
   cout << "MATRIX DONE" << endl;
-}
-/* ----------------------------------------------------------------------
-------------------------------------------------------------------------- */
-
-void PPPMConp::compute_matrix_corr(bigint * /*imat*/, double ** /*matrix*/) {
-  error->warning(FLERR, "Matrix correction not implemented for pppm conp");
 }
 
 /* ----------------------------------------------------------------------
@@ -3998,4 +3992,190 @@ void PPPMConp::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
 
   const double ffact = qscale * (-2.0 * MY_PI / volume);
   f2group[1] += ffact * (qsum_A * dipole_B - qsum_B * dipole_A);
+}
+
+void PPPMConp::compute_matrix_corr(bigint *imat, double **matrix) {
+  // copied from ewald_conp
+  if (slabflag && triclinic)
+    error->all(FLERR,
+               "Cannot (yet) use K-space slab "
+               "correction with compute coul/matrix for triclinic systems");
+
+  int nprocs = comm->nprocs;
+  int nlocal = atom->nlocal;
+  double xprd = domain->xprd;
+  double yprd = domain->yprd;
+  double zprd = domain->zprd;
+  double xprd_wire = xprd * wire_volfactor;
+  double yprd_wire = yprd * wire_volfactor;
+  double zprd_slab = zprd * slab_volfactor;
+  double area = xprd_wire * yprd_wire;
+  double vol = xprd_wire * yprd_wire * zprd_slab;
+
+  bigint *jmat, *jmat_local;
+
+  double **x = atom->x;
+
+  // how many local and total group atoms?
+
+  bigint ngroup = 0;
+
+  int ngrouplocal = 0;
+  for (int i = 0; i < nlocal; i++)
+    if (imat[i] > -1) ngrouplocal++;
+  MPI_Allreduce(&ngrouplocal, &ngroup, 1, MPI_INT, MPI_SUM, world);
+
+  memory->create(jmat, ngroup, "pppm/conp:jmat");
+  memory->create(jmat_local, ngrouplocal, "pppm/conp:jmat_local");
+
+  for (int i = 0, n = 0; i < nlocal; i++) {
+    if (imat[i] < 0) continue;
+
+    // ... keep track of matrix index
+
+    jmat_local[n] = imat[i];
+
+    n++;
+  }
+
+  int *recvcounts, *displs;
+
+  memory->create(recvcounts, nprocs, "pppm/conp:recvcounts");
+  memory->create(displs, nprocs, "pppm/conp:displs");
+
+  MPI_Allgather(&ngrouplocal, 1, MPI_INT, recvcounts, 1, MPI_INT, world);
+  displs[0] = 0;
+  for (int i = 1; i < nprocs; i++)
+    displs[i] = displs[i - 1] + recvcounts[i - 1];
+
+  // gather global matrix indexing
+
+  MPI_Allgatherv(jmat_local, ngrouplocal, MPI_LMP_BIGINT, jmat, recvcounts,
+                 displs, MPI_LMP_BIGINT, world);
+
+  if (slabflag) {
+    double *nprd_local, *nprd_all;
+
+    memory->create(nprd_all, ngroup, "pppm/conp:nprd_all");
+    memory->create(nprd_local, ngrouplocal, "pppm/conp:nprd_local");
+
+    for (int i = 0, n = 0; i < nlocal; i++) {
+      if (imat[i] < 0) continue;
+
+      // gather non-periodic positions of groups
+
+      nprd_local[n] = x[i][2];
+
+      n++;
+    }
+
+    // gather subsets nprd positions
+
+    MPI_Allgatherv(nprd_local, ngrouplocal, MPI_DOUBLE, nprd_all, recvcounts,
+                   displs, MPI_DOUBLE, world);
+    memory->destroy(nprd_local);
+
+    double aij;
+
+    if (slabflag == 1) {
+      // use EW3DC slab correction on subset
+
+      const double prefac = MY_4PI / vol;
+      cout << "SLAB 1" << endl;
+      cout << "prefac: " << prefac << endl;
+      cout << "volume: " << vol << endl;
+      cout << "4 pi: " << MY_4PI << endl;
+      for (int i = 0; i < nlocal; i++) {
+        if (imat[i] < 0) continue;
+        for (bigint j = 0; j < ngroup; j++) {
+          // matrix is symmetric
+          if (jmat[j] > imat[i]) continue;
+          aij = prefac * x[i][2] * nprd_all[j];
+
+          // TODO add ELC corrections, needs sum over all kpoints but not
+          // (0,0)
+
+          matrix[imat[i]][jmat[j]] += aij;
+          if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
+        }
+      }
+
+    } else if (slabflag == 3) {
+      // use EW2D infinite boundary correction
+
+      const double g_ewald_inv = 1.0 / g_ewald;
+      const double g_ewald_sq = g_ewald * g_ewald;
+      const double prefac = 2.0 * MY_PIS / area;
+
+      double dij;
+      for (int i = 0; i < nlocal; i++) {
+        if (imat[i] < 0) continue;
+        for (bigint j = 0; j < ngroup; j++) {
+          // matrix is symmetric
+          if (jmat[j] > imat[i]) continue;
+          dij = nprd_all[j] - x[i][2];
+          // resembles (aij) matrix component in constant potential
+          aij = prefac * (exp(-dij * dij * g_ewald_sq) * g_ewald_inv +
+                          MY_PIS * dij * erf(dij * g_ewald));
+          matrix[imat[i]][jmat[j]] -= aij;
+          if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] -= aij;
+        }
+      }
+    }
+
+    memory->destroy(nprd_all);
+  } else if (wireflag) {
+    // use EW3DC wire correction on subset
+
+    double *xprd_local, *xprd_all;
+    double *yprd_local, *yprd_all;
+
+    memory->create(xprd_all, ngroup, "pppm/conp:xprd_all");
+    memory->create(yprd_all, ngroup, "pppm/conp:yprd_all");
+    memory->create(xprd_local, ngrouplocal, "pppm/conp:xprd_local");
+    memory->create(yprd_local, ngrouplocal, "pppm/conp:yprd_local");
+
+    for (int i = 0, n = 0; i < nlocal; i++) {
+      if (imat[i] < 0) continue;
+
+      // gather non-periodic positions of groups
+
+      xprd_local[n] = x[i][0];
+      yprd_local[n] = x[i][1];
+
+      n++;
+    }
+
+    // gather subsets nprd positions
+
+    MPI_Allgatherv(xprd_local, ngrouplocal, MPI_DOUBLE, xprd_all, recvcounts,
+                   displs, MPI_DOUBLE, world);
+    MPI_Allgatherv(yprd_local, ngrouplocal, MPI_DOUBLE, yprd_all, recvcounts,
+                   displs, MPI_DOUBLE, world);
+    memory->destroy(xprd_local);
+    memory->destroy(yprd_local);
+
+    double aij;
+
+    const double prefac = MY_2PI / volume;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) continue;
+      for (bigint j = 0; j < ngroup; j++) {
+        // matrix is symmetric
+        if (jmat[j] > imat[i]) continue;
+        aij = prefac * (x[i][0] * xprd_all[j] + x[i][1] * yprd_all[j]);
+
+        matrix[imat[i]][jmat[j]] += aij;
+        if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
+      }
+    }
+
+    memory->destroy(xprd_all);
+    memory->destroy(yprd_all);
+  }
+
+  memory->destroy(recvcounts);
+  memory->destroy(displs);
+  memory->destroy(jmat);
+  memory->destroy(jmat_local);
 }

@@ -225,12 +225,12 @@ void FixChargeUpdate::setup_post_neighbor() {
       }
       capacitance.push_back(vec);
     }
-    invert(capacitance); // TODO  uncommented lots of stuff here
+    invert(capacitance);  // TODO  uncommented lots of stuff here
   }
   if (symm) symmetrize();
 
   // initial charges and b vector
-  //update_charges();
+  update_charges();
 
   // write to files, ordered by group
   auto const order_matrix = [](std::vector<tagint> order,
