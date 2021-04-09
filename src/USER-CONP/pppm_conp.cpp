@@ -870,9 +870,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       }
 
   // debugging check fft, looking good!
-  int zmax = 2 * (nzhi_out + nlower + 1);
-  int ymax = 2 * (nyhi_out + nlower + 1);
-  int xmax = 2 * (nxhi_out + nlower + 1);
+  int zmax = nzhi_out - nzlo_out + 1;
+  int ymax = nyhi_out - nylo_out + 1;
+  int xmax = nxhi_out - nxlo_out + 1;
   vector<vector<vector<double>>> greens_debug(
       zmax, vector<vector<double>>(ymax, vector<double>(xmax, 0.)));
   for (int iz = 0; iz < zmax; iz++)
@@ -900,16 +900,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   double debug_energy = 0.;
   double mesh_energy = 0.;
   double total_rho = 0.;
-  /*
-   *for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
-   *  for (int iy = nylo_in; iy <= nyhi_in; iy++) {
-   *    for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
-   *      double rhoi = density_brick[iz][iy][ix];
-   *      total_rho += rhoi;
-   *      for (int jz = nzlo_in; jz <= nzhi_in; jz++) {
-   *        for (int jy = nylo_in; jy <= nyhi_in; jy++) {
-   *          for (int jx = nxlo_in; jx <= nxhi_in; jx++) {
-   */
   for (int iz = nzlo_out; iz <= nzhi_out; iz++) {
     for (int iy = nylo_out; iy <= nyhi_out; iy++) {
       for (int ix = nxlo_out; ix <= nxhi_out; ix++) {
@@ -937,9 +927,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     }
   }
 
-  cout << "scaleinv " << scaleinv << endl;
-  // cout << "volume " << volume << endl;
-  // cout << "POISSON ENERGY: " << energy << ", " << energy / s2 << endl;
   cout << "TOTAL RHO: " << total_rho << endl;
   cout << "MESH ENERGY: " << mesh_energy << ", " << mesh_energy * s2 << endl;
   cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 << ", "
@@ -961,23 +948,20 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   for (int i = 0; i < nlocal; i++) {
     int ipos = imat[i];
     if (ipos < 0) continue;
-    // cout << "ipos " << ipos << endl;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
     int dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
     int diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
     int diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
-
     compute_rho1d(dix, diy, diz);
-    // vector<bool> skip(nlocal, false);
     for (int ni = nlower; ni <= nupper; ni++) {
       double iz0 = rho1d[2][ni];
       for (int mi = nlower; mi <= nupper; mi++) {
         double iy0 = iz0 * rho1d[1][mi];
         for (int li = nlower; li <= nupper; li++) {
           double ix0 = iy0 * rho1d[0][li];
-          // TODO index with ipos
+          // TODO index with ipos and 
           weight_bricks[i][li - nlower][mi - nlower][ni - nlower] = ix0;
         }
       }
@@ -992,7 +976,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
-    // vector<bool> skip(nlocal, false);
     for (int ni = nlower; ni <= nupper; ni++) {
       int miz = ni + niz;
       for (int mi = nlower; mi <= nupper; mi++) {
@@ -1020,26 +1003,21 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
                   double jx0 =
                       weight_bricks[j][lj - nlower][mj - nlower][nj - nlower];
                   // TODO diffs of indices out of bounds, really completely
-                  // symmetric? for now skip uncertain cases
-                  // skip[j] = skip[j] || (mx < 0 || my < 0 || mz < 0);
-                  // if (skip[j]) continue;
+                  // symmetric?
                   // aij += ix0 * jx0 * greens_real[mz][my][mx];
                   // aij += ix0 * jx0 * debug_fft(mx, my, mz);
                   aij += ix0 * jx0 * greens_debug[abs(mz)][abs(my)][abs(mx)];
                 }
               }
             }
-            // if (skip[j]) {
-            // matrix[ipos][jpos] = 0.0;
-            //} else {
             matrix[ipos][jpos] += aij / volume;
-            //}
           }
         }
       }
     }
   }
 
+  // verify results by calculating Poisson energy in real space
   double *q = atom->q;
   double a_energy = 0.;
   for (int i = 0; i < nlocal; i++) {
