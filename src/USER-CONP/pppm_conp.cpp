@@ -709,9 +709,8 @@ void PPPMConp::compute(int eflag, int vflag) {
   // also performs per-atom calculations via poisson_peratom()
 
   poisson();
-
-  cout << "flag: " << eflag_global << endl;
-  cout << "POISSON ENERGY: " << energy << endl;
+  cout << "POISSON ENERGY: " << energy << ", " << energy * 0.5 * volume << ", "
+       << energy * 0.5 * volume * qqrd2e * scale << endl;
 
   // all procs communicate E-field values
   // to fill ghost cells surrounding their 3d bricks
@@ -805,6 +804,8 @@ void PPPMConp::compute(int eflag, int vflag) {
 }
 
 /* ----------------------------------------------------------------------
+ * brute force fft of greens funciton k -> r
+ * for grid coords ix, iy, iz
 ------------------------------------------------------------------------- */
 
 double PPPMConp::debug_fft(int ix, int iy, int iz) {
@@ -833,12 +834,28 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // TODO replace compute with required setup
   setup();
   compute(1, 0);
+  double scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
+  double s2 = scaleinv * scaleinv;
 
+  // debugging, check energy in k space
+  brick2fft();
+  for (int i = 0, n = 0; i < nfft; i++) {
+    work1[n++] = density_fft[i];
+    work1[n++] = ZEROF;
+  }
+  fft1->compute(work1, work1, 1);
+  double k_energy = 0;
+  for (int i = 0, n = 0; i < nfft; i++) {
+    k_energy +=
+        s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n + 1]);
+    n += 2;
+  }
+  cout << "DEBUG POISSON: " << k_energy << endl;
+
+  // fft green's funciton k -> r
   FFT_SCALAR ***greens_real;
   memory->create3d_offset(greens_real, nzlo_out, nzhi_out, nylo_out, nyhi_out,
                           nxlo_out, nxhi_out, "pppm/conp:greens_real");
-
-  // fft green's funciton k -> r
   for (int i = 0, n = 0; i < nfft; i++) {
     work2[n++] = greensfn[i];
     work2[n++] = ZEROF;  // *= greensfn[i];
@@ -852,46 +869,81 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
         n += 2;
       }
 
-  // debugging check fft
-  for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
-    for (int iy = nylo_in; iy <= nyhi_in; iy++) {
-      for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
-        cout << "greens: " << greens_real[iz][iy][ix] << endl;
-        cout << "Manual: " << debug_fft(ix, iy, iz) << endl << endl;
-      }
-    }
-  }
+  // debugging check fft, looking good!
+  int zmax = 2 * (nzhi_out + nlower + 1);
+  int ymax = 2 * (nyhi_out + nlower + 1);
+  int xmax = 2 * (nxhi_out + nlower + 1);
+  vector<vector<vector<double>>> greens_debug(
+      zmax, vector<vector<double>>(ymax, vector<double>(xmax, 0.)));
+  for (int iz = 0; iz < zmax; iz++)
+    for (int iy = 0; iy < ymax; iy++)
+      for (int ix = 0; ix < xmax; ix++)
+        greens_debug[iz][iy][ix] = debug_fft(ix, iy, iz);
+  /*
+   *for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
+   *  for (int iy = nylo_in; iy <= nyhi_in; iy++) {
+   *    for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
+   *      cout << "greens: " << greens_real[iz][iy][ix] << endl;
+   *      cout << "vector: " << greens_debug[iz][iy][ix] << endl;
+   *      cout << "Manual: " << debug_fft(ix, iy, iz) << endl;
+   *      cout << "Manual: " << debug_fft(ix, -iy, iz) << endl;
+   *      cout << "Manual: " << debug_fft(ix, iy, -iz) << endl;
+   *      cout << "Manual: " << debug_fft(ix, -iy, -iz) << endl;
+   *      cout << endl;
+   *    }
+   *  }
+   *}
+   */
 
   // debugging: verify energy U = rho^T A^mesh rho
+  make_rho();
+  double debug_energy = 0.;
+  double mesh_energy = 0.;
+  double total_rho = 0.;
   /*
-   *make_rho();
-   *double mesh_energy = 0.;
    *for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
    *  for (int iy = nylo_in; iy <= nyhi_in; iy++) {
    *    for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
    *      double rhoi = density_brick[iz][iy][ix];
+   *      total_rho += rhoi;
    *      for (int jz = nzlo_in; jz <= nzhi_in; jz++) {
    *        for (int jy = nylo_in; jy <= nyhi_in; jy++) {
    *          for (int jx = nxlo_in; jx <= nxhi_in; jx++) {
-   *            int z = jz - iz;
-   *            int y = jy - iy;
-   *            int x = jx - ix;
-   *            if (z < 0) z = -z;
-   *            if (y < 0) y = -y;
-   *            if (x < 0) x = -x;
-   *            mesh_energy +=
-   *                rhoi * density_brick[jz][jy][jx] * greens_real[z][y][x];
-   *          }
-   *        }
-   *      }
-   *    }
-   *  }
-   *}
-
-  cout << "scaleinv " << 1.0 / (nx_pppm * ny_pppm * nz_pppm) << endl;
-  cout << "volume " << volume << endl;
-  cout << "MESH ENERGY: " << mesh_energy << endl;
    */
+  for (int iz = nzlo_out; iz <= nzhi_out; iz++) {
+    for (int iy = nylo_out; iy <= nyhi_out; iy++) {
+      for (int ix = nxlo_out; ix <= nxhi_out; ix++) {
+        double rhoi = density_brick[iz][iy][ix];
+        total_rho += rhoi;
+        for (int jz = nzlo_out; jz <= nzhi_out; jz++) {
+          for (int jy = nylo_out; jy <= nyhi_out; jy++) {
+            for (int jx = nxlo_out; jx <= nxhi_out; jx++) {
+              int z = jz - iz;
+              int y = jy - iy;
+              int x = jx - ix;
+              // debug_energy +=
+              // rhoi * density_brick[jz][jy][jx] * debug_fft(x, y, z);
+              if (z < 0) z = -z;
+              if (y < 0) y = -y;
+              if (x < 0) x = -x;
+              debug_energy +=
+                  rhoi * density_brick[jz][jy][jx] * greens_debug[z][y][x];
+              // mesh_energy +=
+              // rhoi * density_brick[jz][jy][jx] * greens_real[z][y][x];
+            }
+          }
+        }
+      }
+    }
+  }
+
+  cout << "scaleinv " << scaleinv << endl;
+  // cout << "volume " << volume << endl;
+  // cout << "POISSON ENERGY: " << energy << ", " << energy / s2 << endl;
+  cout << "TOTAL RHO: " << total_rho << endl;
+  cout << "MESH ENERGY: " << mesh_energy << ", " << mesh_energy * s2 << endl;
+  cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 << ", "
+       << debug_energy * s2 * 0.5 * scale * qqrd2e << endl;
 
   // map green's function in real space from mesh to particle positions
   // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
@@ -912,7 +964,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     int diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
 
     compute_rho1d(dix, diy, diz);
-    vector<bool> skip(nlocal, false);
+    // vector<bool> skip(nlocal, false);
     for (int ni = nlower; ni <= nupper; ni++) {
       int miz = ni + niz;
       double iz0 = rho1d[2][ni];
@@ -948,27 +1000,38 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
                   double jx0 = jy0 * rho1d[0][lj];
                   // TODO diffs of indices out of bounds, really completely
                   // symmetric? for now skip uncertain cases
-                  /*
-                   *if (mz < 0) mz = -mz;
-                   *if (my < 0) my = -my;
-                   *if (mx < 0) mx = -mx;
-                   */
-                  skip[j] = skip[j] || (mx < 0 || my < 0 || mz < 0);
-                  if (skip[j]) continue;
-                  aij += ix0 * jx0 * greens_real[mz][my][mx];
+                  // skip[j] = skip[j] || (mx < 0 || my < 0 || mz < 0);
+                  // if (skip[j]) continue;
+                  // aij += ix0 * jx0 * greens_real[mz][my][mx];
+                  // aij += ix0 * jx0 * debug_fft(mx, my, mz);
+                  aij += ix0 * jx0 * greens_debug[abs(mz)][abs(my)][abs(mx)];
                 }
               }
             }
-            if (skip[j]) {
-              matrix[ipos][jpos] = 0.0;
-            } else {
-              matrix[ipos][jpos] += aij / volume;
-            }
+            // if (skip[j]) {
+            // matrix[ipos][jpos] = 0.0;
+            //} else {
+            matrix[ipos][jpos] += aij / volume;
+            //}
           }
         }
       }
     }
   }
+
+  double *q = atom->q;
+  double a_energy = 0.;
+  for (int i = 0; i < nlocal; i++) {
+    int ipos = imat[i];
+    if (ipos < 0) continue;
+    for (int j = 0; j < nlocal; j++) {
+      int jpos = imat[j];
+      if (jpos < 0) continue;
+      a_energy += q[i] * q[j] * matrix[ipos][jpos];
+    }
+  }
+  a_energy *= 0.5 * scale * qqrd2e;
+  cout << "A ENERGY: " << a_energy << endl;
 
   memory->destroy3d_offset(greens_real, nzlo_out, nylo_out, nxlo_out);
   cout << "MATRIX DONE" << endl;

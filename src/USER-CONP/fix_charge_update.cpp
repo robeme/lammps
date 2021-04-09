@@ -225,7 +225,7 @@ void FixChargeUpdate::setup_post_neighbor() {
       }
       capacitance.push_back(vec);
     }
-    //invert(capacitance); // TODO  uncommented lots of stuff here
+    invert(capacitance); // TODO  uncommented lots of stuff here
   }
   if (symm) symmetrize();
 
