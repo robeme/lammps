@@ -252,10 +252,10 @@ void ComputeConpMatrix::compute_array() {
   if (nbytes)
     for (int i = 0; i < ngroup; i++) memset(&array[i][0], 0, nbytes);
 
-  //if (pairflag) pair_contribution();
-  //if (selfflag) self_contribution();
   if (kspaceflag) kspace->compute_matrix(mpos, array);
-  //if (boundaryflag) kspace->compute_matrix_corr(mpos, array);
+  if (pairflag) pair_contribution();
+  if (selfflag) self_contribution();
+  if (boundaryflag) kspace->compute_matrix_corr(mpos, array);
 
   // reduce coulomb matrix with contributions from all procs
   // all procs need to know full matrix for matrix inversion
@@ -453,7 +453,7 @@ void ComputeConpMatrix::matrix_assignment() {
 
   // create global matrix indices for local+ghost atoms
   for (bigint ii = 0; ii < ngroup; ii++)
-    for (int i = 0; i < nlocal; i++)  
+    for (int i = 0; i < nlocal; i++)
       if (mat2tag[ii] == tag[i]) mpos[i] = ii;
 
   memory->destroy(igroupnum_list);
