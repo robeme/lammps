@@ -854,13 +854,19 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
 
   // fft green's funciton k -> r
   FFT_SCALAR ***greens_real;
-  memory->create3d_offset(greens_real, nzlo_out, nzhi_out, nylo_out, nyhi_out,
-                          nxlo_out, nxhi_out, "pppm/conp:greens_real");
+  memory->create3d_offset(
+      greens_real, 0, nz_pppm, 0, ny_pppm, 0, nx_pppm,
+      "pppm/conp:greens_real");  // TODO local values of n*_pppm
   for (int i = 0, n = 0; i < nfft; i++) {
     work2[n++] = greensfn[i];
     work2[n++] = ZEROF;  // *= greensfn[i];
   }
-  fft2->compute(work2, work2, -1);
+  int tmp;
+  FFT3d *fft3 =
+      new FFT3d(lmp, world, nx_pppm, ny_pppm, nz_pppm, nxlo_fft, nxhi_fft,
+                nylo_fft, nyhi_fft, nzlo_fft, nzhi_fft, 0, nx_pppm - 1, 0,
+                ny_pppm - 1, 0, nz_pppm - 1, 0, 0, &tmp, collective_flag);
+  fft3->compute(work2, work2, -1);
   for (int k = nzlo_in, n = 0; k <= nzhi_in; k++)
     for (int j = nylo_in; j <= nyhi_in; j++)
       for (int i = nxlo_in; i <= nxhi_in; i++) {
@@ -870,15 +876,15 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       }
 
   // debugging check fft, looking good!
-  int zmax = nzhi_out - nzlo_out + 1;
-  int ymax = nyhi_out - nylo_out + 1;
-  int xmax = nxhi_out - nxlo_out + 1;
-  vector<vector<vector<double>>> greens_debug(
-      zmax, vector<vector<double>>(ymax, vector<double>(xmax, 0.)));
-  for (int iz = 0; iz < zmax; iz++)
-    for (int iy = 0; iy < ymax; iy++)
-      for (int ix = 0; ix < xmax; ix++)
-        greens_debug[iz][iy][ix] = debug_fft(ix, iy, iz);
+  // int zmax = nzhi_out - nzlo_out + 1;
+  // int ymax = nyhi_out - nylo_out + 1;
+  // int xmax = nxhi_out - nxlo_out + 1;
+  // vector<vector<vector<double>>> greens_debug(
+  // zmax, vector<vector<double>>(ymax, vector<double>(xmax, 0.)));
+  // for (int iz = 0; iz < zmax; iz++)
+  // for (int iy = 0; iy < ymax; iy++)
+  // for (int ix = 0; ix < xmax; ix++)
+  // greens_debug[iz][iy][ix] = debug_fft(ix, iy, iz);
   /*
    *for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
    *  for (int iy = nylo_in; iy <= nyhi_in; iy++) {
@@ -895,49 +901,44 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
    *}
    */
 
-  // debugging: verify energy U = rho^T A^mesh rho
-  make_rho();
-  double debug_energy = 0.;
-  double mesh_energy = 0.;
-  double total_rho = 0.;
-  for (int iz = nzlo_out; iz <= nzhi_out; iz++) {
-    for (int iy = nylo_out; iy <= nyhi_out; iy++) {
-      for (int ix = nxlo_out; ix <= nxhi_out; ix++) {
-        double rhoi = density_brick[iz][iy][ix];
-        total_rho += rhoi;
-        for (int jz = nzlo_out; jz <= nzhi_out; jz++) {
-          for (int jy = nylo_out; jy <= nyhi_out; jy++) {
-            for (int jx = nxlo_out; jx <= nxhi_out; jx++) {
-              int z = jz - iz;
-              int y = jy - iy;
-              int x = jx - ix;
-              // debug_energy +=
-              // rhoi * density_brick[jz][jy][jx] * debug_fft(x, y, z);
-              if (z < 0) z = -z;
-              if (y < 0) y = -y;
-              if (x < 0) x = -x;
-              debug_energy +=
-                  rhoi * density_brick[jz][jy][jx] * greens_debug[z][y][x];
-              // mesh_energy +=
-              // rhoi * density_brick[jz][jy][jx] * greens_real[z][y][x];
-            }
-          }
-        }
-      }
-    }
-  }
+  // DEBUGGING: verify energy U = rho^T A^mesh rho
+  // fits with n***_out but not with n***_in
+  // make_rho();
+  // double debug_energy = 0.;
+  // double mesh_energy = 0.;
+  // double total_rho = 0.;
+  // for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
+  // for (int iy = nylo_in; iy <= nyhi_in; iy++) {
+  // for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
+  // double rhoi = density_brick[iz][iy][ix];
+  // total_rho += rhoi;
+  // for (int jz = nzlo_in; jz <= nzhi_in; jz++) {
+  // for (int jy = nylo_in; jy <= nyhi_in; jy++) {
+  // for (int jx = nxlo_in; jx <= nxhi_in; jx++) {
+  // int z = jz - iz;
+  // int y = jy - iy;
+  // int x = jx - ix;
+  //// debug_energy +=
+  //// rhoi * density_brick[jz][jy][jx] * debug_fft(x, y, z);
+  //// debug_energy +=
+  //// rhoi * density_brick[jz][jy][jx] * greens_debug[z][y][x];
+  // mesh_energy += rhoi * density_brick[jz][jy][jx] *
+  // greens_real[abs(z)][abs(y)][abs(x)];
+  //}
+  //}
+  //}
+  //}
+  //}
+  //}
+  // cout << "TOTAL RHO: " << total_rho << endl;
+  // cout << "MESH ENERGY: " << mesh_energy << ", " << mesh_energy * s2 << endl;
+  // cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 <<
+  // endl;
 
-  cout << "TOTAL RHO: " << total_rho << endl;
-  cout << "MESH ENERGY: " << mesh_energy << ", " << mesh_energy * s2 << endl;
-  cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 << ", "
-       << debug_energy * s2 * 0.5 * scale * qqrd2e << endl;
-
-  // create weight brick for each electrode atom, (i.e. density_brick per atom
-  // w/0 charge)
-  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
-  // (dx,dy,dz) = distance to "lower left" grid pt
+  // create weight brick for each electrode atom, (i.e. density_brick per
+  // atom w/0 charge) (nx,ny,nz) = global coords of grid pt to "lower
+  // left" of charge (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
-  cout << "NLOWER, NUPPER: " << nlower << ", " << nupper << endl;
   int const nstencil = nupper - nlower + 1;
   int nlocal = atom->nlocal;
   vector<vector<vector<vector<double>>>> weight_bricks(
@@ -972,7 +973,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   for (int i = 0; i < nlocal; i++) {
     int ipos = imat[i];
     if (ipos < 0) continue;
-    // cout << "ipos " << ipos << endl;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
@@ -993,20 +993,21 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
             int njz = part2grid[j][2];
             for (int nj = nlower; nj <= nupper; nj++) {
               int mjz = nj + njz;
-              int mz = mjz - miz;
+              int mz = abs(mjz - miz);
               for (int mj = nlower; mj <= nupper; mj++) {
                 int mjy = mj + njy;
-                int my = mjy - miy;
+                int my = abs(mjy - miy);
                 for (int lj = nlower; lj <= nupper; lj++) {
                   int mjx = lj + njx;
-                  int mx = mjx - mix;
-                  double jx0 =
-                      weight_bricks[j][lj - nlower][mj - nlower][nj - nlower];
-                  // TODO diffs of indices out of bounds, really completely
-                  // symmetric?
-                  // aij += ix0 * jx0 * greens_real[mz][my][mx];
-                  // aij += ix0 * jx0 * debug_fft(mx, my, mz);
-                  aij += ix0 * jx0 * greens_debug[abs(mz)][abs(my)][abs(mx)];
+                  int mx = abs(mjx - mix);
+                  // TODO greens_real of diffs of indices really
+                  // completely symmetric?
+                  // TODO cutting off distances oft of bounds acceptable?
+                  if (mx < nx_pppm && my < ny_pppm && mz < nz_pppm) {
+                    double jx0 =
+                        weight_bricks[j][lj - nlower][mj - nlower][nj - nlower];
+                    aij += ix0 * jx0 * greens_real[mz][my][mx];
+                  }
                 }
               }
             }
@@ -1032,7 +1033,8 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   a_energy *= 0.5 * scale * qqrd2e;
   cout << "A ENERGY: " << a_energy << endl;
 
-  memory->destroy3d_offset(greens_real, nzlo_out, nylo_out, nxlo_out);
+  memory->destroy3d_offset(greens_real, 0, 0, 0);
+  delete fft3;
   cout << "MATRIX DONE" << endl;
 }
 
@@ -3917,11 +3919,11 @@ void PPPMConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
 }
 
 /* ----------------------------------------------------------------------
-   TODO wire-geometry correction term to dampen inter-wire interactions between
-   periodically repeating wires.  Yields good approximation to 2D Ewald if
-   adequate empty space is left between repeating wires (J. Chem. Phys.
-   111, 3155).  Wires defined here to be parallel to the x axis. Also
-   extended to non-neutral systems (J. Chem. Phys. 131, 094107).
+   TODO wire-geometry correction term to dampen inter-wire interactions
+between periodically repeating wires.  Yields good approximation to 2D Ewald
+if adequate empty space is left between repeating wires (J. Chem. Phys. 111,
+3155).  Wires defined here to be parallel to the x axis. Also extended to
+non-neutral systems (J. Chem. Phys. 131, 094107).
 ------------------------------------------------------------------------- */
 
 void PPPMConp::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
