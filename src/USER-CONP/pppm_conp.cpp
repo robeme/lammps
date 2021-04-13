@@ -25,6 +25,7 @@
 #include <iostream>
 
 #include "angle.h"
+#include "assert.h"
 #include "atom.h"
 #include "bond.h"
 #include "comm.h"
@@ -652,6 +653,7 @@ void PPPMConp::setup_grid() {
 ------------------------------------------------------------------------- */
 
 void PPPMConp::compute(int eflag, int vflag) {
+  cout << "PPPM COMPUTE" << endl;
   int i, j;
 
   // set energy/virial flags
@@ -670,7 +672,7 @@ void PPPMConp::compute(int eflag, int vflag) {
 
   // return if there are no charges
 
-  if (qsqsum == 0.0) return;
+  // if (qsqsum == 0.0) return; TODO move back in
 
   // convert atoms from box to lamda coords
 
@@ -806,6 +808,7 @@ void PPPMConp::compute(int eflag, int vflag) {
 /* ----------------------------------------------------------------------
  * brute force fft of greens funciton k -> r
  * for grid coords ix, iy, iz
+ * not parallelized
 ------------------------------------------------------------------------- */
 
 double PPPMConp::debug_fft(int ix, int iy, int iz) {
@@ -830,50 +833,67 @@ double PPPMConp::debug_fft(int ix, int iy, int iz) {
 void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   cout << "MATRIX calculation" << endl;
   // TODO verify energies from real and k space are the same
-
   // TODO replace compute with required setup
   setup();
+  cout << "calling compute" << endl;
   compute(1, 0);
-  double scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
-  double s2 = scaleinv * scaleinv;
+  if (comm->me == 0)
+    cout << "n*_pppm: " << nx_pppm << ", " << ny_pppm << ", " << nz_pppm
+         << endl;
 
   // debugging, check energy in k space
-  brick2fft();
-  for (int i = 0, n = 0; i < nfft; i++) {
-    work1[n++] = density_fft[i];
-    work1[n++] = ZEROF;
-  }
-  fft1->compute(work1, work1, 1);
-  double k_energy = 0;
-  for (int i = 0, n = 0; i < nfft; i++) {
-    k_energy +=
-        s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n + 1]);
-    n += 2;
-  }
-  cout << "DEBUG POISSON: " << k_energy << endl;
+  // double scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
+  // double s2 = scaleinv * scaleinv;
+  // brick2fft();
+  // for (int i = 0, n = 0; i < nfft; i++) {
+  // work1[n++] = density_fft[i];
+  // work1[n++] = ZEROF;
+  //}
+  // fft1->compute(work1, work1, 1);
+  // double k_energy = 0;
+  // for (int i = 0, n = 0; i < nfft; i++) {
+  // k_energy +=
+  // s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n + 1]);
+  // n += 2;
+  //}
+  // cout << "DEBUG POISSON: " << k_energy << endl;
 
   // fft green's funciton k -> r
+  double fft_time = MPI_Wtime();
   FFT_SCALAR ***greens_real;
   memory->create3d_offset(
-      greens_real, 0, nz_pppm, 0, ny_pppm, 0, nx_pppm,
+      greens_real, nzlo_in, nzhi_in, nylo_in, nyhi_in, nxlo_in, nxhi_in,
       "pppm/conp:greens_real");  // TODO local values of n*_pppm
+  vector<double> greens_all(nz_pppm * ny_pppm * nx_pppm, 0.);
   for (int i = 0, n = 0; i < nfft; i++) {
     work2[n++] = greensfn[i];
     work2[n++] = ZEROF;  // *= greensfn[i];
   }
-  int tmp;
-  FFT3d *fft3 =
-      new FFT3d(lmp, world, nx_pppm, ny_pppm, nz_pppm, nxlo_fft, nxhi_fft,
-                nylo_fft, nyhi_fft, nzlo_fft, nzhi_fft, 0, nx_pppm - 1, 0,
-                ny_pppm - 1, 0, nz_pppm - 1, 0, 0, &tmp, collective_flag);
-  fft3->compute(work2, work2, -1);
+  // int tmp;
+  // int nx_local = nxhi_in - nxlo_in;
+  // int ny_local = nyhi_in - nylo_in;
+  // int nz_local = nzhi_in - nzlo_in;
+  // nxhi_fft, nylo_fft, nyhi_fft, nzlo_fft, nzhi_fft,
+  // nxlo_in, nxhi_in, nylo_in, nyhi_in, nzlo_in, nzhi_in,
+  // 0, 0, &tmp, collective_flag);
+  fft2->compute(work2, work2, -1);
+  // cout << "ins: " << nzlo_in << ", " << nylo_in << ", " << nxlo_in << endl;
   for (int k = nzlo_in, n = 0; k <= nzhi_in; k++)
     for (int j = nylo_in; j <= nyhi_in; j++)
       for (int i = nxlo_in; i <= nxhi_in; i++) {
         // cout << n << ", " << work2[n] << ", " << work2[n + 1] << endl;
         greens_real[k][j][i] = work2[n];
+        greens_all[ny_pppm * nx_pppm * k + nx_pppm * j + i] = work2[n];
+        if (comm->me == 0) {
+          // cout << i << ", " << j << ", " << k << endl;
+          // cout << "  " << greens_real[k][j][i] << ", " << debug_fft(i, j, k)
+          //<< endl;
+        }
         n += 2;
       }
+  MPI_Allreduce(MPI_IN_PLACE, &greens_all.front(), nz_pppm * ny_pppm * nx_pppm,
+                MPI_DOUBLE, MPI_SUM, world);
+  cout << "FFT time: " << MPI_Wtime() - fft_time << endl;
 
   // debugging check fft, looking good!
   // int zmax = nzhi_out - nzlo_out + 1;
@@ -939,16 +959,30 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // atom w/0 charge) (nx,ny,nz) = global coords of grid pt to "lower
   // left" of charge (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
+  double weights_time = MPI_Wtime();
+  int const nlocal = atom->nlocal;
+  int nmat =
+      std::count_if(&imat[0], &imat[nlocal], [](int x) { return x >= 0; });
+  MPI_Allreduce(MPI_IN_PLACE, &nmat, 1, MPI_INT, MPI_SUM, world);
+  cout << "nmat: " << nmat << endl;
   int const nstencil = nupper - nlower + 1;
-  int nlocal = atom->nlocal;
-  vector<vector<vector<vector<double>>>> weight_bricks(
-      nlocal, vector<vector<vector<double>>>(
-                  nstencil, vector<vector<double>>(
-                                nstencil, vector<double>(nstencil, 0.))));
+  int const nlo = nlower;
+  auto weight_index = [nstencil, nlo](int ipos, int iz, int iy, int ix) {
+    return ipos * nstencil * nstencil * nstencil +
+           (iz - nlo) * nstencil * nstencil + (iy - nlo) * nstencil +
+           (ix - nlo);
+  };
+  vector<double> weight_bricks(nmat * nstencil * nstencil * nstencil, 0.);
+  cout << "bricks allocated " << nmat * nstencil * nstencil * nstencil << endl;
+  // vector<vector<vector<vector<double>>>> weight_bricks(
+  // nmat, vector<vector<vector<double>>>(
+  // nstencil, vector<vector<double>>(
+  // nstencil, vector<double>(nstencil, 0.))));
   double **x = atom->x;
   for (int i = 0; i < nlocal; i++) {
     int ipos = imat[i];
     if (ipos < 0) continue;
+    // cout << ipos << endl;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
@@ -961,36 +995,63 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       for (int mi = nlower; mi <= nupper; mi++) {
         double iy0 = iz0 * rho1d[1][mi];
         for (int li = nlower; li <= nupper; li++) {
-          double ix0 = iy0 * rho1d[0][li];
-          // TODO index with ipos and
-          weight_bricks[i][li - nlower][mi - nlower][ni - nlower] = ix0;
+          // weight_bricks[ipos][li - nlower][mi - nlower][ni - nlower] =
+          // iy0 * rho1d[0][li];
+          // cout << weight_index(ipos, li, mi, ni) << ", ";
+          weight_bricks[weight_index(ipos, li, mi, ni)] = iy0 * rho1d[0][li];
         }
       }
     }
+    // cout << endl;
   }
 
-  // map green's function in real space from mesh to particle positions
+  cout << "reducing" << endl;
+  MPI_Allreduce(MPI_IN_PLACE, &weight_bricks.front(),
+                nmat * nstencil * nstencil * nstencil, MPI_DOUBLE, MPI_SUM,
+                world);
+  cout << "bricks done" << endl;
+  // for (int ipos : {0, 100, 200}) {
+  // MPI_Barrier(world);
+  // cout << ipos << ", " << weight_bricks[ipos][1][2][3] << ", "
+  //<< weight_bricks_1d[weight_index(ipos, 3, 2, 1)] << endl;
+  //}
+  vector<int> ele2grid(nmat * 3, 0);
   for (int i = 0; i < nlocal; i++) {
     int ipos = imat[i];
+    if (ipos < 0) continue;
+    for (int dim : {0, 1, 2}) ele2grid[ipos * 3 + dim] = part2grid[i][dim];
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &ele2grid.front(), nmat * 3, MPI_INT, MPI_SUM,
+                world);
+
+  cout << "Weights time: " << MPI_Wtime() - weights_time << endl;
+
+  // map green's function in real space from mesh to particle positions
+  // TODO run ni etc from 0 to nstencil
+  double matrix_time = MPI_Wtime();
+  for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
-    for (int ni = nlower; ni <= nupper; ni++) {
-      int miz = ni + niz;
-      for (int mi = nlower; mi <= nupper; mi++) {
-        int miy = mi + niy;
-        for (int li = nlower; li <= nupper; li++) {
-          int mix = li + nix;
-          double ix0 = weight_bricks[i][li - nlower][mi - nlower][ni - nlower];
-
-          for (int j = 0; j < nlocal; j++) {  // TODO parallelize
-            double aij = 0.;
-            int jpos = imat[j];
-            if (jpos < 0) continue;
-            int njx = part2grid[j][0];
-            int njy = part2grid[j][1];
-            int njz = part2grid[j][2];
+    assert(nix == ele2grid[ipos * 3 + 0]);
+    assert(niy == ele2grid[ipos * 3 + 1]);
+    assert(niz == ele2grid[ipos * 3 + 2]);
+    // for (int j = 0; j < nlocal; j++) {  // TODO parallelize
+    // int jpos = imat[j];
+    // if (jpos < 0) continue;
+    for (int jpos = 0; jpos < nmat; jpos++) {
+      double aij = 0.;
+      int njx = ele2grid[jpos * 3 + 0];
+      int njy = ele2grid[jpos * 3 + 1];
+      int njz = ele2grid[jpos * 3 + 2];
+      for (int ni = nlower; ni <= nupper; ni++) {
+        int miz = ni + niz;
+        for (int mi = nlower; mi <= nupper; mi++) {
+          int miy = mi + niy;
+          for (int li = nlower; li <= nupper; li++) {
+            int mix = li + nix;
+            double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
             for (int nj = nlower; nj <= nupper; nj++) {
               int mjz = nj + njz;
               int mz = abs(mjz - miz);
@@ -1004,19 +1065,27 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
                   // completely symmetric?
                   // TODO cutting off distances oft of bounds acceptable?
                   if (mx < nx_pppm && my < ny_pppm && mz < nz_pppm) {
-                    double jx0 =
-                        weight_bricks[j][lj - nlower][mj - nlower][nj - nlower];
-                    aij += ix0 * jx0 * greens_real[mz][my][mx];
+                    double jx0 = weight_bricks[weight_index(jpos, lj, mj, nj)];
+                    // double jx0 = weight_bricks[jpos][lj - nlower][mj -
+                    // nlower] [nj - nlower];
+                    // aij += ix0 * jx0 * greens_real[mz][my][mx];
+                    aij +=
+                        ix0 * jx0 *
+                        greens_all[mz * nx_pppm * ny_pppm + my * nx_pppm + mx];
+                    // assert(abs(greens_real[mz][my][mx] -
+                    // greens_all[mz * nx_pppm * ny_pppm +
+                    // my * nx_pppm + mx]) < SMALL);
                   }
                 }
               }
             }
-            matrix[ipos][jpos] += aij / volume;
           }
         }
       }
+      matrix[ipos][jpos] += aij / volume;
     }
   }
+  cout << "Matrix time: " << MPI_Wtime() - matrix_time << endl;
 
   // verify results by calculating Poisson energy in real space
   double *q = atom->q;
@@ -1033,8 +1102,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   a_energy *= 0.5 * scale * qqrd2e;
   cout << "A ENERGY: " << a_energy << endl;
 
-  memory->destroy3d_offset(greens_real, 0, 0, 0);
-  delete fft3;
+  memory->destroy3d_offset(greens_real, nzlo_in, nylo_in, nxlo_in);
   cout << "MATRIX DONE" << endl;
 }
 
@@ -2248,6 +2316,8 @@ void PPPMConp::particle_map() {
         nz + nlower < nzlo_out || nz + nupper > nzhi_out)
       flag = 1;
   }
+
+  cout << "PART2GRID ready" << endl;
 
   if (flag) error->one(FLERR, "Out of range atoms - cannot compute PPPM/conp");
 }
@@ -4086,7 +4156,6 @@ void PPPMConp::compute_matrix_corr(bigint *imat, double **matrix) {
       cout << "SLAB 1" << endl;
       cout << "prefac: " << prefac << endl;
       cout << "volume: " << vol << endl;
-      cout << "4 pi: " << MY_4PI << endl;
       for (int i = 0; i < nlocal; i++) {
         if (imat[i] < 0) continue;
         for (bigint j = 0; j < ngroup; j++) {
