@@ -653,7 +653,6 @@ void PPPMConp::setup_grid() {
 ------------------------------------------------------------------------- */
 
 void PPPMConp::compute(int eflag, int vflag) {
-  cout << "PPPM COMPUTE" << endl;
   int i, j;
 
   // set energy/virial flags
@@ -711,8 +710,9 @@ void PPPMConp::compute(int eflag, int vflag) {
   // also performs per-atom calculations via poisson_peratom()
 
   poisson();
-  cout << "POISSON ENERGY: " << energy << ", " << energy * 0.5 * volume << ", "
-       << energy * 0.5 * volume * qqrd2e * scale << endl;
+  // cout << "POISSON ENERGY: " << energy << ", " << energy * 0.5 * volume << ",
+  // "
+  //<< energy * 0.5 * volume * qqrd2e * scale << endl;
 
   // all procs communicate E-field values
   // to fill ghost cells surrounding their 3d bricks
@@ -831,14 +831,11 @@ double PPPMConp::debug_fft(int ix, int iy, int iz) {
 ------------------------------------------------------------------------- */
 
 void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
-  cout << "MATRIX calculation" << endl;
+  if (comm->me == 0) cout << "MATRIX calculation" << endl;
   // TODO verify energies from real and k space are the same
   // TODO replace compute with required setup
   setup();
   compute(1, 0);
-  if (comm->me == 0)
-    cout << "n*_pppm: " << nx_pppm << ", " << ny_pppm << ", " << nz_pppm
-         << endl;
 
   // debugging, check energy in k space
   // double scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
@@ -858,6 +855,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // cout << "DEBUG POISSON: " << k_energy << endl;
 
   // fft green's funciton k -> r
+  MPI_Barrier(world);
   double fft_time = MPI_Wtime();
   vector<double> greens_real(nz_pppm * ny_pppm * nx_pppm, 0.);
   for (int i = 0, n = 0; i < nfft; i++) {
@@ -873,7 +871,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       }
   MPI_Allreduce(MPI_IN_PLACE, &greens_real.front(), nz_pppm * ny_pppm * nx_pppm,
                 MPI_DOUBLE, MPI_SUM, world);
-  cout << "FFT time: " << MPI_Wtime() - fft_time << endl;
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(lmp, fmt::format("FFT time: {}\n", MPI_Wtime() - fft_time));
 
   // debugging check fft, looking good!
   // double debug_fft_time = MPI_Wtime();
@@ -926,6 +926,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // atom w/0 charge) (nx,ny,nz) = global coords of grid pt to "lower
   // left" of charge (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
+  MPI_Barrier(world);
   double weights_time = MPI_Wtime();
   int const nlocal = atom->nlocal;
   int nmat =
@@ -973,9 +974,13 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   MPI_Allreduce(MPI_IN_PLACE, &ele2grid.front(), nmat * 3, MPI_INT, MPI_SUM,
                 world);
 
-  cout << "Weights time: " << MPI_Wtime() - weights_time << endl;
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(
+        lmp, fmt::format("Weights time: {}\n", MPI_Wtime() - weights_time));
 
   // map green's function in real space from mesh to particle positions
+  MPI_Barrier(world);
   double matrix_time = MPI_Wtime();
   for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
@@ -1023,25 +1028,28 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       matrix[ipos][jpos] += aij / volume;
     }
   }
-  cout << "Matrix time: " << MPI_Wtime() - matrix_time << endl;
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(lmp,
+                   fmt::format("Matrix time: {}\n", MPI_Wtime() - matrix_time));
 
   // verify results by calculating Poisson energy in real space
-  double *q = atom->q;
-  double a_energy = 0.;
-  for (int i = 0; i < nlocal; i++) {
-    int ipos = imat[i];
-    if (ipos < 0) continue;
-    for (int j = 0; j < nlocal; j++) {
-      int jpos = imat[j];
-      if (jpos < 0) continue;
-      a_energy += q[i] * q[j] * matrix[ipos][jpos];
-    }
-  }
-  a_energy *= 0.5 * scale * qqrd2e;
-  cout << "A ENERGY (not parallelized): " << a_energy << endl;  //
+  // double *q = atom->q;
+  // double a_energy = 0.;
+  // for (int i = 0; i < nlocal; i++) {
+  // int ipos = imat[i];
+  // if (ipos < 0) continue;
+  // for (int j = 0; j < nlocal; j++) {
+  // int jpos = imat[j];
+  // if (jpos < 0) continue;
+  // a_energy += q[i] * q[j] * matrix[ipos][jpos];
+  //}
+  //}
+  // a_energy *= 0.5 * scale * qqrd2e;
+  // cout << "A ENERGY (not parallelized): " << a_energy << endl;  //
 
   // memory->destroy3d_offset(greens_real, nzlo_in, nylo_in, nxlo_in);
-  cout << "MATRIX DONE" << endl;
+  // cout << "MATRIX DONE" << endl;
 }
 
 /* ----------------------------------------------------------------------
@@ -2254,8 +2262,6 @@ void PPPMConp::particle_map() {
         nz + nlower < nzlo_out || nz + nupper > nzhi_out)
       flag = 1;
   }
-
-  cout << "PART2GRID ready" << endl;
 
   if (flag) error->one(FLERR, "Out of range atoms - cannot compute PPPM/conp");
 }
@@ -4091,9 +4097,6 @@ void PPPMConp::compute_matrix_corr(bigint *imat, double **matrix) {
       // use EW3DC slab correction on subset
 
       const double prefac = MY_4PI / vol;
-      cout << "SLAB 1" << endl;
-      cout << "prefac: " << prefac << endl;
-      cout << "volume: " << vol << endl;
       for (int i = 0; i < nlocal; i++) {
         if (imat[i] < 0) continue;
         for (bigint j = 0; j < ngroup; j++) {
