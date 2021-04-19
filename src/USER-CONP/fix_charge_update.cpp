@@ -1,6 +1,7 @@
 #include "fix_charge_update.h"
 
 #include <assert.h>
+#include <utils.h>
 
 #include <fstream>
 #include <numeric>
@@ -275,6 +276,8 @@ void FixChargeUpdate::setup_pre_reverse(int eflag, int /*vflag*/) {
 /* ---------------------------------------------------------------------- */
 
 void FixChargeUpdate::invert(std::vector<std::vector<double>> capacitance) {
+  MPI_Barrier(world);
+  double invert_time = MPI_Wtime();
   if (comm->me == 0) utils::logmesg(lmp, "CONP inverting matrix\n");
   int m = ngroup, n = ngroup, lda = ngroup;
   std::vector<int> ipiv(ngroup);
@@ -303,6 +306,10 @@ void FixChargeUpdate::invert(std::vector<std::vector<double>> capacitance) {
       elastance[i][j] = tmp[idx];
     }
   }
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(lmp,
+                   fmt::format("Invert time: {}\n", MPI_Wtime() - invert_time));
 }
 
 /* ---------------------------------------------------------------------- */

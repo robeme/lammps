@@ -20,6 +20,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -252,7 +253,13 @@ void ComputeConpMatrix::compute_array() {
   if (nbytes)
     for (int i = 0; i < ngroup; i++) memset(&array[i][0], 0, nbytes);
 
+  MPI_Barrier(world);
+  double kspace_time = MPI_Wtime();
   if (kspaceflag) kspace->compute_matrix(mpos, array);
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(lmp,
+                   fmt::format("Kspace time: {}\n", MPI_Wtime() - kspace_time));
   if (pairflag) pair_contribution();
   if (selfflag) self_contribution();
   if (boundaryflag) kspace->compute_matrix_corr(mpos, array);
