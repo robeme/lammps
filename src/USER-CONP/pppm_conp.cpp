@@ -951,6 +951,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   vector<vector<double>> gw(nmat, vector<double>(nxyz, 0.));
   for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
+    cout << ipos;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
@@ -968,12 +969,18 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
           int mix = li + nix;
           double ix0 = iy0 * rho1d[0][li];
           // double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
+          cout << ",";
           for (int mjz = off; mjz < nz + off; mjz++) {
             int mz = abs(mjz - miz) % nz_pppm;
             for (int mjy = off; mjy < ny + off; mjy++) {
               int my = abs(mjy - miy) % ny_pppm;
               for (int mjx = off; mjx < nx + off; mjx++) {
                 int mx = abs(mjx - mix) % nx_pppm;
+                assert(nx * ny * (mjz - off) + nx * (mjy - off) + (mjx - off) <
+                       nxyz);
+                assert(ipos < nmat);
+                assert(mz * nx_pppm * ny_pppm + my * nx_pppm + mx <
+                       nz_pppm * ny_pppm * nx_pppm);
                 gw[ipos]
                   [nx * ny * (mjz - off) + nx * (mjy - off) + (mjx - off)] +=
                     greens_real[mz * nx_pppm * ny_pppm + my * nx_pppm + mx] *
@@ -981,9 +988,11 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
               }
             }
           }
+          cout << ".";
         }
       }
     }
+    cout << endl;
   }
   MPI_Barrier(world);
   if (comm->me == 0)

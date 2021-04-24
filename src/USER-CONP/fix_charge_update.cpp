@@ -1,7 +1,6 @@
 #include "fix_charge_update.h"
 
 #include <assert.h>
-#include <utils.h>
 
 #include <fstream>
 #include <numeric>
