@@ -926,23 +926,30 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // atom w/0 charge) (nx,ny,nz) = global coords of grid pt to "lower
   // left" of charge (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
-  MPI_Barrier(world);
-  double weights_time = MPI_Wtime();
   int const nlocal = atom->nlocal;
   int nmat =
       std::count_if(&imat[0], &imat[nlocal], [](int x) { return x >= 0; });
   MPI_Allreduce(MPI_IN_PLACE, &nmat, 1, MPI_INT, MPI_SUM, world);
-  int const nstencil = nupper - nlower + 1;
-  int const nlo = nlower;
-  auto weight_index = [nstencil, nlo](int ipos, int iz, int iy, int ix) {
-    return ipos * nstencil * nstencil * nstencil +
-           (iz - nlo) * nstencil * nstencil + (iy - nlo) * nstencil +
-           (ix - nlo);
-  };
-  vector<double> weight_bricks(nmat * nstencil * nstencil * nstencil, 0.);
   double **x = atom->x;
-  for (int i = 0; i < nlocal; i++) {
-    int ipos = imat[i];
+
+  // map green's function in real space from mesh to particle positions
+  MPI_Barrier(world);
+  double step1_time = MPI_Wtime();
+  // TODO parallelize
+  int nx = nx_pppm + order + 1;
+  int ny = ny_pppm + order + 1;
+  int nz = nz_pppm + order + 1;
+  int nxyz = nx * ny * nz;
+  int off = nlower - 1;
+  cout << "ns: " << nx << ", " << ny << ", " << nz << endl;
+  cout << "lo outs: " << nxlo_out << ", " << nylo_out << ", " << nzlo_out
+       << endl;
+  cout << "hi outs: " << nxhi_out << ", " << nyhi_out << ", " << nzhi_out
+       << endl;
+  cout << "lower, upper: " << nlower << ", " << nupper << endl;
+  cout << "OUT SIZE: " << nxyz << endl;
+  vector<vector<double>> gw(nmat, vector<double>(nxyz, 0.));
+  for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
@@ -953,66 +960,22 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     compute_rho1d(dix, diy, diz);
     for (int ni = nlower; ni <= nupper; ni++) {
       double iz0 = rho1d[2][ni];
-      for (int mi = nlower; mi <= nupper; mi++) {
-        double iy0 = iz0 * rho1d[1][mi];
-        for (int li = nlower; li <= nupper; li++) {
-          weight_bricks[weight_index(ipos, li, mi, ni)] = iy0 * rho1d[0][li];
-        }
-      }
-    }
-  }
-
-  MPI_Allreduce(MPI_IN_PLACE, &weight_bricks.front(),
-                nmat * nstencil * nstencil * nstencil, MPI_DOUBLE, MPI_SUM,
-                world);
-  vector<int> ele2grid(nmat * 3, 0);
-  for (int i = 0; i < nlocal; i++) {
-    int ipos = imat[i];
-    if (ipos < 0) continue;
-    for (int dim : {0, 1, 2}) ele2grid[ipos * 3 + dim] = part2grid[i][dim];
-  }
-  MPI_Allreduce(MPI_IN_PLACE, &ele2grid.front(), nmat * 3, MPI_INT, MPI_SUM,
-                world);
-
-  MPI_Barrier(world);
-  if (comm->me == 0)
-    utils::logmesg(
-        lmp, fmt::format("Weights time: {}\n", MPI_Wtime() - weights_time));
-
-  // map green's function in real space from mesh to particle positions
-  MPI_Barrier(world);
-  double matrix_time = MPI_Wtime();
-  int nx_out = nxhi_out - nxlo_out + 1;
-  int ny_out = nyhi_out - nylo_out + 1;
-  int nz_out = nzhi_out - nzlo_out + 1;
-  cout << "OUT SIZE: " << nx_out * ny_out * nz_out;
-  vector<vector<double>> gw(nmat, vector<double>(nx_out * ny_out * nz_out, 0.));
-  for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
-    if (ipos < 0) continue;
-    int nix = part2grid[i][0];
-    int niy = part2grid[i][1];
-    int niz = part2grid[i][2];
-    for (int ni = nlower; ni <= nupper; ni++) {
       int miz = ni + niz;
       for (int mi = nlower; mi <= nupper; mi++) {
+        double iy0 = iz0 * rho1d[1][mi];
         int miy = mi + niy;
         for (int li = nlower; li <= nupper; li++) {
           int mix = li + nix;
-          double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
-          for (int mjz = nzlo_out; mjz <= nzhi_out; mjz++) {
+          double ix0 = iy0 * rho1d[0][li];
+          // double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
+          for (int mjz = off; mjz < nz + off; mjz++) {
             int mz = abs(mjz - miz) % nz_pppm;
-            for (int mjy = nylo_out; mjy <= nyhi_out; mjy++) {
+            for (int mjy = off; mjy < ny + off; mjy++) {
               int my = abs(mjy - miy) % ny_pppm;
-              for (int mjx = nxlo_out; mjx <= nxhi_out; mjx++) {
+              for (int mjx = off; mjx < nx + off; mjx++) {
                 int mx = abs(mjx - mix) % nx_pppm;
-                // if (nx_out * ny_out * (mjz - nzlo_out) +
-                // nx_out * (mjy - nylo_out) + (mjx - nxlo_out) >=
-                // nx_out * ny_out * nz_out) {
-                // cout << "WARNING: " << mjz << ", " << mjy << ", " << mjx
-                //<< endl;
-                //}
-                gw[ipos][nx_out * ny_out * (mjz - nzlo_out) +
-                         nx_out * (mjy - nylo_out) + (mjx - nxlo_out)] +=
+                gw[ipos]
+                  [nx * ny * (mjz - off) + nx * (mjy - off) + (mjx - off)] +=
                     greens_real[mz * nx_pppm * ny_pppm + my * nx_pppm + mx] *
                     ix0;
               }
@@ -1022,6 +985,20 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       }
     }
   }
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(lmp,
+                   fmt::format("step 1 time: {}\n", MPI_Wtime() - step1_time));
+  double step2_time = MPI_Wtime();
+  for (size_t i = 0; i < gw.size(); i++)
+    MPI_Allreduce(MPI_IN_PLACE, &gw[i].front(), nxyz, MPI_DOUBLE, MPI_SUM,
+                  world);
+  MPI_Barrier(world);
+  if (comm->me == 0)
+    utils::logmesg(lmp,
+                   fmt::format("step 2 time: {}\n", MPI_Wtime() - step2_time));
+
+  double step3_time = MPI_Wtime();
   cout << "gw done" << endl;
   // TODO reduce
   for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
@@ -1029,72 +1006,34 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
+    int dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
+    int diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
+    int diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
+    compute_rho1d(dix, diy, diz);
     for (int jpos = 0; jpos < nmat; jpos++) {
       double aij = 0.;
       for (int ni = nlower; ni <= nupper; ni++) {
+        double iz0 = rho1d[2][ni];
         int miz = ni + niz;
         for (int mi = nlower; mi <= nupper; mi++) {
+          double iy0 = iz0 * rho1d[1][mi];
           int miy = mi + niy;
           for (int li = nlower; li <= nupper; li++) {
             int mix = li + nix;
-            double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
-            aij += ix0 * gw[jpos][nx_out * ny_out * (miz - nzlo_out) +
-                                  nx_out * (miy - nylo_out) + (mix - nxlo_out)];
+            double ix0 = iy0 * rho1d[0][li];
+            // double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
+            aij += ix0 * gw[jpos][nx * ny * (miz - off) + nx * (miy - off) +
+                                  (mix - off)];
           }
         }
       }
       matrix[ipos][jpos] += aij / volume;
     }
   }
-
-  // old
-  // for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
-  // if (ipos < 0) continue;
-  // int nix = part2grid[i][0];
-  // int niy = part2grid[i][1];
-  // int niz = part2grid[i][2];
-  // for (int jpos = 0; jpos < nmat; jpos++) {
-  // double aij = 0.;
-  // int njx = ele2grid[jpos * 3 + 0];
-  // int njy = ele2grid[jpos * 3 + 1];
-  // int njz = ele2grid[jpos * 3 + 2];
-  // for (int ni = nlower; ni <= nupper; ni++) {
-  // int miz = ni + niz;
-  // for (int mi = nlower; mi <= nupper; mi++) {
-  // int miy = mi + niy;
-  // for (int li = nlower; li <= nupper; li++) {
-  // int mix = li + nix;
-  // double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
-  // for (int nj = nlower; nj <= nupper; nj++) {
-  // int mjz = nj + njz;
-  // int mz = abs(mjz - miz) % nz_pppm;
-  // for (int mj = nlower; mj <= nupper; mj++) {
-  // int mjy = mj + njy;
-  // int my = abs(mjy - miy) % ny_pppm;
-  // for (int lj = nlower; lj <= nupper; lj++) {
-  // int mjx = lj + njx;
-  // int mx = abs(mjx - mix) % nx_pppm;
-  //// TODO greens_real of diffs of indices really
-  //// completely symmetric?
-  // double jx0 = weight_bricks[weight_index(jpos, lj, mj, nj)];
-  //// aij += ix0 * jx0 * greens_debug[abs(mjz - miz)][mjy -
-  //// miy][mjx - mix];
-  // aij +=
-  // ix0 * jx0 *
-  // greens_real[mz * nx_pppm * ny_pppm + my * nx_pppm + mx];
-  //}
-  //}
-  //}
-  //}
-  //}
-  //}
-  // matrix[ipos][jpos] += aij / volume;
-  //}
-  //}
   MPI_Barrier(world);
   if (comm->me == 0)
     utils::logmesg(lmp,
-                   fmt::format("Matrix time: {}\n", MPI_Wtime() - matrix_time));
+                   fmt::format("step 3 time: {}\n", MPI_Wtime() - step3_time));
 
   // verify results by calculating Poisson energy in real space
   // double *q = atom->q;
