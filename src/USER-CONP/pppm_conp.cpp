@@ -982,19 +982,55 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // map green's function in real space from mesh to particle positions
   MPI_Barrier(world);
   double matrix_time = MPI_Wtime();
+  int nx_out = nxhi_out - nxlo_out + 1;
+  int ny_out = nyhi_out - nylo_out + 1;
+  int nz_out = nzhi_out - nzlo_out + 1;
+  cout << "OUT SIZE: " << nx_out * ny_out * nz_out;
+  vector<vector<double>> gw(nmat, vector<double>(nx_out * ny_out * nz_out, 0.));
   for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
-    assert(nix == ele2grid[ipos * 3 + 0]);
-    assert(niy == ele2grid[ipos * 3 + 1]);
-    assert(niz == ele2grid[ipos * 3 + 2]);
+    for (int ni = nlower; ni <= nupper; ni++) {
+      int miz = ni + niz;
+      for (int mi = nlower; mi <= nupper; mi++) {
+        int miy = mi + niy;
+        for (int li = nlower; li <= nupper; li++) {
+          int mix = li + nix;
+          double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
+          for (int mjz = nzlo_out; mjz <= nzhi_out; mjz++) {
+            int mz = abs(mjz - miz) % nz_pppm;
+            for (int mjy = nylo_out; mjy <= nyhi_out; mjy++) {
+              int my = abs(mjy - miy) % ny_pppm;
+              for (int mjx = nxlo_out; mjx <= nxhi_out; mjx++) {
+                int mx = abs(mjx - mix) % nx_pppm;
+                // if (nx_out * ny_out * (mjz - nzlo_out) +
+                // nx_out * (mjy - nylo_out) + (mjx - nxlo_out) >=
+                // nx_out * ny_out * nz_out) {
+                // cout << "WARNING: " << mjz << ", " << mjy << ", " << mjx
+                //<< endl;
+                //}
+                gw[ipos][nx_out * ny_out * (mjz - nzlo_out) +
+                         nx_out * (mjy - nylo_out) + (mjx - nxlo_out)] +=
+                    greens_real[mz * nx_pppm * ny_pppm + my * nx_pppm + mx] *
+                    ix0;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  cout << "gw done" << endl;
+  // TODO reduce
+  for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
+    if (ipos < 0) continue;
+    int nix = part2grid[i][0];
+    int niy = part2grid[i][1];
+    int niz = part2grid[i][2];
     for (int jpos = 0; jpos < nmat; jpos++) {
       double aij = 0.;
-      int njx = ele2grid[jpos * 3 + 0];
-      int njy = ele2grid[jpos * 3 + 1];
-      int njz = ele2grid[jpos * 3 + 2];
       for (int ni = nlower; ni <= nupper; ni++) {
         int miz = ni + niz;
         for (int mi = nlower; mi <= nupper; mi++) {
@@ -1002,32 +1038,59 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
           for (int li = nlower; li <= nupper; li++) {
             int mix = li + nix;
             double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
-            for (int nj = nlower; nj <= nupper; nj++) {
-              int mjz = nj + njz;
-              int mz = abs(mjz - miz) % nz_pppm;
-              for (int mj = nlower; mj <= nupper; mj++) {
-                int mjy = mj + njy;
-                int my = abs(mjy - miy) % ny_pppm;
-                for (int lj = nlower; lj <= nupper; lj++) {
-                  int mjx = lj + njx;
-                  int mx = abs(mjx - mix) % nx_pppm;
-                  // TODO greens_real of diffs of indices really
-                  // completely symmetric?
-                  double jx0 = weight_bricks[weight_index(jpos, lj, mj, nj)];
-                  // aij += ix0 * jx0 * greens_debug[abs(mjz - miz)][mjy -
-                  // miy][mjx - mix];
-                  aij +=
-                      ix0 * jx0 *
-                      greens_real[mz * nx_pppm * ny_pppm + my * nx_pppm + mx];
-                }
-              }
-            }
+            aij += ix0 * gw[jpos][nx_out * ny_out * (miz - nzlo_out) +
+                                  nx_out * (miy - nylo_out) + (mix - nxlo_out)];
           }
         }
       }
       matrix[ipos][jpos] += aij / volume;
     }
   }
+
+  // old
+  // for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
+  // if (ipos < 0) continue;
+  // int nix = part2grid[i][0];
+  // int niy = part2grid[i][1];
+  // int niz = part2grid[i][2];
+  // for (int jpos = 0; jpos < nmat; jpos++) {
+  // double aij = 0.;
+  // int njx = ele2grid[jpos * 3 + 0];
+  // int njy = ele2grid[jpos * 3 + 1];
+  // int njz = ele2grid[jpos * 3 + 2];
+  // for (int ni = nlower; ni <= nupper; ni++) {
+  // int miz = ni + niz;
+  // for (int mi = nlower; mi <= nupper; mi++) {
+  // int miy = mi + niy;
+  // for (int li = nlower; li <= nupper; li++) {
+  // int mix = li + nix;
+  // double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
+  // for (int nj = nlower; nj <= nupper; nj++) {
+  // int mjz = nj + njz;
+  // int mz = abs(mjz - miz) % nz_pppm;
+  // for (int mj = nlower; mj <= nupper; mj++) {
+  // int mjy = mj + njy;
+  // int my = abs(mjy - miy) % ny_pppm;
+  // for (int lj = nlower; lj <= nupper; lj++) {
+  // int mjx = lj + njx;
+  // int mx = abs(mjx - mix) % nx_pppm;
+  //// TODO greens_real of diffs of indices really
+  //// completely symmetric?
+  // double jx0 = weight_bricks[weight_index(jpos, lj, mj, nj)];
+  //// aij += ix0 * jx0 * greens_debug[abs(mjz - miz)][mjy -
+  //// miy][mjx - mix];
+  // aij +=
+  // ix0 * jx0 *
+  // greens_real[mz * nx_pppm * ny_pppm + my * nx_pppm + mx];
+  //}
+  //}
+  //}
+  //}
+  //}
+  //}
+  // matrix[ipos][jpos] += aij / volume;
+  //}
+  //}
   MPI_Barrier(world);
   if (comm->me == 0)
     utils::logmesg(lmp,
