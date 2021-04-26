@@ -955,9 +955,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
-    int dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
-    int diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
-    int diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
+    FFT_SCALAR dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
+    FFT_SCALAR diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
+    FFT_SCALAR diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
     compute_rho1d(dix, diy, diz);
     for (int ni = nlower; ni <= nupper; ni++) {
       double iz0 = rho1d[2][ni];
@@ -1015,9 +1015,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
-    int dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
-    int diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
-    int diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
+    FFT_SCALAR dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
+    FFT_SCALAR diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
+    FFT_SCALAR diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
     compute_rho1d(dix, diy, diz);
     for (int jpos = 0; jpos < nmat; jpos++) {
       double aij = 0.;
