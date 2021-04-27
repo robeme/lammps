@@ -922,9 +922,8 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 <<
   // endl;
 
-  // create weight brick for each electrode atom, (i.e. density_brick per
-  // atom w/0 charge) (nx,ny,nz) = global coords of grid pt to "lower
-  // left" of charge (dx,dy,dz) = distance to "lower left" grid pt
+  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge 
+  // (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
   int const nlocal = atom->nlocal;
   int nmat =
@@ -932,26 +931,21 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   MPI_Allreduce(MPI_IN_PLACE, &nmat, 1, MPI_INT, MPI_SUM, world);
   double **x = atom->x;
 
-  // map green's function in real space from mesh to particle positions
+  // map green's function in real space from mesh to particle positions with
+  // matrix multiplication 'W^T G W' in two steps. gw is result of first
+  // multiplication.
   MPI_Barrier(world);
   double step1_time = MPI_Wtime();
-  // TODO parallelize
   int nx = nx_pppm + order + 1;
   int ny = ny_pppm + order + 1;
   int nz = nz_pppm + order + 1;
   int nxyz = nx * ny * nz;
   int off = nlower - 1;
-  cout << "ns: " << nx << ", " << ny << ", " << nz << endl;
-  cout << "lo outs: " << nxlo_out << ", " << nylo_out << ", " << nzlo_out
-       << endl;
-  cout << "hi outs: " << nxhi_out << ", " << nyhi_out << ", " << nzhi_out
-       << endl;
-  cout << "lower, upper: " << nlower << ", " << nupper << endl;
-  cout << "OUT SIZE: " << nxyz << endl;
-  vector<vector<double>> gw(nmat, vector<double>(nxyz, 0.));
+  double **gw = new double *[nmat];
+  for (int i = 0; i < nmat; i++) gw[i] = new double[nxyz]();
+
   for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
-    cout << ipos;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
     int niz = part2grid[i][2];
@@ -969,7 +963,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
           int mix = li + nix;
           double ix0 = iy0 * rho1d[0][li];
           // double ix0 = weight_bricks[weight_index(ipos, li, mi, ni)];
-          cout << ",";
           for (int mjz = off; mjz < nz + off; mjz++) {
             int mz = abs(mjz - miz) % nz_pppm;
             for (int mjy = off; mjy < ny + off; mjy++) {
@@ -988,28 +981,23 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
               }
             }
           }
-          cout << ".";
         }
       }
     }
-    cout << endl;
   }
   MPI_Barrier(world);
   if (comm->me == 0)
     utils::logmesg(lmp,
                    fmt::format("step 1 time: {}\n", MPI_Wtime() - step1_time));
   double step2_time = MPI_Wtime();
-  for (size_t i = 0; i < gw.size(); i++)
-    MPI_Allreduce(MPI_IN_PLACE, &gw[i].front(), nxyz, MPI_DOUBLE, MPI_SUM,
-                  world);
+  for (int i = 0; i < nmat; i++)
+    MPI_Allreduce(MPI_IN_PLACE, gw[i], nxyz, MPI_DOUBLE, MPI_SUM, world);
   MPI_Barrier(world);
   if (comm->me == 0)
     utils::logmesg(lmp,
                    fmt::format("step 2 time: {}\n", MPI_Wtime() - step2_time));
 
   double step3_time = MPI_Wtime();
-  cout << "gw done" << endl;
-  // TODO reduce
   for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
     if (ipos < 0) continue;
     int nix = part2grid[i][0];
@@ -1043,6 +1031,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   if (comm->me == 0)
     utils::logmesg(lmp,
                    fmt::format("step 3 time: {}\n", MPI_Wtime() - step3_time));
+
+  for (int i = 0; i < nmat; i++) delete[] gw[i];
+  delete[] gw;
 
   // verify results by calculating Poisson energy in real space
   // double *q = atom->q;
