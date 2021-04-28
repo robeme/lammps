@@ -943,7 +943,8 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // int off = nlower - 1;
   vector<vector<double>> gw(nmat, vector<double>(nxyz, 0.));
   vector<vector<double>> x_ele(nmat, {0, 0, 0});
-  for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
+  for (int i = 0; i < nlocal;i++) {
+    int ipos = imat[i];
     if (ipos < 0) continue;
     for (int dim = 0; dim < 3; dim++) x_ele[ipos][dim] = x[i][dim];
   }
@@ -999,7 +1000,8 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   double step2_time = MPI_Wtime();
   int min_miz = nzhi_out;
   int max_miz = nzlo_out;
-  for (int i = 0, ipos = imat[i]; i < nlocal; ipos = imat[++i]) {
+  for (int i = 0; i < nlocal; i++) {
+    int ipos = imat[i];
     if (ipos < 0) continue;
     int nix = part2grid[i][0];
     int niy = part2grid[i][1];
