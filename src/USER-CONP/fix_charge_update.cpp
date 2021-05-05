@@ -253,13 +253,16 @@ void FixChargeUpdate::setup_post_neighbor() {
         vec[group_idx[i]][0] = b[i];
       }
       write_to_file(f_vec, taglist_bygroup, vec);
+      fclose(f_vec);
     }
     if (f_inv) {
       write_to_file(f_inv, taglist_bygroup, order_matrix(group_idx, elastance));
+      fclose(f_inv);
     }
     if (f_mat && !(read_inv)) {
       write_to_file(f_mat, taglist_bygroup,
                     order_matrix(group_idx, capacitance));
+      fclose(f_mat);
     }
   }
 }
@@ -606,7 +609,10 @@ std::vector<std::vector<double>> FixChargeUpdate::read_from_file(
     std::ifstream input(input_file);
     if (!input.is_open())
       error->all(FLERR, fmt::format("Cannot open {} for reading", input_file));
+    int i = 0;
     for (std::string line; getline(input, line);) {
+      i++;
+
       if (line.compare(0, 1, "#") == 0) continue;
       std::istringstream stream(line);
       std::string word;
@@ -628,18 +634,16 @@ std::vector<std::vector<double>> FixChargeUpdate::read_from_file(
           a_line.push_back(stof(word));
         }
         if ((bigint)a_line.size() != ngroup)
-          error->all(
-              FLERR,
-              fmt::format(
-                  "Number of read entries {} not equal to group members {}",
-                  a_line.size(), ngroup));
+          error->all(FLERR, fmt::format("Number of read entries {} not equal "
+                                        "to group members {}. Line {}.",
+                                        a_line.size(), ngroup, i));
         matrix.push_back(a_line);
       }
     }
     if ((bigint)matrix.size() != ngroup)
       error->all(
           FLERR,
-          fmt::format("Number of lines {} read not equal to group members {}",
+          fmt::format("Number of lines {} read not equal to group members {}.",
                       matrix.size(), ngroup));
 
     std::vector<tagint> idx;
