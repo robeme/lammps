@@ -204,9 +204,9 @@ void ComputeConpVector::setup() {
 void ComputeConpVector::compute_vector() {
   update_mpos();
   for (int i = 0; i < ngroup; i++) vector[i] = 0.;
-  if (pairflag) pair_contribution();
+  //if (pairflag) pair_contribution();
   if (kspaceflag) kspace->compute_vector(mpos, vector);
-  if (boundaryflag) kspace->compute_vector_corr(mpos, vector);
+  //if (boundaryflag) kspace->compute_vector_corr(mpos, vector);
   MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
 }
 

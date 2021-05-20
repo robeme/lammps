@@ -69,6 +69,7 @@ PPPMConp::PPPMConp(LAMMPS *lmp)
     : KSpace(lmp),
       factors(nullptr),
       density_brick(nullptr),
+      electrolyte_density_brick(nullptr),
       vdx_brick(nullptr),
       vdy_brick(nullptr),
       vdz_brick(nullptr),
@@ -85,6 +86,7 @@ PPPMConp::PPPMConp(LAMMPS *lmp)
       fky(nullptr),
       fkz(nullptr),
       density_fft(nullptr),
+      electrolyte_density_fft(nullptr),
       work1(nullptr),
       work2(nullptr),
       gf_b(nullptr),
@@ -132,8 +134,9 @@ PPPMConp::PPPMConp(LAMMPS *lmp)
   nyhi_in = nylo_in = nyhi_out = nylo_out = 0;
   nzhi_in = nzlo_in = nzhi_out = nzlo_out = 0;
 
-  density_brick = vdx_brick = vdy_brick = vdz_brick = nullptr;
-  density_fft = nullptr;
+  electrolyte_density_brick = density_brick = vdx_brick = vdy_brick =
+      vdz_brick = nullptr;
+  electrolyte_density_fft = density_fft = nullptr;
   u_brick = nullptr;
   v0_brick = v1_brick = v2_brick = v3_brick = v4_brick = v5_brick = nullptr;
   greensfn = nullptr;
@@ -664,10 +667,8 @@ void PPPMConp::compute(int eflag, int vflag) {
 
   // if atom count has changed, update qsum and qsqsum
 
-  if (atom->natoms != natoms_original) {
-    qsum_qsq();
-    natoms_original = atom->natoms;
-  }
+  qsum_qsq();
+  natoms_original = atom->natoms;
 
   // return if there are no charges
 
@@ -812,9 +813,40 @@ void PPPMConp::compute(int eflag, int vflag) {
 ------------------------------------------------------------------------- */
 
 double PPPMConp::debug_fft(int ix, int iy, int iz) {
-  int n = 0;
+  for (int i = 0, n = 0; i < nfft; i++) {
+    work1[n++] = electrolyte_density_fft[i];
+    work1[n++] = ZEROF;
+  }
+  fft1->compute(work1, work1, -1);
+  // rho*
+  // for (int kz = nzlo_fft, n = 0; kz <= nzhi_fft; kz++) {
+  // for (int ky = nylo_fft; ky <= nyhi_fft; ky++) {
+  // for (int kx = nxlo_fft; kx <= nxhi_fft; kx++) {
+  // double out1 = 0;
+  // double out2 = 0;
+  // for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
+  // for (int iy = nylo_in; iy <= nyhi_in; iy++) {
+  // for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
+  // double z = MY_2PI * kz * iz * 1. / nz_pppm;
+  // double y = MY_2PI * ky * iy * 1. / ny_pppm;
+  // double x = MY_2PI * kx * ix * 1. / nx_pppm;
+  // out1 += (cos(x) * cos(y) * cos(z) - cos(x) * sin(y) * sin(z) -
+  // sin(x) * cos(y) * sin(z) - sin(x) * sin(y) * cos(z)) *
+  // electrolyte_density_brick[iz][iy][ix];
+  // out2 -= (-sin(x) * sin(y) * sin(z) + cos(x) * cos(y) * sin(z) +
+  // cos(x) * sin(y) * cos(z) + sin(x) * cos(y) * cos(z)) *
+  // electrolyte_density_brick[iz][iy][ix];
+  //}
+  //}
+  //}
+  // cout << work1[n] << ", " << out1 << endl;
+  // cout << work1[n + 1] << ", " << out2 << endl;
+  // n += 2;
+  //}
+  //}
+  //}
   double out = 0.;
-  for (int kz = nzlo_fft; kz <= nzhi_fft; kz++)
+  for (int kz = nzlo_fft, n = 0; kz <= nzhi_fft; kz++)
     for (int ky = nylo_fft; ky <= nyhi_fft; ky++)
       for (int kx = nxlo_fft; kx <= nxhi_fft; kx++) {
         double z = MY_2PI * kz * iz * 1. / nz_pppm;
@@ -822,13 +854,198 @@ double PPPMConp::debug_fft(int ix, int iy, int iz) {
         double x = MY_2PI * kx * ix * 1. / nx_pppm;
         out += (cos(x) * cos(y) * cos(z) - cos(x) * sin(y) * sin(z) -
                 sin(x) * cos(y) * sin(z) - sin(x) * sin(y) * cos(z)) *
-               greensfn[n++];
+               greensfn[n] * work1[2 * n];
+        out += (-sin(x) * sin(y) * sin(z) + cos(x) * cos(y) * sin(z) +
+                cos(x) * sin(y) * cos(z) + sin(x) * cos(y) * cos(z)) *
+               greensfn[n] * work1[2 * n + 1];
+        n++;
       }
   return out;
 }
 
 /* ----------------------------------------------------------------------
 ------------------------------------------------------------------------- */
+void PPPMConp::compute_vector(bigint *imat, double *vec) {
+  double const scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
+  double const s2 = scaleinv * scaleinv;
+  // TODO build particle map once per timestep
+  if (triclinic == 0)
+    boxlo = domain->boxlo;
+  else {
+    boxlo = domain->boxlo_lamda;
+    domain->x2lamda(atom->nlocal);
+  }
+  // extend size of per-atom arrays if necessary
+  if (atom->nmax > nmax) {
+    memory->destroy(part2grid);
+    nmax = atom->nmax;
+    memory->create(part2grid, nmax, 3, "pppm/conp:part2grid");
+  }
+  // find grid points for all my particles
+  // map my particle charge onto my local 3d density grid
+  particle_map();
+
+  // debugging setup
+  FFT_SCALAR *work_debug;
+  memory->create(work_debug, 2 * nfft_both, "pppm/conp:work_debug");
+  // temporarily store and switch pointers so we can
+  //  use brick2fft() for groups A and B (without
+  //  writing an additional function)
+  FFT_SCALAR ***density_brick_real = density_brick;
+  FFT_SCALAR *density_fft_real = density_fft;
+
+  // debugging: setup electrode density
+  debug_make_electrode_rho(imat);
+  density_brick = electrode_density_brick;
+  density_fft = electrode_density_fft;
+  gc->reverse_comm_kspace(this, 1, sizeof(FFT_SCALAR), REVERSE_RHO, gc_buf1,
+                          gc_buf2, MPI_FFT_SCALAR);
+  brick2fft();
+
+  make_electrolyte_rho(imat);
+  density_brick = electrolyte_density_brick;
+  density_fft = electrolyte_density_fft;
+  gc->reverse_comm_kspace(this, 1, sizeof(FFT_SCALAR), REVERSE_RHO, gc_buf1,
+                          gc_buf2, MPI_FFT_SCALAR);
+  brick2fft();
+
+  // switch back pointers
+  density_brick = density_brick_real;
+  density_fft = density_fft_real;
+
+  // debugging fft for electrode
+  for (int i = 0, n = 0; i < nfft; i++) {
+    work_debug[n++] = electrode_density_fft[i];
+    work_debug[n++] = ZEROF;
+  }
+  fft1->compute(work_debug, work_debug, 1);
+  // transform electrolyte charge density (r -> k) (complex conjugate)
+  for (int i = 0, n = 0; i < nfft; i++) {
+    work1[n++] = electrolyte_density_fft[i];
+    work1[n++] = ZEROF;
+  }
+  fft1->compute(work1, work1, -1);
+
+  // debugging: check electrode-electrolyte energy:
+  double debug_qQ = 0.;
+  double debug_QQ = 0.;
+  double debug_qq = 0.;
+  for (int i = 0, n = 0; i < nfft; i++) {
+    debug_qQ += s2 * greensfn[i] *
+                (work1[n] * work_debug[n] - work1[n + 1] * work_debug[n + 1]);
+    debug_qq +=
+        s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n + 1]);
+    debug_QQ +=
+        s2 * greensfn[i] *
+        (work_debug[n] * work_debug[n] + work_debug[n + 1] * work_debug[n + 1]);
+    n += 2;
+  }
+  cout << "debug_qQ: " << debug_qQ * volume << endl;
+  cout << "debug_QQ: " << debug_QQ * volume << endl;
+  cout << "debug_qq: " << debug_qq  * volume<< endl;
+  cout << "debug total: " << debug_qq + debug_QQ + 2 * debug_qQ << endl;
+
+  // k->r FFT of Green's * electrolyte density = brick_psi
+  for (int i = 0, n = 0; i < nfft; i++) {
+    work2[n] = work1[n] * greensfn[i];
+    n++;
+    work2[n] = work1[n] * greensfn[i];
+    n++;
+  }
+  fft2->compute(work2, work2, 1);
+  vector<double> brick_psi(nz_pppm * ny_pppm * nx_pppm, 0.);
+  // debug_fft(0, 0, 0);
+  for (int k = nzlo_in, n = 0; k <= nzhi_in; k++)
+    for (int j = nylo_in; j <= nyhi_in; j++)
+      for (int i = nxlo_in; i <= nxhi_in; i++) {
+        brick_psi[ny_pppm * nx_pppm * k + nx_pppm * j + i] = work2[n];
+        if (abs(work2[n + 1]) > SMALL)
+          cout << n + 1 << ", " << work2[n + 1] << endl;
+        n += 2;
+      }
+  MPI_Allreduce(MPI_IN_PLACE, &brick_psi.front(), nz_pppm * ny_pppm * nx_pppm,
+                MPI_DOUBLE, MPI_SUM, world);
+
+  // project brick_psi with weight matrix
+  double **x = atom->x;
+  for (int i = 0; i < atom->nlocal; i++) {
+    int ipos = imat[i];
+    if (ipos < 0) continue;
+    double v = 0.;
+    // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
+    // (dx,dy,dz) = distance to "lower left" grid pt
+    // (mx,my,mz) = global coords of moving stencil pt
+    int nix = part2grid[i][0];
+    int niy = part2grid[i][1];
+    int niz = part2grid[i][2];
+    FFT_SCALAR dix = nix + shiftone - (x[i][0] - boxlo[0]) * delxinv;
+    FFT_SCALAR diy = niy + shiftone - (x[i][1] - boxlo[1]) * delyinv;
+    FFT_SCALAR diz = niz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
+    compute_rho1d(dix, diy, diz);
+    for (int ni = nlower; ni <= nupper; ni++) {
+      double iz0 = rho1d[2][ni];
+      int miz = ni + niz;
+      // int debug_miz = miz;
+      while (miz < 0) miz += nz_pppm;
+      miz = miz % nz_pppm;
+      for (int mi = nlower; mi <= nupper; mi++) {
+        double iy0 = iz0 * rho1d[1][mi];
+        int miy = mi + niy;
+        // int debug_miy = miy;
+        while (miy < 0) miy += ny_pppm;
+        miy = miy % ny_pppm;
+        for (int li = nlower; li <= nupper; li++) {
+          int mix = li + nix;
+          // int debug_mix = mix;
+          while (mix < 0) mix += nx_pppm;
+          mix = mix % nx_pppm;
+          double ix0 = iy0 * rho1d[0][li];
+          assert(miz >= 0);
+          assert(miy >= 0);
+          assert(mix >= 0);
+          assert(miz < nz_pppm);
+          assert(miy < ny_pppm);
+          assert(mix < nx_pppm);
+          // double debug = debug_fft(mix, miy, miz);
+          // if (abs(debug -
+          // brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]) >
+          // SMALL) {
+          // cout << mix << ", " << miy << ", " << mix << endl;
+          // cout << "FFT: " << debug_fft(mix, miy, miz) << ", "
+          //<< brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]
+          //<< endl;
+          //}
+          // if (abs(debug_fft(debug_mix, debug_miy, debug_miz) -
+          // brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]) >
+          // SMALL) {
+          // cout << debug_mix << ", " << debug_miy << ", " << debug_miz <<
+          // endl; cout << debug_fft(debug_mix, debug_miy, debug_miz) << ", "
+          //<< brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]
+          //<< endl;
+          //}
+          v += ix0 * brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix];
+        }
+      }
+    }
+    vec[ipos] += v * scaleinv;
+  }
+
+  // debug BQ energy
+  double debug_BQ = 0;
+  for (int i = 0; i < atom->nlocal; i++) {
+    int ipos = imat[i];
+    if (ipos < 0) continue;
+    debug_BQ += vec[ipos] * atom->q[i];
+  }
+  cout << "debug_BQ: " << debug_BQ << endl;
+  cout << "volume: " << volume << endl;
+  cout << "scale inv: " << scaleinv << endl;
+
+  memory->destroy(work_debug);
+}
+/* ----------------------------------------------------------------------
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   if (comm->me == 0) cout << "MATRIX calculation" << endl;
@@ -849,8 +1066,8 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // double k_energy = 0;
   // for (int i = 0, n = 0; i < nfft; i++) {
   // k_energy +=
-  // s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n + 1]);
-  // n += 2;
+  // s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n +
+  // 1]); n += 2;
   //}
   // cout << "DEBUG POISSON: " << k_energy << endl;
 
@@ -918,9 +1135,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   //}
   //}
   // cout << "TOTAL RHO: " << total_rho << endl;
-  // cout << "MESH ENERGY: " << mesh_energy << ", " << mesh_energy * s2 << endl;
-  // cout << "DEBUG ENERGY: " << debug_energy << ", " << debug_energy * s2 <<
-  // endl;
+  // cout << "MESH ENERGY: " << mesh_energy << ", " << mesh_energy * s2 <<
+  // endl; cout << "DEBUG ENERGY: " << debug_energy << ", " <<
+  // debug_energy * s2 << endl;
 
   // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
   // (dx,dy,dz) = distance to "lower left" grid pt
@@ -931,9 +1148,9 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   MPI_Allreduce(MPI_IN_PLACE, &nmat, 1, MPI_INT, MPI_SUM, world);
   double **x = atom->x;
 
-  // map green's function in real space from mesh to particle positions with
-  // matrix multiplication 'W^T G W' in two steps. gw is result of first
-  // multiplication.
+  // map green's function in real space from mesh to particle positions
+  // with matrix multiplication 'W^T G W' in two steps. gw is result of
+  // first multiplication.
   MPI_Barrier(world);
   double step1_time = MPI_Wtime();
   int nx_conp = nxhi_out - nxlo_out + 1;  // nx_pppm + order + 1;
@@ -943,7 +1160,7 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   // int off = nlower - 1;
   vector<vector<double>> gw(nmat, vector<double>(nxyz, 0.));
   vector<vector<double>> x_ele(nmat, {0, 0, 0});
-  for (int i = 0; i < nlocal;i++) {
+  for (int i = 0; i < nlocal; i++) {
     int ipos = imat[i];
     if (ipos < 0) continue;
     for (int dim = 0; dim < 3; dim++) x_ele[ipos][dim] = x[i][dim];
@@ -954,8 +1171,8 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
 
   for (int ipos = 0; ipos < nmat; ipos++) {
     vector<double> xi_ele = x_ele[ipos];
-    // new calculation for nx, ny, nz because part2grid available for nlocal,
-    // only
+    // new calculation for nx, ny, nz because part2grid available for
+    // nlocal, only
     int nix =
         static_cast<int>((xi_ele[0] - boxlo[0]) * delxinv + shift) - OFFSET;
     int niy =
@@ -1067,13 +1284,24 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
 
 /* ----------------------------------------------------------------------
    allocate memory that depends on # of K-vectors and order
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::allocate() {
+  memory->create3d_offset(electrode_density_brick, nzlo_out, nzhi_out, nylo_out,
+                          nyhi_out, nxlo_out, nxhi_out,
+                          "pppm/conp:electrode_density_brick");
+  memory->create3d_offset(electrolyte_density_brick, nzlo_out, nzhi_out,
+                          nylo_out, nyhi_out, nxlo_out, nxhi_out,
+                          "pppm/conp:electrolyte_density_brick");
   memory->create3d_offset(density_brick, nzlo_out, nzhi_out, nylo_out, nyhi_out,
                           nxlo_out, nxhi_out, "pppm/conp:density_brick");
 
   memory->create(density_fft, nfft_both, "pppm/conp:density_fft");
+  memory->create(electrode_density_fft, nfft_both,
+                 "pppm/conp:electrode_density_fft");
+  memory->create(electrolyte_density_fft, nfft_both,
+                 "pppm/conp:electrolyte_density_fft");
   memory->create(greensfn, nfft_both, "pppm/conp:greensfn");
   memory->create(work1, 2 * nfft_both, "pppm/conp:work1");
   memory->create(work2, 2 * nfft_both, "pppm/conp:work2");
@@ -1142,7 +1370,8 @@ void PPPMConp::allocate() {
                     nzhi_fft, 1, 0, 0, FFT_PRECISION, collective_flag);
 
   // create ghost grid object for rho and electric field communication
-  // also create 2 bufs for ghost grid cell comm, passed to GridComm methods
+  // also create 2 bufs for ghost grid cell comm, passed to GridComm
+  // methods
 
   gc = new GridComm(lmp, world, nx_pppm, ny_pppm, nz_pppm, nxlo_in, nxhi_in,
                     nylo_in, nyhi_in, nzlo_in, nzhi_in, nxlo_out, nxhi_out,
@@ -1161,10 +1390,13 @@ void PPPMConp::allocate() {
 
 /* ----------------------------------------------------------------------
    deallocate memory that depends on # of K-vectors and order
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::deallocate() {
   memory->destroy3d_offset(density_brick, nzlo_out, nylo_out, nxlo_out);
+  memory->destroy3d_offset(electrolyte_density_brick, nzlo_out, nylo_out,
+                           nxlo_out);
 
   if (differentiation_flag == 1) {
     memory->destroy3d_offset(u_brick, nzlo_out, nylo_out, nxlo_out);
@@ -1181,6 +1413,7 @@ void PPPMConp::deallocate() {
   }
 
   memory->destroy(density_fft);
+  memory->destroy(electrolyte_density_fft);
   memory->destroy(greensfn);
   memory->destroy(work1);
   memory->destroy(work2);
@@ -1213,7 +1446,8 @@ void PPPMConp::deallocate() {
 
 /* ----------------------------------------------------------------------
    allocate per-atom memory that depends on # of K-vectors and order
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::allocate_peratom() {
   peratom_allocate_flag = 1;
@@ -1252,7 +1486,8 @@ void PPPMConp::allocate_peratom() {
 
 /* ----------------------------------------------------------------------
    deallocate per-atom memory that depends on # of K-vectors and order
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::deallocate_peratom() {
   peratom_allocate_flag = 0;
@@ -1271,7 +1506,8 @@ void PPPMConp::deallocate_peratom() {
 /* ----------------------------------------------------------------------
    set global size of PPPM grid = nx,ny,nz_pppm
    used for charge accumulation, FFTs, and electric field interpolation
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::set_grid_global() {
   // use xprd,yprd,zprd (even if triclinic, and then scale later)
@@ -1411,7 +1647,8 @@ void PPPMConp::set_grid_global() {
 /* ----------------------------------------------------------------------
    check if all factors of n are in list of factors
    return 1 if yes, 0 if no
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 int PPPMConp::factorable(int n) {
   int i;
@@ -1431,7 +1668,8 @@ int PPPMConp::factorable(int n) {
 
 /* ----------------------------------------------------------------------
    compute estimated kspace force error
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::compute_df_kspace() {
   double xprd = domain->xprd;
@@ -1456,7 +1694,8 @@ double PPPMConp::compute_df_kspace() {
 
 /* ----------------------------------------------------------------------
    compute qopt
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::compute_qopt() {
   int k, l, m, nx, ny, nz;
@@ -1548,7 +1787,8 @@ double PPPMConp::compute_qopt() {
 
 /* ----------------------------------------------------------------------
    estimate kspace force error for ik method
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::estimate_ik_error(double h, double prd, bigint natoms) {
   double sum = 0.0;
@@ -1565,7 +1805,8 @@ double PPPMConp::estimate_ik_error(double h, double prd, bigint natoms) {
 /* ----------------------------------------------------------------------
    adjust the g_ewald parameter to near its optimal value
    using a Newton-Raphson solver
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::adjust_gewald() {
   double dx;
@@ -1580,7 +1821,8 @@ void PPPMConp::adjust_gewald() {
 
 /* ----------------------------------------------------------------------
    calculate f(x) using Newton-Raphson solver
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::newton_raphson_f() {
   double xprd = domain->xprd;
@@ -1599,7 +1841,8 @@ double PPPMConp::newton_raphson_f() {
 /* ----------------------------------------------------------------------
    calculate numerical derivative f'(x) using forward difference
    [f(x + h) - f(x)] / h
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::derivf() {
   double h = 0.000001;  // Derivative step-size
@@ -1617,7 +1860,8 @@ double PPPMConp::derivf() {
 
 /* ----------------------------------------------------------------------
    calculate the final estimate of the accuracy
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::final_accuracy() {
   double xprd = domain->xprd;
@@ -1641,15 +1885,18 @@ double PPPMConp::final_accuracy() {
    set local subset of PPPM/FFT grid that I own
    n xyz lo/hi in = 3d brick that I own (inclusive)
    n xyz lo/hi out = 3d brick + ghost cells in 6 directions (inclusive)
-   n xyz lo/hi fft = FFT columns that I own (all of x dim, 2d decomp in yz)
-------------------------------------------------------------------------- */
+   n xyz lo/hi fft = FFT columns that I own (all of x dim, 2d decomp in
+yz)
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::set_grid_local() {
   // global indices of PPPM grid range from 0 to N-1
   // nlo_in,nhi_in = lower/upper limits of the 3d sub-brick of
   //   global PPPM grid that I own without ghost cells
   // for slab PPPM, assign z grid as if it were not extended
-  // both non-tiled and tiled proc layouts use 0-1 fractional sumdomain info
+  // both non-tiled and tiled proc layouts use 0-1 fractional sumdomain
+  // info
 
   if (comm->layout != Comm::LAYOUT_TILED) {
     nxlo_in = static_cast<int>(comm->xsplit[comm->myloc[0]] * nx_pppm /
@@ -1704,7 +1951,8 @@ void PPPMConp::set_grid_local() {
   // nlo_out,nhi_out = lower/upper limits of the 3d sub-brick of
   //   global PPPM grid that my particles can contribute charge to
   // effectively nlo_in,nhi_in + ghost cells
-  // nlo,nhi = global coords of grid pt to "lower left" of smallest/largest
+  // nlo,nhi = global coords of grid pt to "lower left" of
+  // smallest/largest
   //           position a particle in my box can be at
   // dist[3] = particle position bound = subbox + skin/2.0 + qdist
   //   qdist = offset due to TIP4P fictitious charge
@@ -1779,8 +2027,8 @@ void PPPMConp::set_grid_local() {
   // for slab PPPM, change the grid boundary for processors at +z end
   //   to include the empty volume between periodically repeating slabs
   // for slab PPPM, want charge data communicated from -z proc to +z proc,
-  //   but not vice versa, also want field data communicated from +z proc to
-  //   -z proc, but not vice versa
+  //   but not vice versa, also want field data communicated from +z proc
+  //   to -z proc, but not vice versa
   // this is accomplished by nzhi_in = nzhi_out on +z end (no ghost cells)
   // also insure no other procs use ghost cells beyond +z limit
   // differnet logic for non-tiled vs tiled decomposition
@@ -1811,9 +2059,9 @@ void PPPMConp::set_grid_local() {
 
   // x-pencil decomposition of FFT mesh
   // global indices range from 0 to N-1
-  // each proc owns entire x-dimension, clumps of columns in y,z dimensions
-  // npey_fft,npez_fft = # of procs in y,z dims
-  // if nprocs is small enough, proc can own 1 or more entire xy planes,
+  // each proc owns entire x-dimension, clumps of columns in y,z
+  // dimensions npey_fft,npez_fft = # of procs in y,z dims if nprocs is
+  // small enough, proc can own 1 or more entire xy planes,
   //   else proc owns 2d sub-blocks of yz plane
   // me_y,me_z = which proc (0-npe_fft-1) I am in y,z dimensions
   // nlo_fft,nhi_fft = lower/upper limit of the section
@@ -1855,7 +2103,8 @@ void PPPMConp::set_grid_local() {
 
 /* ----------------------------------------------------------------------
    pre-compute Green's function denominator expansion coeffs, Gamma(2n)
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_gf_denom() {
   int k, l, m;
@@ -1878,7 +2127,8 @@ void PPPMConp::compute_gf_denom() {
 
 /* ----------------------------------------------------------------------
    pre-compute modified (Hockney-Eastwood) Coulomb Green's function
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_gf_ik() {
   const double *const prd = domain->prd;
@@ -1966,7 +2216,8 @@ void PPPMConp::compute_gf_ik() {
 /* ----------------------------------------------------------------------
    pre-compute modified (Hockney-Eastwood) Coulomb Green's function
    for a triclinic system
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_gf_ik_triclinic() {
   double snx, sny, snz;
@@ -2059,7 +2310,8 @@ void PPPMConp::compute_gf_ik_triclinic() {
 
 /* ----------------------------------------------------------------------
    compute optimized Green's function for energy calculation
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_gf_ad() {
   const double *const prd = domain->prd;
@@ -2158,7 +2410,8 @@ void PPPMConp::compute_gf_ad() {
 
 /* ----------------------------------------------------------------------
    compute self force coefficients for ad-differentiation scheme
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_sf_precoeff() {
   int i, k, l, m, n;
@@ -2241,7 +2494,8 @@ void PPPMConp::compute_sf_precoeff() {
    find center grid pt for each of my particles
    check that full stencil for the particle will fit in my 3d brick
    store central grid pt indices in part2grid array
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::particle_map() {
   int nx, ny, nz;
@@ -2278,13 +2532,117 @@ void PPPMConp::particle_map() {
 
   if (flag) error->one(FLERR, "Out of range atoms - cannot compute PPPM/conp");
 }
+/* ----------------------------------------------------------------------
+   create discretized "density" of electrode particles (c.f. make_rho())
+   density(x,y,z) = charge "density" at grid points of my 3d brick
+   TODO remove. This is only needed for debugging
+-------------------------------------------------------------------------
+*/
+
+void PPPMConp::debug_make_electrode_rho(bigint *imat) {
+  int l, m, n, nx, ny, nz, mx, my, mz;
+  FFT_SCALAR dx, dy, dz, x0, y0, z0;
+
+  // clear 3d density array
+
+  memset(&(electrode_density_brick[nzlo_out][nylo_out][nxlo_out]), 0,
+         ngrid * sizeof(FFT_SCALAR));
+
+  // loop over my charges, add their contribution to nearby grid points
+  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
+  // (dx,dy,dz) = distance to "lower left" grid pt
+  // (mx,my,mz) = global coords of moving stencil pt
+
+  double *q = atom->q;
+  double **x = atom->x;
+  int nlocal = atom->nlocal;
+
+  for (int i = 0; i < nlocal; i++) {
+    if (imat[i] < 0) continue;
+    nx = part2grid[i][0];
+    ny = part2grid[i][1];
+    nz = part2grid[i][2];
+    dx = nx + shiftone - (x[i][0] - boxlo[0]) * delxinv;
+    dy = ny + shiftone - (x[i][1] - boxlo[1]) * delyinv;
+    dz = nz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
+
+    compute_rho1d(dx, dy, dz);
+
+    z0 = delvolinv * q[i];
+    for (n = nlower; n <= nupper; n++) {
+      mz = n + nz;
+      y0 = z0 * rho1d[2][n];
+      for (m = nlower; m <= nupper; m++) {
+        my = m + ny;
+        x0 = y0 * rho1d[1][m];
+        for (l = nlower; l <= nupper; l++) {
+          mx = l + nx;
+          electrode_density_brick[mz][my][mx] += x0 * rho1d[0][l];
+        }
+      }
+    }
+  }
+}
+/* ----------------------------------------------------------------------
+   create discretized "density" of electrolyte particles (c.f. make_rho())
+   density(x,y,z) = charge "density" at grid points of my 3d brick
+   (nxlo:nxhi,nylo:nyhi,nzlo:nzhi) is extent of my brick (including
+ghosts) in global grid
+-------------------------------------------------------------------------
+*/
+
+void PPPMConp::make_electrolyte_rho(bigint *imat) {
+  int l, m, n, nx, ny, nz, mx, my, mz;
+  FFT_SCALAR dx, dy, dz, x0, y0, z0;
+
+  // clear 3d density array
+
+  memset(&(electrolyte_density_brick[nzlo_out][nylo_out][nxlo_out]), 0,
+         ngrid * sizeof(FFT_SCALAR));
+
+  // loop over my charges, add their contribution to nearby grid points
+  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
+  // (dx,dy,dz) = distance to "lower left" grid pt
+  // (mx,my,mz) = global coords of moving stencil pt
+
+  double *q = atom->q;
+  double **x = atom->x;
+  int nlocal = atom->nlocal;
+
+  for (int i = 0; i < nlocal; i++) {
+    if (imat[i] >= 0) continue;
+    nx = part2grid[i][0];
+    ny = part2grid[i][1];
+    nz = part2grid[i][2];
+    dx = nx + shiftone - (x[i][0] - boxlo[0]) * delxinv;
+    dy = ny + shiftone - (x[i][1] - boxlo[1]) * delyinv;
+    dz = nz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
+
+    compute_rho1d(dx, dy, dz);
+
+    z0 = delvolinv * q[i];
+    for (n = nlower; n <= nupper; n++) {
+      mz = n + nz;
+      y0 = z0 * rho1d[2][n];
+      for (m = nlower; m <= nupper; m++) {
+        my = m + ny;
+        x0 = y0 * rho1d[1][m];
+        for (l = nlower; l <= nupper; l++) {
+          mx = l + nx;
+          electrolyte_density_brick[mz][my][mx] += x0 * rho1d[0][l];
+        }
+      }
+    }
+  }
+}
 
 /* ----------------------------------------------------------------------
-   create discretized "density" on section of global grid due to my particles
-   density(x,y,z) = charge "density" at grid points of my 3d brick
-   (nxlo:nxhi,nylo:nyhi,nzlo:nzhi) is extent of my brick (including ghosts)
-   in global grid
-------------------------------------------------------------------------- */
+   create discretized "density" on section of global grid due to my
+particles density(x,y,z) = charge "density" at grid points of my 3d brick
+   (nxlo:nxhi,nylo:nyhi,nzlo:nzhi) is extent of my brick (including
+ghosts) in global grid
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::make_rho() {
   int l, m, n, nx, ny, nz, mx, my, mz;
@@ -2332,7 +2690,8 @@ void PPPMConp::make_rho() {
 
 /* ----------------------------------------------------------------------
    remap density from 3d brick decomposition to FFT decomposition
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::brick2fft() {
   int n, ix, iy, iz;
@@ -2352,7 +2711,8 @@ void PPPMConp::brick2fft() {
 
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson() {
   if (differentiation_flag == 1)
@@ -2363,7 +2723,8 @@ void PPPMConp::poisson() {
 
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver for ik
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson_ik() {
   int i, j, k, n;
@@ -2403,6 +2764,7 @@ void PPPMConp::poisson_ik() {
       }
     }
   }
+  cout << "Poisson energy: " << energy << endl;
 
   // scale by 1/total-grid-pts to get rho(k)
   // multiply by Green's function to get V(k)
@@ -2494,7 +2856,8 @@ void PPPMConp::poisson_ik() {
 
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver for ik for a triclinic system
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson_ik_triclinic() {
   int i, j, k, n;
@@ -2563,7 +2926,8 @@ void PPPMConp::poisson_ik_triclinic() {
 
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver for ad
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson_ad() {
   int i, j, k, n;
@@ -2637,7 +3001,8 @@ void PPPMConp::poisson_ad() {
 
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver for per-atom energy/virial
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson_peratom() {
   int i, j, k, n;
@@ -2772,7 +3137,8 @@ void PPPMConp::poisson_peratom() {
 
 /* ----------------------------------------------------------------------
    interpolate from grid to get electric field & force on my particles
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::fieldforce() {
   if (differentiation_flag == 1)
@@ -2782,19 +3148,21 @@ void PPPMConp::fieldforce() {
 }
 
 /* ----------------------------------------------------------------------
-   interpolate from grid to get electric field & force on my particles for ik
-------------------------------------------------------------------------- */
+   interpolate from grid to get electric field & force on my particles for
+ik
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::fieldforce_ik() {
   int i, l, m, n, nx, ny, nz, mx, my, mz;
   FFT_SCALAR dx, dy, dz, x0, y0, z0;
   FFT_SCALAR ekx, eky, ekz;
 
-  // loop over my charges, interpolate electric field from nearby grid points
-  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
-  // (dx,dy,dz) = distance to "lower left" grid pt
-  // (mx,my,mz) = global coords of moving stencil pt
-  // ek = 3 components of E-field on particle
+  // loop over my charges, interpolate electric field from nearby grid
+  // points (nx,ny,nz) = global coords of grid pt to "lower left" of
+  // charge (dx,dy,dz) = distance to "lower left" grid pt (mx,my,mz) =
+  // global coords of moving stencil pt ek = 3 components of E-field on
+  // particle
 
   double *q = atom->q;
   double **x = atom->x;
@@ -2842,8 +3210,10 @@ void PPPMConp::fieldforce_ik() {
 }
 
 /* ----------------------------------------------------------------------
-   interpolate from grid to get electric field & force on my particles for ad
-------------------------------------------------------------------------- */
+   interpolate from grid to get electric field & force on my particles for
+ad
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::fieldforce_ad() {
   int i, l, m, n, nx, ny, nz, mx, my, mz;
@@ -2862,11 +3232,11 @@ void PPPMConp::fieldforce_ad() {
   double hy_inv = ny_pppm / yprd;
   double hz_inv = nz_pppm / zprd;
 
-  // loop over my charges, interpolate electric field from nearby grid points
-  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
-  // (dx,dy,dz) = distance to "lower left" grid pt
-  // (mx,my,mz) = global coords of moving stencil pt
-  // ek = 3 components of E-field on particle
+  // loop over my charges, interpolate electric field from nearby grid
+  // points (nx,ny,nz) = global coords of grid pt to "lower left" of
+  // charge (dx,dy,dz) = distance to "lower left" grid pt (mx,my,mz) =
+  // global coords of moving stencil pt ek = 3 components of E-field on
+  // particle
 
   double *q = atom->q;
   double **x = atom->x;
@@ -2928,7 +3298,8 @@ void PPPMConp::fieldforce_ad() {
 
 /* ----------------------------------------------------------------------
    interpolate from grid to get per-atom energy/virial
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::fieldforce_peratom() {
   int i, l, m, n, nx, ny, nz, mx, my, mz;
@@ -2992,7 +3363,8 @@ void PPPMConp::fieldforce_peratom() {
 
 /* ----------------------------------------------------------------------
    pack own values to buf to send to another proc
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::pack_forward_grid(int flag, void *vbuf, int nlist, int *list) {
   FFT_SCALAR *buf = (FFT_SCALAR *)vbuf;
@@ -3050,7 +3422,8 @@ void PPPMConp::pack_forward_grid(int flag, void *vbuf, int nlist, int *list) {
 
 /* ----------------------------------------------------------------------
    unpack another proc's own values from buf and set own ghost values
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::unpack_forward_grid(int flag, void *vbuf, int nlist, int *list) {
   FFT_SCALAR *buf = (FFT_SCALAR *)vbuf;
@@ -3108,7 +3481,8 @@ void PPPMConp::unpack_forward_grid(int flag, void *vbuf, int nlist, int *list) {
 
 /* ----------------------------------------------------------------------
    pack ghost values into buf to send to another proc
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::pack_reverse_grid(int flag, void *vbuf, int nlist, int *list) {
   FFT_SCALAR *buf = (FFT_SCALAR *)vbuf;
@@ -3121,7 +3495,8 @@ void PPPMConp::pack_reverse_grid(int flag, void *vbuf, int nlist, int *list) {
 
 /* ----------------------------------------------------------------------
    unpack another proc's ghost values from buf and add to own values
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::unpack_reverse_grid(int flag, void *vbuf, int nlist, int *list) {
   FFT_SCALAR *buf = (FFT_SCALAR *)vbuf;
@@ -3134,7 +3509,8 @@ void PPPMConp::unpack_reverse_grid(int flag, void *vbuf, int nlist, int *list) {
 
 /* ----------------------------------------------------------------------
    map nprocs to NX by NY grid as PX by PY procs - return optimal px,py
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::procs2grid2d(int nprocs, int nx, int ny, int *px, int *py) {
   // loop thru all possible factorizations of nprocs
@@ -3172,7 +3548,8 @@ void PPPMConp::procs2grid2d(int nprocs, int nx, int ny, int *px, int *py) {
 /* ----------------------------------------------------------------------
    charge assignment into rho1d
    dx,dy,dz = distance of particle from "lower left" grid point
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_rho1d(const FFT_SCALAR &dx, const FFT_SCALAR &dy,
                              const FFT_SCALAR &dz) {
@@ -3196,7 +3573,8 @@ void PPPMConp::compute_rho1d(const FFT_SCALAR &dx, const FFT_SCALAR &dy,
 /* ----------------------------------------------------------------------
    charge assignment into drho1d
    dx,dy,dz = distance of particle from "lower left" grid point
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_drho1d(const FFT_SCALAR &dx, const FFT_SCALAR &dy,
                               const FFT_SCALAR &dz) {
@@ -3234,7 +3612,8 @@ void PPPMConp::compute_drho1d(const FFT_SCALAR &dx, const FFT_SCALAR &dy,
               ---
   a coeffients are packed into the array rho_coeff to eliminate zeros
   rho_coeff(l,((k+mod(n+1,2))/2) = a(l,k)
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_rho_coeff() {
   int j, k, l, m;
@@ -3280,7 +3659,8 @@ void PPPMConp::compute_rho_coeff() {
    adequate empty space is left between repeating slabs (J. Chem. Phys.
    111, 3155).  Slabs defined here to be parallel to the xy plane. Also
    extended to non-neutral systems (J. Chem. Phys. 131, 094107).
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::slabcorr() {
   // compute local contribution to global dipole moment
@@ -3347,7 +3727,8 @@ void PPPMConp::slabcorr() {
    periodically repeating wires.  Yields good approximation to 1D Ewald if
    adequate empty space is left between repeating wires (J. Mol. Struct.
    704, 101). x and y are non-periodic.
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::wirecorr() {
   // compute local contribution to global dipole moment
@@ -3419,7 +3800,8 @@ void PPPMConp::wirecorr() {
 
 /* ----------------------------------------------------------------------
    perform and time the 1d FFTs required for N timesteps
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 int PPPMConp::timing_1d(int n, double &time1d) {
   double time1, time2;
@@ -3448,7 +3830,8 @@ int PPPMConp::timing_1d(int n, double &time1d) {
 
 /* ----------------------------------------------------------------------
    perform and time the 3d FFTs required for N timesteps
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 int PPPMConp::timing_3d(int n, double &time3d) {
   double time1, time2;
@@ -3477,7 +3860,8 @@ int PPPMConp::timing_3d(int n, double &time3d) {
 
 /* ----------------------------------------------------------------------
    memory usage of local arrays
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 double PPPMConp::memory_usage() {
   double bytes = nmax * 3 * sizeof(double);
@@ -3512,11 +3896,13 @@ double PPPMConp::memory_usage() {
 
 /* ----------------------------------------------------------------------
    group-group interactions
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 /* ----------------------------------------------------------------------
    compute the PPPM total long-range force and energy for groups A and B
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 void PPPMConp::compute_group_group(int groupbit_A, int groupbit_B,
                                    int AA_flag) {
@@ -3623,7 +4009,8 @@ void PPPMConp::compute_group_group(int groupbit_A, int groupbit_B,
 
 /* ----------------------------------------------------------------------
  allocate group-group memory that depends on # of K-vectors and order
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 void PPPMConp::allocate_groups() {
   group_allocate_flag = 1;
@@ -3640,7 +4027,8 @@ void PPPMConp::allocate_groups() {
 
 /* ----------------------------------------------------------------------
  deallocate group-group memory that depends on # of K-vectors and order
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 void PPPMConp::deallocate_groups() {
   group_allocate_flag = 0;
@@ -3652,11 +4040,12 @@ void PPPMConp::deallocate_groups() {
 }
 
 /* ----------------------------------------------------------------------
- create discretized "density" on section of global grid due to my particles
- density(x,y,z) = charge "density" at grid points of my 3d brick
+ create discretized "density" on section of global grid due to my
+ particles density(x,y,z) = charge "density" at grid points of my 3d brick
  (nxlo:nxhi,nylo:nyhi,nzlo:nzhi) is extent of my brick (including ghosts)
  in global grid for group-group interactions
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 void PPPMConp::make_rho_groups(int groupbit_A, int groupbit_B, int AA_flag) {
   int l, m, n, nx, ny, nz, mx, my, mz;
@@ -3722,7 +4111,8 @@ void PPPMConp::make_rho_groups(int groupbit_A, int groupbit_B, int AA_flag) {
 
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver for group-group interactions
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson_groups(int AA_flag) {
   int i, j, k, n;
@@ -3827,7 +4217,8 @@ void PPPMConp::poisson_groups(int AA_flag) {
 /* ----------------------------------------------------------------------
    FFT-based Poisson solver for group-group interactions
    for a triclinic system
- ------------------------------------------------------------------------- */
+ -------------------------------------------------------------------------
+*/
 
 void PPPMConp::poisson_groups_triclinic() {
   int i, n;
@@ -3873,7 +4264,8 @@ void PPPMConp::poisson_groups_triclinic() {
    adequate empty space is left between repeating slabs (J. Chem. Phys.
    111, 3155).  Slabs defined here to be parallel to the xy plane. Also
    extended to non-neutral systems (J. Chem. Phys. 131, 094107).
-------------------------------------------------------------------------- */
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
   // compute local contribution to global dipole moment
@@ -3947,11 +4339,12 @@ void PPPMConp::slabcorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
 
 /* ----------------------------------------------------------------------
    TODO wire-geometry correction term to dampen inter-wire interactions
-between periodically repeating wires.  Yields good approximation to 2D Ewald
-if adequate empty space is left between repeating wires (J. Chem. Phys. 111,
-3155).  Wires defined here to be parallel to the x axis. Also extended to
-non-neutral systems (J. Chem. Phys. 131, 094107).
-------------------------------------------------------------------------- */
+between periodically repeating wires.  Yields good approximation to 2D
+Ewald if adequate empty space is left between repeating wires (J. Chem.
+Phys. 111, 3155).  Wires defined here to be parallel to the x axis. Also
+extended to non-neutral systems (J. Chem. Phys. 131, 094107).
+-------------------------------------------------------------------------
+*/
 
 void PPPMConp::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
   // compute local contribution to global dipole moment
@@ -4203,4 +4596,32 @@ void PPPMConp::compute_matrix_corr(bigint *imat, double **matrix) {
   memory->destroy(displs);
   memory->destroy(jmat);
   memory->destroy(jmat_local);
+}
+
+/* ----------------------------------------------------------------------
+   compute b-vector EW3DC correction of constant potential approach
+ ------------------------------------------------------------------------- */
+
+void PPPMConp::compute_vector_corr(bigint *imat, double *vec) {
+  int const nlocal = atom->nlocal;
+  double **x = atom->x;
+  double *q = atom->q;
+  if (slabflag == 1) {
+    // use EW3DC slab correction
+    double dipole = 0.;
+    for (int i = 0; i < nlocal; i++) {
+      if (imat[i] < 0) dipole += q[i] * x[i][2];
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &dipole, 1, MPI_DOUBLE, MPI_SUM, world);
+    dipole *= 4.0 * MY_PI / volume;
+    for (int i = 0; i < nlocal; i++) {
+      int const pos = imat[i];
+      if (pos >= 0) vec[pos] += x[i][2] * dipole;
+    }
+  } else if (slabflag == 3) {
+    error->all(FLERR, "Cannot (yet) use PPPM CONP with EW2D ");
+    // use EW2D infinite boundary correction
+  } else if (wireflag) {
+    error->all(FLERR, "Cannot (yet) use PPPM CONP with wire ");
+  }
 }

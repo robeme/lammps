@@ -2293,9 +2293,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 
 /* ---------------------------------------------------------------------- */
 
-void EwaldConp::update_eikr() {
-  update_eikr(false);
-}
+void EwaldConp::update_eikr() { update_eikr(false); }
 
 /* ---------------------------------------------------------------------- */
 
