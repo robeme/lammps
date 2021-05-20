@@ -130,11 +130,17 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
     if (ferror(fp)) error->one(FLERR, "Error writing file header");
     filepos = ftell(fp);
   }
+  kspace_time_total = 0;
+  b_time_total = 0;
 }
 
 /* ---------------------------------------------------------------------- */
 
 ComputeConpVector::~ComputeConpVector() {
+  if (comm->me == 0)
+    utils::logmesg(lmp, fmt::format("B time: {}\n", b_time_total));
+  if (comm->me == 0)
+    utils::logmesg(lmp, fmt::format("B kspace time: {}\n", kspace_time_total));
   delete[] vector;
   if (assigned) delete[] mpos;
   if (fp && comm->me == 0) fclose(fp);
@@ -202,12 +208,20 @@ void ComputeConpVector::setup() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpVector::compute_vector() {
+  MPI_Barrier(world);
+  double start_time = MPI_Wtime();
   update_mpos();
   for (int i = 0; i < ngroup; i++) vector[i] = 0.;
   if (pairflag) pair_contribution();
+  MPI_Barrier(world);
+  double kspace_start_time = MPI_Wtime();
   if (kspaceflag) kspace->compute_vector(mpos, vector);
+  MPI_Barrier(world);
+  kspace_time_total += MPI_Wtime() - kspace_start_time; 
   if (boundaryflag) kspace->compute_vector_corr(mpos, vector);
   MPI_Allreduce(MPI_IN_PLACE, vector, ngroup, MPI_DOUBLE, MPI_SUM, world);
+  MPI_Barrier(world);
+  b_time_total += MPI_Wtime() - start_time;
 }
 
 /* ---------------------------------------------------------------------- */

@@ -455,19 +455,15 @@ void EwaldConp::compute(int eflag, int vflag) {
 
   // sum global energy across Kspace vevs and add in volume-dependent term
 
-  cout << "EWALD ENERGY before: " << energy << endl;
   if (eflag_global) {
     for (int k = 0; k < kcount; k++)
       energy += ug[k] *
                 (sfacrl_all[k] * sfacrl_all[k] + sfacim_all[k] * sfacim_all[k]);
 
-    cout << "EWALD ENERGY between: " << energy * qscale << endl;
     energy -= g_ewald * qsqsum / MY_PIS +
               MY_PI2 * qsum * qsum / (g_ewald * g_ewald * volume);
     energy *= qscale;
   }
-
-  cout << "EWALD ENERGY: " << energy << endl;
 
   // global virial
 
@@ -2293,9 +2289,7 @@ void EwaldConp::compute_matrix_corr(bigint *imat, double **matrix) {
 
 /* ---------------------------------------------------------------------- */
 
-void EwaldConp::update_eikr() {
-  update_eikr(false);
-}
+void EwaldConp::update_eikr() { update_eikr(false); }
 
 /* ---------------------------------------------------------------------- */
 

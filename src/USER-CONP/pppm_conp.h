@@ -13,7 +13,7 @@
 
 #ifdef KSPACE_CLASS
 
-KSpaceStyle(pppm/conp,PPPMConp)
+KSpaceStyle(pppm/conp, PPPMConp)
 
 #else
 
@@ -58,70 +58,73 @@ class PPPMConp : public KSpace {
   virtual int timing_3d(int, double &);
   virtual double memory_usage();
 
+  void compute_vector(bigint *, double *);
+  void compute_vector_corr(bigint *, double *);
   void compute_matrix(bigint *, double **);
   void compute_matrix_corr(bigint *, double **);
 
   virtual void compute_group_group(int, int, int);
 
  protected:
-  int me,nprocs;
+  int me, nprocs;
   int nfactors;
   int *factors;
   double cutoff;
   double volume;
-  double delxinv,delyinv,delzinv,delvolinv;
-  double h_x,h_y,h_z;
-  double shift,shiftone;
+  double delxinv, delyinv, delzinv, delvolinv;
+  double h_x, h_y, h_z;
+  double shift, shiftone;
   int peratom_allocate_flag;
 
-  int nxlo_in,nylo_in,nzlo_in,nxhi_in,nyhi_in,nzhi_in;
-  int nxlo_out,nylo_out,nzlo_out,nxhi_out,nyhi_out,nzhi_out;
-  int nxlo_ghost,nxhi_ghost,nylo_ghost,nyhi_ghost,nzlo_ghost,nzhi_ghost;
-  int nxlo_fft,nylo_fft,nzlo_fft,nxhi_fft,nyhi_fft,nzhi_fft;
-  int nlower,nupper;
-  int ngrid,nfft,nfft_both;
+  int nxlo_in, nylo_in, nzlo_in, nxhi_in, nyhi_in, nzhi_in;
+  int nxlo_out, nylo_out, nzlo_out, nxhi_out, nyhi_out, nzhi_out;
+  int nxlo_ghost, nxhi_ghost, nylo_ghost, nyhi_ghost, nzlo_ghost, nzhi_ghost;
+  int nxlo_fft, nylo_fft, nzlo_fft, nxhi_fft, nyhi_fft, nzhi_fft;
+  int nlower, nupper;
+  int ngrid, nfft, nfft_both;
 
-  FFT_SCALAR ***density_brick;
-  FFT_SCALAR ***vdx_brick,***vdy_brick,***vdz_brick;
+  FFT_SCALAR ***density_brick, ***electrolyte_density_brick,
+      ***electrode_density_brick;
+  FFT_SCALAR ***vdx_brick, ***vdy_brick, ***vdz_brick;
   FFT_SCALAR ***u_brick;
-  FFT_SCALAR ***v0_brick,***v1_brick,***v2_brick;
-  FFT_SCALAR ***v3_brick,***v4_brick,***v5_brick;
+  FFT_SCALAR ***v0_brick, ***v1_brick, ***v2_brick;
+  FFT_SCALAR ***v3_brick, ***v4_brick, ***v5_brick;
   double *greensfn;
   double **vg;
-  double *fkx,*fky,*fkz;
-  FFT_SCALAR *density_fft;
-  FFT_SCALAR *work1,*work2;
+  double *fkx, *fky, *fkz;
+  FFT_SCALAR *density_fft, *electrolyte_density_fft, *electrode_density_fft;
+  FFT_SCALAR *work1, *work2;
 
   double *gf_b;
-  FFT_SCALAR **rho1d,**rho_coeff,**drho1d,**drho_coeff;
+  FFT_SCALAR **rho1d, **rho_coeff, **drho1d, **drho_coeff;
   double *sf_precoeff1, *sf_precoeff2, *sf_precoeff3;
   double *sf_precoeff4, *sf_precoeff5, *sf_precoeff6;
-  double sf_coeff[6];          // coefficients for calculating ad self-forces
+  double sf_coeff[6];  // coefficients for calculating ad self-forces
   double **acons;
 
   // FFTs and grid communication
 
-  class FFT3d *fft1,*fft2;
+  class FFT3d *fft1, *fft2;
   class Remap *remap;
   class GridComm *gc;
 
-  FFT_SCALAR *gc_buf1,*gc_buf2;
-  int ngc_buf1,ngc_buf2,npergrid;
+  FFT_SCALAR *gc_buf1, *gc_buf2;
+  int ngc_buf1, ngc_buf2, npergrid;
 
   // group-group interactions
 
   int group_allocate_flag;
-  FFT_SCALAR ***density_A_brick,***density_B_brick;
-  FFT_SCALAR *density_A_fft,*density_B_fft;
+  FFT_SCALAR ***density_A_brick, ***density_B_brick;
+  FFT_SCALAR *density_A_fft, *density_B_fft;
 
-  int **part2grid;             // storage for particle -> grid mapping
+  int **part2grid;  // storage for particle -> grid mapping
   int nmax;
 
   double *boxlo;
-                               // TIP4P settings
-  int typeH,typeO;             // atom types of TIP4P water H and O atoms
-  double qdist;                // distance from O site to negative charge
-  double alpha;                // geometric factor
+  // TIP4P settings
+  int typeH, typeO;  // atom types of TIP4P water H and O atoms
+  double qdist;      // distance from O site to negative charge
+  double alpha;      // geometric factor
 
   virtual void set_grid_global();
   void set_grid_local();
@@ -157,11 +160,11 @@ class PPPMConp : public KSpace {
 
   virtual void poisson_peratom();
   virtual void fieldforce_peratom();
-  void procs2grid2d(int,int,int,int *, int*);
+  void procs2grid2d(int, int, int, int *, int *);
   void compute_rho1d(const FFT_SCALAR &, const FFT_SCALAR &,
                      const FFT_SCALAR &);
   void compute_drho1d(const FFT_SCALAR &, const FFT_SCALAR &,
-                     const FFT_SCALAR &);
+                      const FFT_SCALAR &);
   void compute_rho_coeff();
   virtual void slabcorr();
   virtual void wirecorr();
@@ -175,7 +178,7 @@ class PPPMConp : public KSpace {
 
   // triclinic
 
-  int triclinic;               // domain settings, orthog or triclinic
+  int triclinic;  // domain settings, orthog or triclinic
   void setup_triclinic();
   void compute_gf_ik_triclinic();
   void poisson_ik_triclinic();
@@ -187,184 +190,189 @@ class PPPMConp : public KSpace {
   virtual void deallocate_groups();
   virtual void make_rho_groups(int, int, int);
   virtual void poisson_groups(int);
-  virtual void slabcorr_groups(int,int,int);
-  virtual void wirecorr_groups(int,int,int);
+  virtual void slabcorr_groups(int, int, int);
+  virtual void wirecorr_groups(int, int, int);
 
-/* ----------------------------------------------------------------------
-   denominator for Hockney-Eastwood Green's function
-     of x,y,z = sin(kx*deltax/2), etc
+  /* ----------------------------------------------------------------------
+     denominator for Hockney-Eastwood Green's function
+       of x,y,z = sin(kx*deltax/2), etc
 
-            inf                 n-1
-   S(n,k) = Sum  W(k+pi*j)**2 = Sum b(l)*(z*z)**l
-           j=-inf               l=0
+              inf                 n-1
+     S(n,k) = Sum  W(k+pi*j)**2 = Sum b(l)*(z*z)**l
+             j=-inf               l=0
 
-          = -(z*z)**n /(2n-1)! * (d/dx)**(2n-1) cot(x)  at z = sin(x)
-   gf_b = denominator expansion coeffs
-------------------------------------------------------------------------- */
+            = -(z*z)**n /(2n-1)! * (d/dx)**(2n-1) cot(x)  at z = sin(x)
+     gf_b = denominator expansion coeffs
+  ------------------------------------------------------------------------- */
 
   inline double gf_denom(const double &x, const double &y,
                          const double &z) const {
-    double sx,sy,sz;
+    double sx, sy, sz;
     sz = sy = sx = 0.0;
-    for (int l = order-1; l >= 0; l--) {
-      sx = gf_b[l] + sx*x;
-      sy = gf_b[l] + sy*y;
-      sz = gf_b[l] + sz*z;
+    for (int l = order - 1; l >= 0; l--) {
+      sx = gf_b[l] + sx * x;
+      sy = gf_b[l] + sy * y;
+      sz = gf_b[l] + sz * z;
     }
-    double s = sx*sy*sz;
-    return s*s;
+    double s = sx * sy * sz;
+    return s * s;
   };
+
  private:
+  int compute_step;
+  void start_compute();
+  void make_electrolyte_rho(bigint *);
+  void debug_make_electrode_rho(bigint *);
   // debugging
   double debug_fft(int, int, int);
-
 };
 
-}
+}  // namespace LAMMPS_NS
 
 #endif
 #endif
 
-/* ERROR/WARNING messages:
+    /* ERROR/WARNING messages:
 
-E: Illegal ... command
+    E: Illegal ... command
 
-Self-explanatory.  Check the input script syntax and compare to the
-documentation for the command.  You can use -echo screen as a
-command-line option when running LAMMPS to see the offending line.
+    Self-explanatory.  Check the input script syntax and compare to the
+    documentation for the command.  You can use -echo screen as a
+    command-line option when running LAMMPS to see the offending line.
 
-E: Must redefine kspace_style after changing to triclinic box
+    E: Must redefine kspace_style after changing to triclinic box
 
-UNDOCUMENTED
+    UNDOCUMENTED
 
-E: Cannot (yet) use PPPM with triclinic box and kspace_modify diff ad
+    E: Cannot (yet) use PPPM with triclinic box and kspace_modify diff ad
 
-This feature is not yet supported.
+    This feature is not yet supported.
 
-E: Cannot (yet) use PPPM with triclinic box and slab correction
+    E: Cannot (yet) use PPPM with triclinic box and slab correction
 
-This feature is not yet supported.
+    This feature is not yet supported.
 
-E: Cannot use PPPM with 2d simulation
+    E: Cannot use PPPM with 2d simulation
 
-The kspace style pppm cannot be used in 2d simulations.  You can use
-2d PPPM in a 3d simulation; see the kspace_modify command.
+    The kspace style pppm cannot be used in 2d simulations.  You can use
+    2d PPPM in a 3d simulation; see the kspace_modify command.
 
-E: PPPM can only currently be used with comm_style brick
+    E: PPPM can only currently be used with comm_style brick
 
-This is a current restriction in LAMMPS.
+    This is a current restriction in LAMMPS.
 
-E: Kspace style requires atom attribute q
+    E: Kspace style requires atom attribute q
 
-The atom style defined does not have these attributes.
+    The atom style defined does not have these attributes.
 
-E: Cannot use non-periodic boundaries with PPPM
+    E: Cannot use non-periodic boundaries with PPPM
 
-For kspace style pppm, all 3 dimensions must have periodic boundaries
-unless you use the kspace_modify command to define a 2d slab with a
-non-periodic z dimension.
+    For kspace style pppm, all 3 dimensions must have periodic boundaries
+    unless you use the kspace_modify command to define a 2d slab with a
+    non-periodic z dimension.
 
-E: Incorrect boundaries with slab PPPM
+    E: Incorrect boundaries with slab PPPM
 
-Must have periodic x,y dimensions and non-periodic z dimension to use
-2d slab option with PPPM.
+    Must have periodic x,y dimensions and non-periodic z dimension to use
+    2d slab option with PPPM.
 
-E: PPPM order cannot be < 2 or > than %d
+    E: PPPM order cannot be < 2 or > than %d
 
-This is a limitation of the PPPM implementation in LAMMPS.
+    This is a limitation of the PPPM implementation in LAMMPS.
 
-E: KSpace style is incompatible with Pair style
+    E: KSpace style is incompatible with Pair style
 
-Setting a kspace style requires that a pair style with matching
-long-range Coulombic or dispersion components be used.
+    Setting a kspace style requires that a pair style with matching
+    long-range Coulombic or dispersion components be used.
 
-E: Pair style is incompatible with TIP4P KSpace style
+    E: Pair style is incompatible with TIP4P KSpace style
 
-The pair style does not have the requires TIP4P settings.
+    The pair style does not have the requires TIP4P settings.
 
-E: Bond and angle potentials must be defined for TIP4P
+    E: Bond and angle potentials must be defined for TIP4P
 
-Cannot use TIP4P pair potential unless bond and angle potentials
-are defined.
+    Cannot use TIP4P pair potential unless bond and angle potentials
+    are defined.
 
-E: Bad TIP4P angle type for PPPM/TIP4P
+    E: Bad TIP4P angle type for PPPM/TIP4P
 
-Specified angle type is not valid.
+    Specified angle type is not valid.
 
-E: Bad TIP4P bond type for PPPM/TIP4P
+    E: Bad TIP4P bond type for PPPM/TIP4P
 
-Specified bond type is not valid.
+    Specified bond type is not valid.
 
-W: Reducing PPPM order b/c stencil extends beyond nearest neighbor processor
+    W: Reducing PPPM order b/c stencil extends beyond nearest neighbor processor
 
-This may lead to a larger grid than desired.  See the kspace_modify overlap
-command to prevent changing of the PPPM order.
+    This may lead to a larger grid than desired.  See the kspace_modify overlap
+    command to prevent changing of the PPPM order.
 
-E: PPPM order < minimum allowed order
+    E: PPPM order < minimum allowed order
 
-The default minimum order is 2.  This can be reset by the
-kspace_modify minorder command.
+    The default minimum order is 2.  This can be reset by the
+    kspace_modify minorder command.
 
-E: PPPM grid stencil extends beyond nearest neighbor processor
+    E: PPPM grid stencil extends beyond nearest neighbor processor
 
-This is not allowed if the kspace_modify overlap setting is no.
+    This is not allowed if the kspace_modify overlap setting is no.
 
-E: KSpace accuracy must be > 0
+    E: KSpace accuracy must be > 0
 
-The kspace accuracy designated in the input must be greater than zero.
+    The kspace accuracy designated in the input must be greater than zero.
 
-E: Must use kspace_modify gewald for uncharged system
+    E: Must use kspace_modify gewald for uncharged system
 
-UNDOCUMENTED
+    UNDOCUMENTED
 
-E: Could not compute grid size
+    E: Could not compute grid size
 
-The code is unable to compute a grid size consistent with the desired
-accuracy.  This error should not occur for typical problems.  Please
-send an email to the developers.
+    The code is unable to compute a grid size consistent with the desired
+    accuracy.  This error should not occur for typical problems.  Please
+    send an email to the developers.
 
-E: PPPM grid is too large
+    E: PPPM grid is too large
 
-The global PPPM grid is larger than OFFSET in one or more dimensions.
-OFFSET is currently set to 4096.  You likely need to decrease the
-requested accuracy.
+    The global PPPM grid is larger than OFFSET in one or more dimensions.
+    OFFSET is currently set to 4096.  You likely need to decrease the
+    requested accuracy.
 
-E: Could not compute g_ewald
+    E: Could not compute g_ewald
 
-The Newton-Raphson solver failed to converge to a good value for
-g_ewald.  This error should not occur for typical problems.  Please
-send an email to the developers.
+    The Newton-Raphson solver failed to converge to a good value for
+    g_ewald.  This error should not occur for typical problems.  Please
+    send an email to the developers.
 
-E: Non-numeric box dimensions - simulation unstable
+    E: Non-numeric box dimensions - simulation unstable
 
-The box size has apparently blown up.
+    The box size has apparently blown up.
 
-E: Out of range atoms - cannot compute PPPM
+    E: Out of range atoms - cannot compute PPPM
 
-One or more atoms are attempting to map their charge to a PPPM grid
-point that is not owned by a processor.  This is likely for one of two
-reasons, both of them bad.  First, it may mean that an atom near the
-boundary of a processor's sub-domain has moved more than 1/2 the
-"neighbor skin distance"_neighbor.html without neighbor lists being
-rebuilt and atoms being migrated to new processors.  This also means
-you may be missing pairwise interactions that need to be computed.
-The solution is to change the re-neighboring criteria via the
-"neigh_modify"_neigh_modify command.  The safest settings are "delay 0
-every 1 check yes".  Second, it may mean that an atom has moved far
-outside a processor's sub-domain or even the entire simulation box.
-This indicates bad physics, e.g. due to highly overlapping atoms, too
-large a timestep, etc.
+    One or more atoms are attempting to map their charge to a PPPM grid
+    point that is not owned by a processor.  This is likely for one of two
+    reasons, both of them bad.  First, it may mean that an atom near the
+    boundary of a processor's sub-domain has moved more than 1/2 the
+    "neighbor skin distance"_neighbor.html without neighbor lists being
+    rebuilt and atoms being migrated to new processors.  This also means
+    you may be missing pairwise interactions that need to be computed.
+    The solution is to change the re-neighboring criteria via the
+    "neigh_modify"_neigh_modify command.  The safest settings are "delay 0
+    every 1 check yes".  Second, it may mean that an atom has moved far
+    outside a processor's sub-domain or even the entire simulation box.
+    This indicates bad physics, e.g. due to highly overlapping atoms, too
+    large a timestep, etc.
 
-E: Cannot (yet) use K-space slab correction with compute group/group for triclinic systems
+    E: Cannot (yet) use K-space slab correction with compute group/group for
+    triclinic systems
 
-This option is not yet supported.
+    This option is not yet supported.
 
-E: Cannot (yet) use kspace_modify diff ad with compute group/group
+    E: Cannot (yet) use kspace_modify diff ad with compute group/group
 
-This option is not yet supported.
+    This option is not yet supported.
 
-U: Cannot (yet) use PPPM with triclinic box and TIP4P
+    U: Cannot (yet) use PPPM with triclinic box and TIP4P
 
-This feature is not yet supported.
+    This feature is not yet supported.
 
-*/
+    */
