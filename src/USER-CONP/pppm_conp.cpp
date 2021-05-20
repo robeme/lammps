@@ -40,6 +40,7 @@
 #include "neighbor.h"
 #include "pair.h"
 #include "remap_wrap.h"
+#include "update.h"
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -420,6 +421,7 @@ void PPPMConp::init() {
   compute_gf_denom();
   if (differentiation_flag == 1) compute_sf_precoeff();
   compute_rho_coeff();
+  compute_step = -1;
 }
 
 /* ----------------------------------------------------------------------
@@ -674,27 +676,7 @@ void PPPMConp::compute(int eflag, int vflag) {
 
   // if (qsqsum == 0.0) return; TODO move back in
 
-  // convert atoms from box to lamda coords
-
-  if (triclinic == 0)
-    boxlo = domain->boxlo;
-  else {
-    boxlo = domain->boxlo_lamda;
-    domain->x2lamda(atom->nlocal);
-  }
-
-  // extend size of per-atom arrays if necessary
-
-  if (atom->nmax > nmax) {
-    memory->destroy(part2grid);
-    nmax = atom->nmax;
-    memory->create(part2grid, nmax, 3, "pppm/conp:part2grid");
-  }
-
-  // find grid points for all my particles
-  // map my particle charge onto my local 3d density grid
-
-  particle_map();
+  start_compute();
   make_rho();
 
   // all procs communicate density values from their ghost cells
@@ -865,85 +847,55 @@ double PPPMConp::debug_fft(int ix, int iy, int iz) {
 
 /* ----------------------------------------------------------------------
 ------------------------------------------------------------------------- */
-void PPPMConp::compute_vector(bigint *imat, double *vec) {
-  double const scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
-  double const s2 = scaleinv * scaleinv;
-  // TODO build particle map once per timestep
-  if (triclinic == 0)
-    boxlo = domain->boxlo;
-  else {
-    boxlo = domain->boxlo_lamda;
-    domain->x2lamda(atom->nlocal);
+void PPPMConp::start_compute() {
+  if (compute_step < update->ntimestep) {
+    if (compute_step == -1) setup();
+    // convert atoms from box to lamda coords
+    if (triclinic == 0)
+      boxlo = domain->boxlo;
+    else {
+      boxlo = domain->boxlo_lamda;
+      domain->x2lamda(atom->nlocal);
+    }
+    // extend size of per-atom arrays if necessary
+    if (atom->nmax > nmax) {
+      memory->destroy(part2grid);
+      nmax = atom->nmax;
+      memory->create(part2grid, nmax, 3, "pppm/conp:part2grid");
+    }
+    // find grid points for all my particles
+    // map my particle charge onto my local 3d density grid
+    particle_map();
+    compute_step = update->ntimestep;
   }
-  // extend size of per-atom arrays if necessary
-  if (atom->nmax > nmax) {
-    memory->destroy(part2grid);
-    nmax = atom->nmax;
-    memory->create(part2grid, nmax, 3, "pppm/conp:part2grid");
-  }
-  // find grid points for all my particles
-  // map my particle charge onto my local 3d density grid
-  particle_map();
+}
 
-  // debugging setup
-  FFT_SCALAR *work_debug;
-  memory->create(work_debug, 2 * nfft_both, "pppm/conp:work_debug");
-  // temporarily store and switch pointers so we can
-  //  use brick2fft() for groups A and B (without
-  //  writing an additional function)
+/* ----------------------------------------------------------------------
+------------------------------------------------------------------------- */
+void PPPMConp::compute_vector(bigint *imat, double *vec) {
+  start_compute();
+  double const scaleinv = 1.0 / (nx_pppm * ny_pppm * nz_pppm);
+
+  // temporarily store and switch pointers so we can use brick2fft() for
+  // electrolyte density (without writing an additional function)
   FFT_SCALAR ***density_brick_real = density_brick;
   FFT_SCALAR *density_fft_real = density_fft;
-
-  // debugging: setup electrode density
-  debug_make_electrode_rho(imat);
-  density_brick = electrode_density_brick;
-  density_fft = electrode_density_fft;
-  gc->reverse_comm_kspace(this, 1, sizeof(FFT_SCALAR), REVERSE_RHO, gc_buf1,
-                          gc_buf2, MPI_FFT_SCALAR);
-  brick2fft();
-
   make_electrolyte_rho(imat);
   density_brick = electrolyte_density_brick;
   density_fft = electrolyte_density_fft;
   gc->reverse_comm_kspace(this, 1, sizeof(FFT_SCALAR), REVERSE_RHO, gc_buf1,
                           gc_buf2, MPI_FFT_SCALAR);
   brick2fft();
-
   // switch back pointers
   density_brick = density_brick_real;
   density_fft = density_fft_real;
 
-  // debugging fft for electrode
-  for (int i = 0, n = 0; i < nfft; i++) {
-    work_debug[n++] = electrode_density_fft[i];
-    work_debug[n++] = ZEROF;
-  }
-  fft1->compute(work_debug, work_debug, 1);
   // transform electrolyte charge density (r -> k) (complex conjugate)
   for (int i = 0, n = 0; i < nfft; i++) {
     work1[n++] = electrolyte_density_fft[i];
     work1[n++] = ZEROF;
   }
   fft1->compute(work1, work1, -1);
-
-  // debugging: check electrode-electrolyte energy:
-  double debug_qQ = 0.;
-  double debug_QQ = 0.;
-  double debug_qq = 0.;
-  for (int i = 0, n = 0; i < nfft; i++) {
-    debug_qQ += s2 * greensfn[i] *
-                (work1[n] * work_debug[n] - work1[n + 1] * work_debug[n + 1]);
-    debug_qq +=
-        s2 * greensfn[i] * (work1[n] * work1[n] + work1[n + 1] * work1[n + 1]);
-    debug_QQ +=
-        s2 * greensfn[i] *
-        (work_debug[n] * work_debug[n] + work_debug[n + 1] * work_debug[n + 1]);
-    n += 2;
-  }
-  cout << "debug_qQ: " << debug_qQ * volume << endl;
-  cout << "debug_QQ: " << debug_QQ * volume << endl;
-  cout << "debug_qq: " << debug_qq  * volume<< endl;
-  cout << "debug total: " << debug_qq + debug_QQ + 2 * debug_qQ << endl;
 
   // k->r FFT of Green's * electrolyte density = brick_psi
   for (int i = 0, n = 0; i < nfft; i++) {
@@ -954,13 +906,10 @@ void PPPMConp::compute_vector(bigint *imat, double *vec) {
   }
   fft2->compute(work2, work2, 1);
   vector<double> brick_psi(nz_pppm * ny_pppm * nx_pppm, 0.);
-  // debug_fft(0, 0, 0);
   for (int k = nzlo_in, n = 0; k <= nzhi_in; k++)
     for (int j = nylo_in; j <= nyhi_in; j++)
       for (int i = nxlo_in; i <= nxhi_in; i++) {
         brick_psi[ny_pppm * nx_pppm * k + nx_pppm * j + i] = work2[n];
-        if (abs(work2[n + 1]) > SMALL)
-          cout << n + 1 << ", " << work2[n + 1] << endl;
         n += 2;
       }
   MPI_Allreduce(MPI_IN_PLACE, &brick_psi.front(), nz_pppm * ny_pppm * nx_pppm,
@@ -1000,48 +949,12 @@ void PPPMConp::compute_vector(bigint *imat, double *vec) {
           while (mix < 0) mix += nx_pppm;
           mix = mix % nx_pppm;
           double ix0 = iy0 * rho1d[0][li];
-          assert(miz >= 0);
-          assert(miy >= 0);
-          assert(mix >= 0);
-          assert(miz < nz_pppm);
-          assert(miy < ny_pppm);
-          assert(mix < nx_pppm);
-          // double debug = debug_fft(mix, miy, miz);
-          // if (abs(debug -
-          // brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]) >
-          // SMALL) {
-          // cout << mix << ", " << miy << ", " << mix << endl;
-          // cout << "FFT: " << debug_fft(mix, miy, miz) << ", "
-          //<< brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]
-          //<< endl;
-          //}
-          // if (abs(debug_fft(debug_mix, debug_miy, debug_miz) -
-          // brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]) >
-          // SMALL) {
-          // cout << debug_mix << ", " << debug_miy << ", " << debug_miz <<
-          // endl; cout << debug_fft(debug_mix, debug_miy, debug_miz) << ", "
-          //<< brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix]
-          //<< endl;
-          //}
           v += ix0 * brick_psi[ny_pppm * nx_pppm * miz + nx_pppm * miy + mix];
         }
       }
     }
     vec[ipos] += v * scaleinv;
   }
-
-  // debug BQ energy
-  double debug_BQ = 0;
-  for (int i = 0; i < atom->nlocal; i++) {
-    int ipos = imat[i];
-    if (ipos < 0) continue;
-    debug_BQ += vec[ipos] * atom->q[i];
-  }
-  cout << "debug_BQ: " << debug_BQ << endl;
-  cout << "volume: " << volume << endl;
-  cout << "scale inv: " << scaleinv << endl;
-
-  memory->destroy(work_debug);
 }
 /* ----------------------------------------------------------------------
 -------------------------------------------------------------------------
@@ -1051,7 +964,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
   if (comm->me == 0) cout << "MATRIX calculation" << endl;
   // TODO verify energies from real and k space are the same
   // TODO replace compute with required setup
-  setup();
   compute(1, 0);
 
   // debugging, check energy in k space
@@ -1257,7 +1169,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
       matrix[ipos][jpos] += aij / volume;
     }
   }
-  cout << "min, max miz: " << min_miz << ", " << max_miz << endl;
   MPI_Barrier(world);
   if (comm->me == 0)
     utils::logmesg(lmp,
@@ -2764,7 +2675,6 @@ void PPPMConp::poisson_ik() {
       }
     }
   }
-  cout << "Poisson energy: " << energy << endl;
 
   // scale by 1/total-grid-pts to get rho(k)
   // multiply by Green's function to get V(k)

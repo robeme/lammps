@@ -219,6 +219,8 @@ class PPPMConp : public KSpace {
   };
 
  private:
+  int compute_step;
+  void start_compute();
   void make_electrolyte_rho(bigint *);
   void debug_make_electrode_rho(bigint *);
   // debugging

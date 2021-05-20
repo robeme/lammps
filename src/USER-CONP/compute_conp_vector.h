@@ -56,6 +56,8 @@ class ComputeConpVector : public Compute {
 
   void pair_contribution();
   double calc_erfc(double);
+
+  double kspace_time_total;
 };
 
 }  // namespace LAMMPS_NS
