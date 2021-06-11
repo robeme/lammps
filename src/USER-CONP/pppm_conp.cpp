@@ -3110,7 +3110,6 @@ void PPPMConp::fieldforce_ik() {
     // convert E-field to force
 
     const double qfactor = qqrd2e * scale * q[i];
-    f[i][0] += qfactor * ekx;  // TODO remove?
     if (wireflag != 2) {
       f[i][0] += qfactor * ekx;
       f[i][1] += qfactor * eky;
