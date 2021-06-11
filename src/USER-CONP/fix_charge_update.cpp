@@ -446,7 +446,7 @@ double FixChargeUpdate::potential_energy(int eflag, std::vector<int> mpos) {
   for (int i = 0; i < nlocal; i++) {
     if (groupbit & mask[i]) {
       double e = -qqrd2e * q[i] * psi[mpos[i]];
-      energy = e;
+      energy += e;
       if (eflag) {
         force->pair->ev_tally(i, i, nlocal, force->newton_pair, 0., e, 0, 0, 0,
                               0);  // 0 evdwl, 0 fpair, 0 delxyz
