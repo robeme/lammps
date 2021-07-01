@@ -111,6 +111,11 @@ void TemperNPTAtomSwap::command(int narg, char **arg)
        (!utils::strmatch(modify->fix[nptfix]->style,"^rigid/npt")) )
     error->universe_all(FLERR,"Tempering temperature and pressure fix is not supported");
 
+  // I have modified fix atom/swap to allow resetting temperature via reset_target()
+  
+  if ( (!utils::strmatch(modify->fix[swpfix]->style,"^atom/swap")) )
+    error->universe_all(FLERR,"atom/swap is not possible with this fix");
+
   // setup for long tempering run
 
   update->whichflag = 1;
