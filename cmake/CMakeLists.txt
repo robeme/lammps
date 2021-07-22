@@ -198,6 +198,7 @@ pkg_depends(MPIIO MPI)
 pkg_depends(USER-ATC MANYBODY)
 pkg_depends(USER-LB MPI)
 pkg_depends(USER-PHONON KSPACE)
+pkg_depends(USER-CONP KSPACE)
 pkg_depends(USER-SCAFACOS MPI)
 
 # detect if we may enable OpenMP support by default
@@ -294,7 +295,7 @@ if(NOT ENABLE_SANITIZER STREQUAL "none")
   endif()
 endif()
 
-if(PKG_MSCG OR PKG_USER-ATC OR PKG_USER-AWPMD OR PKG_USER-QUIP OR PKG_LATTE)
+if(PKG_MSCG OR PKG_USER-ATC OR PKG_USER-AWPMD OR PKG_USER-QUIP OR PKG_LATTE OR PKG_USER-CONP)
   enable_language(C)
   find_package(LAPACK)
   find_package(BLAS)
@@ -492,6 +493,10 @@ foreach(SIMPLE_LIB POEMS USER-ATC USER-AWPMD USER-H5MD USER-MESONT)
     endif()
   endif()
 endforeach()
+
+if(PKG_USER-CONP)
+  target_link_libraries(lammps PRIVATE ${LAPACK_LIBRARIES})
+endif()
 
 if(PKG_USER-AWPMD)
   target_link_libraries(awpmd PRIVATE ${LAPACK_LIBRARIES})
