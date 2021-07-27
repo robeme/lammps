@@ -41,50 +41,7 @@ using namespace std;
 
 /* ---------------------------------------------------------------------- */
 
-EwaldConp::EwaldConp(LAMMPS *lmp)
-    : KSpace(lmp),
-      kxvecs(nullptr),
-      kyvecs(nullptr),
-      kzvecs(nullptr),
-      ug(nullptr),
-      eg(nullptr),
-      vg(nullptr),
-      ek(nullptr),
-      sfacrl(nullptr),
-      sfacim(nullptr),
-      sfacrl_all(nullptr),
-      sfacim_all(nullptr),
-      cs(nullptr),
-      sn(nullptr),
-      sfacrl_A(nullptr),
-      sfacim_A(nullptr),
-      sfacrl_A_all(nullptr),
-      sfacim_A_all(nullptr),
-      sfacrl_B(nullptr),
-      sfacim_B(nullptr),
-      sfacrl_B_all(nullptr),
-      sfacim_B_all(nullptr) {
-  group_allocate_flag = 0;
-  kmax_created = 0;
-  ewaldflag = 1;
-  group_group_enable = 1;
-
-  accuracy_relative = 0.0;
-
-  kmax = 0;
-  kxvecs = kyvecs = kzvecs = nullptr;
-
-  ug = nullptr;
-  eg = vg = nullptr;
-  sfacrl = sfacim = sfacrl_all = sfacim_all = nullptr;
-
-  nmax = 0;
-  ek = nullptr;
-  cs = sn = nullptr;
-
-  kcount = 0;
-  eikr_step = -1;
-}
+EwaldConp::EwaldConp(LAMMPS *lmp) : Ewald(lmp) { eikr_step = -1; }
 
 void EwaldConp::settings(int narg, char **arg) {
   if (narg != 1) error->all(FLERR, "Illegal kspace_style ewald command");
@@ -97,8 +54,6 @@ void EwaldConp::settings(int narg, char **arg) {
 ------------------------------------------------------------------------- */
 
 EwaldConp::~EwaldConp() {
-  deallocate();
-  if (group_allocate_flag) deallocate_groups();
   memory->destroy(ek);
   memory->destroy3d_offset(cs, -kmax_created);
   memory->destroy3d_offset(sn, -kmax_created);
@@ -364,19 +319,6 @@ void EwaldConp::setup() {
     coeffs();
   else
     coeffs_triclinic();
-}
-
-/* ----------------------------------------------------------------------
-   compute RMS accuracy for a dimension
-------------------------------------------------------------------------- */
-
-double EwaldConp::rms(int km, double prd, bigint natoms, double q2) {
-  if (natoms == 0) natoms = 1;  // avoid division by zero
-  double value =
-      2.0 * q2 * g_ewald / prd * sqrt(1.0 / (MY_PI * km * natoms)) *
-      exp(-MY_PI * MY_PI * km * km / (g_ewald * g_ewald * prd * prd));
-
-  return value;
 }
 
 /* ----------------------------------------------------------------------
@@ -1151,44 +1093,6 @@ void EwaldConp::coeffs_triclinic() {
 }
 
 /* ----------------------------------------------------------------------
-   allocate memory that depends on # of K-vectors
-------------------------------------------------------------------------- */
-
-void EwaldConp::allocate() {
-  kxvecs = new int[kmax3d];
-  kyvecs = new int[kmax3d];
-  kzvecs = new int[kmax3d];
-
-  ug = new double[kmax3d];
-  memory->create(eg, kmax3d, 3, "ewald/conp:eg");
-  memory->create(vg, kmax3d, 6, "ewald/conp:vg");
-
-  sfacrl = new double[kmax3d];
-  sfacim = new double[kmax3d];
-  sfacrl_all = new double[kmax3d];
-  sfacim_all = new double[kmax3d];
-}
-
-/* ----------------------------------------------------------------------
-   deallocate memory that depends on # of K-vectors
-------------------------------------------------------------------------- */
-
-void EwaldConp::deallocate() {
-  delete[] kxvecs;
-  delete[] kyvecs;
-  delete[] kzvecs;
-
-  delete[] ug;
-  memory->destroy(eg);
-  memory->destroy(vg);
-
-  delete[] sfacrl;
-  delete[] sfacim;
-  delete[] sfacrl_all;
-  delete[] sfacim_all;
-}
-
-/* ----------------------------------------------------------------------
    Slab-geometry correction term to dampen inter-slab interactions between
    periodically repeating slabs.  Yields good approximation to 2D Ewald if
    adequate empty space is left between repeating slabs (J. Chem. Phys.
@@ -1408,19 +1312,6 @@ void EwaldConp::wirecorr() {
     f[i][0] += ffact * q[i] * xdipole_all;
     f[i][1] += ffact * q[i] * ydipole_all;
   }
-}
-
-/* ----------------------------------------------------------------------
-   memory usage of local arrays
-------------------------------------------------------------------------- */
-
-double EwaldConp::memory_usage() {
-  double bytes = 3 * kmax3d * sizeof(int);
-  bytes += (1 + 3 + 6) * kmax3d * sizeof(double);
-  bytes += 4 * kmax3d * sizeof(double);
-  bytes += nmax * 3 * sizeof(double);
-  bytes += 2 * (2 * kmax + 1) * 3 * nmax * sizeof(double);
-  return bytes;
 }
 
 /* ----------------------------------------------------------------------
@@ -1737,46 +1628,6 @@ void EwaldConp::wirecorr_groups(int groupbit_A, int groupbit_B, int AA_flag) {
   const double ffact = qscale * (-2.0 * MY_PI / volume);
   f2group[1] += ffact * (qsum_A * xdipole_B + qsum_A * ydipole_B -
                          qsum_B * xdipole_A - qsum_B * ydipole_A);
-}
-
-/* ----------------------------------------------------------------------
-   allocate group-group memory that depends on # of K-vectors
-------------------------------------------------------------------------- */
-
-void EwaldConp::allocate_groups() {
-  // group A
-
-  sfacrl_A = new double[kmax3d];
-  sfacim_A = new double[kmax3d];
-  sfacrl_A_all = new double[kmax3d];
-  sfacim_A_all = new double[kmax3d];
-
-  // group B
-
-  sfacrl_B = new double[kmax3d];
-  sfacim_B = new double[kmax3d];
-  sfacrl_B_all = new double[kmax3d];
-  sfacim_B_all = new double[kmax3d];
-}
-
-/* ----------------------------------------------------------------------
-   deallocate group-group memory that depends on # of K-vectors
-------------------------------------------------------------------------- */
-
-void EwaldConp::deallocate_groups() {
-  // group A
-
-  delete[] sfacrl_A;
-  delete[] sfacim_A;
-  delete[] sfacrl_A_all;
-  delete[] sfacim_A_all;
-
-  // group B
-
-  delete[] sfacrl_B;
-  delete[] sfacim_B;
-  delete[] sfacrl_B_all;
-  delete[] sfacim_B_all;
 }
 
 /* ----------------------------------------------------------------------

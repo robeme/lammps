@@ -20,11 +20,11 @@ KSpaceStyle(ewald/conp, EwaldConp)
 #ifndef LMP_EWALDCONP_H
 #define LMP_EWALDCONP_H
 
-#include "kspace.h"
+#include "ewald.h"
 
 namespace LAMMPS_NS {
 
-class EwaldConp : public KSpace {
+class EwaldConp : public Ewald {
  public:
   EwaldConp(class LAMMPS *);
   virtual ~EwaldConp();
@@ -32,7 +32,6 @@ class EwaldConp : public KSpace {
   void setup();
   virtual void settings(int, char **);
   virtual void compute(int, int);
-  double memory_usage();
 
   void compute_group_group(int, int, int);
 
@@ -44,38 +43,18 @@ class EwaldConp : public KSpace {
   void compute_matrix_corr(bigint *, double **);
 
  protected:
-  int kxmax, kymax, kzmax;
-  int kcount, kmax, kmax3d, kmax_created;
-  double gsqmx, volume, area;
-  int nmax;
-
-  double unitk[3];
-  int *kxvecs, *kyvecs, *kzvecs;
-  int kxmax_orig, kymax_orig, kzmax_orig;
-  double *ug;
-  double **eg, **vg;
-  double **ek;
-  double *sfacrl, *sfacim, *sfacrl_all, *sfacim_all;
-  double ***cs, ***sn;
+  double area;
 
   // group-group interactions
 
-  int group_allocate_flag;
-  double *sfacrl_A, *sfacim_A, *sfacrl_A_all, *sfacim_A_all;
-  double *sfacrl_B, *sfacim_B, *sfacrl_B_all, *sfacim_B_all;
-
-  double rms(int, double, bigint, double);
   virtual void eik_dot_r();
   void coeffs();
-  virtual void allocate();
-  void deallocate();
   void slabcorr();
   void ew2dcorr();
   void wirecorr();
 
   // triclinic
 
-  int triclinic;
   void eik_dot_r_triclinic();
   void coeffs_triclinic();
 
@@ -83,8 +62,6 @@ class EwaldConp : public KSpace {
 
   void slabcorr_groups(int, int, int);
   void wirecorr_groups(int, int, int);
-  void allocate_groups();
-  void deallocate_groups();
  
  private:
   int eikr_step;
