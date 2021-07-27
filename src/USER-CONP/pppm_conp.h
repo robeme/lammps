@@ -71,12 +71,6 @@ class PPPMConp : public PPPM {
   FFT_SCALAR  *electrolyte_density_fft;
 
 
-  // FFTs and grid communication
-
-  class FFT3d *fft1, *fft2;
-  class Remap *remap;
-  class GridComm *gc;
-
   int ngc_buf1, ngc_buf2, npergrid;
 
   virtual void set_grid_global();

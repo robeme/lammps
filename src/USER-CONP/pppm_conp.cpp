@@ -69,19 +69,10 @@ enum { FORWARD_IK, FORWARD_AD, FORWARD_IK_PERATOM, FORWARD_AD_PERATOM };
 PPPMConp::PPPMConp(LAMMPS *lmp)
     : PPPM(lmp),
       electrolyte_density_brick(nullptr),
-      electrolyte_density_fft(nullptr),
-      fft1(nullptr),
-      fft2(nullptr),
-      remap(nullptr),
-      gc(nullptr) {
+      electrolyte_density_fft(nullptr){
 
   electrolyte_density_brick = nullptr;
   electrolyte_density_fft = nullptr;
-
-  fft1 = fft2 = nullptr;
-  remap = nullptr;
-  gc = nullptr;
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -223,6 +214,10 @@ void PPPMConp::init() {
   // free all arrays previously allocated
 
   deallocate();
+  delete fft1;
+  delete fft2;
+  delete remap;
+  delete gc;
   if (peratom_allocate_flag) deallocate_peratom();
   if (group_allocate_flag) deallocate_groups();
 
@@ -1171,10 +1166,6 @@ void PPPMConp::deallocate() {
   memory->destroy2d_offset(rho_coeff, (1 - order_allocated) / 2);
   memory->destroy2d_offset(drho_coeff, (1 - order_allocated) / 2);
 
-  delete fft1;
-  delete fft2;
-  delete remap;
-  delete gc;
   memory->destroy(gc_buf1);
   memory->destroy(gc_buf2);
 }
