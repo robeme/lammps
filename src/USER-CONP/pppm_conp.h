@@ -49,14 +49,10 @@ class PPPMConp : public PPPM {
  public:
   PPPMConp(class LAMMPS *);
   virtual ~PPPMConp();
-  virtual void settings(int, char **);
   virtual void init();
   virtual void setup();
   virtual void setup_grid();
   virtual void compute(int, int);
-  virtual int timing_1d(int, double &);
-  virtual int timing_3d(int, double &);
-  virtual double memory_usage();
 
   void compute_vector(bigint *, double *);
   void compute_vector_corr(bigint *, double *);
@@ -71,71 +67,31 @@ class PPPMConp : public PPPM {
   FFT_SCALAR  *electrolyte_density_fft;
 
 
-  int ngc_buf1, ngc_buf2, npergrid;
 
   virtual void set_grid_global();
   void set_grid_local();
-  void adjust_gewald();
-  virtual double newton_raphson_f();
-  double derivf();
-  double final_accuracy();
 
   virtual void allocate();
-  virtual void allocate_peratom();
   virtual void deallocate();
-  virtual void deallocate_peratom();
-  int factorable(int);
   double compute_df_kspace();
-  double estimate_ik_error(double, double, bigint);
+  //double estimate_ik_error(double, double, bigint);
   virtual double compute_qopt();
-  virtual void compute_gf_denom();
   virtual void compute_gf_ik();
   virtual void compute_gf_ad();
-  void compute_sf_precoeff();
-
-  virtual void particle_map();
-  virtual void make_rho();
-  virtual void brick2fft();
-
-  virtual void poisson();
-  virtual void poisson_ik();
-  virtual void poisson_ad();
 
   virtual void fieldforce();
   virtual void fieldforce_ik();
   virtual void fieldforce_ad();
 
-  virtual void poisson_peratom();
-  virtual void fieldforce_peratom();
-  void procs2grid2d(int, int, int, int *, int *);
-  void compute_rho1d(const FFT_SCALAR &, const FFT_SCALAR &,
-                     const FFT_SCALAR &);
-  void compute_drho1d(const FFT_SCALAR &, const FFT_SCALAR &,
-                      const FFT_SCALAR &);
-  void compute_rho_coeff();
   virtual void slabcorr();
   virtual void wirecorr();
-
-  // grid communication
-
-  virtual void pack_forward_grid(int, void *, int, int *);
-  virtual void unpack_forward_grid(int, void *, int, int *);
-  virtual void pack_reverse_grid(int, void *, int, int *);
-  virtual void unpack_reverse_grid(int, void *, int, int *);
 
   // triclinic
 
   void setup_triclinic();
-  void compute_gf_ik_triclinic();
-  void poisson_ik_triclinic();
-  void poisson_groups_triclinic();
 
   // group-group interactions
 
-  virtual void allocate_groups();
-  virtual void deallocate_groups();
-  virtual void make_rho_groups(int, int, int);
-  virtual void poisson_groups(int);
   virtual void slabcorr_groups(int, int, int);
   virtual void wirecorr_groups(int, int, int);
 
