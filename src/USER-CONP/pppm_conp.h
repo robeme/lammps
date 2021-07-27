@@ -20,7 +20,7 @@ KSpaceStyle(pppm/conp, PPPMConp)
 #ifndef LMP_PPPM_CONP_H
 #define LMP_PPPM_CONP_H
 
-#include "kspace.h"
+#include "pppm.h"
 
 #if defined(FFT_FFTW3)
 #define LMP_FFT_LIB "FFTW3"
@@ -45,7 +45,7 @@ typedef double FFT_SCALAR;
 
 namespace LAMMPS_NS {
 
-class PPPMConp : public KSpace {
+class PPPMConp : public PPPM {
  public:
   PPPMConp(class LAMMPS *);
   virtual ~PPPMConp();
@@ -66,41 +66,10 @@ class PPPMConp : public KSpace {
   virtual void compute_group_group(int, int, int);
 
  protected:
-  int me, nprocs;
-  int nfactors;
-  int *factors;
-  double cutoff;
-  double volume;
-  double delxinv, delyinv, delzinv, delvolinv;
-  double h_x, h_y, h_z;
-  double shift, shiftone;
-  int peratom_allocate_flag;
 
-  int nxlo_in, nylo_in, nzlo_in, nxhi_in, nyhi_in, nzhi_in;
-  int nxlo_out, nylo_out, nzlo_out, nxhi_out, nyhi_out, nzhi_out;
-  int nxlo_ghost, nxhi_ghost, nylo_ghost, nyhi_ghost, nzlo_ghost, nzhi_ghost;
-  int nxlo_fft, nylo_fft, nzlo_fft, nxhi_fft, nyhi_fft, nzhi_fft;
-  int nlower, nupper;
-  int ngrid, nfft, nfft_both;
+  FFT_SCALAR ***electrolyte_density_brick ;
+  FFT_SCALAR  *electrolyte_density_fft;
 
-  FFT_SCALAR ***density_brick, ***electrolyte_density_brick,
-      ***electrode_density_brick;
-  FFT_SCALAR ***vdx_brick, ***vdy_brick, ***vdz_brick;
-  FFT_SCALAR ***u_brick;
-  FFT_SCALAR ***v0_brick, ***v1_brick, ***v2_brick;
-  FFT_SCALAR ***v3_brick, ***v4_brick, ***v5_brick;
-  double *greensfn;
-  double **vg;
-  double *fkx, *fky, *fkz;
-  FFT_SCALAR *density_fft, *electrolyte_density_fft, *electrode_density_fft;
-  FFT_SCALAR *work1, *work2;
-
-  double *gf_b;
-  FFT_SCALAR **rho1d, **rho_coeff, **drho1d, **drho_coeff;
-  double *sf_precoeff1, *sf_precoeff2, *sf_precoeff3;
-  double *sf_precoeff4, *sf_precoeff5, *sf_precoeff6;
-  double sf_coeff[6];  // coefficients for calculating ad self-forces
-  double **acons;
 
   // FFTs and grid communication
 
@@ -108,23 +77,7 @@ class PPPMConp : public KSpace {
   class Remap *remap;
   class GridComm *gc;
 
-  FFT_SCALAR *gc_buf1, *gc_buf2;
   int ngc_buf1, ngc_buf2, npergrid;
-
-  // group-group interactions
-
-  int group_allocate_flag;
-  FFT_SCALAR ***density_A_brick, ***density_B_brick;
-  FFT_SCALAR *density_A_fft, *density_B_fft;
-
-  int **part2grid;  // storage for particle -> grid mapping
-  int nmax;
-
-  double *boxlo;
-  // TIP4P settings
-  int typeH, typeO;  // atom types of TIP4P water H and O atoms
-  double qdist;      // distance from O site to negative charge
-  double alpha;      // geometric factor
 
   virtual void set_grid_global();
   void set_grid_local();
@@ -178,7 +131,6 @@ class PPPMConp : public KSpace {
 
   // triclinic
 
-  int triclinic;  // domain settings, orthog or triclinic
   void setup_triclinic();
   void compute_gf_ik_triclinic();
   void poisson_ik_triclinic();
@@ -222,9 +174,6 @@ class PPPMConp : public KSpace {
   int compute_step;
   void start_compute();
   void make_electrolyte_rho(bigint *);
-  void debug_make_electrode_rho(bigint *);
-  // debugging
-  double debug_fft(int, int, int);
 };
 
 }  // namespace LAMMPS_NS

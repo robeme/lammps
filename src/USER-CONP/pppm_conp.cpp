@@ -67,134 +67,21 @@ enum { FORWARD_IK, FORWARD_AD, FORWARD_IK_PERATOM, FORWARD_AD_PERATOM };
 /* ---------------------------------------------------------------------- */
 
 PPPMConp::PPPMConp(LAMMPS *lmp)
-    : KSpace(lmp),
-      factors(nullptr),
-      density_brick(nullptr),
+    : PPPM(lmp),
       electrolyte_density_brick(nullptr),
-      vdx_brick(nullptr),
-      vdy_brick(nullptr),
-      vdz_brick(nullptr),
-      u_brick(nullptr),
-      v0_brick(nullptr),
-      v1_brick(nullptr),
-      v2_brick(nullptr),
-      v3_brick(nullptr),
-      v4_brick(nullptr),
-      v5_brick(nullptr),
-      greensfn(nullptr),
-      vg(nullptr),
-      fkx(nullptr),
-      fky(nullptr),
-      fkz(nullptr),
-      density_fft(nullptr),
       electrolyte_density_fft(nullptr),
-      work1(nullptr),
-      work2(nullptr),
-      gf_b(nullptr),
-      rho1d(nullptr),
-      rho_coeff(nullptr),
-      drho1d(nullptr),
-      drho_coeff(nullptr),
-      sf_precoeff1(nullptr),
-      sf_precoeff2(nullptr),
-      sf_precoeff3(nullptr),
-      sf_precoeff4(nullptr),
-      sf_precoeff5(nullptr),
-      sf_precoeff6(nullptr),
-      acons(nullptr),
       fft1(nullptr),
       fft2(nullptr),
       remap(nullptr),
-      gc(nullptr),
-      gc_buf1(nullptr),
-      gc_buf2(nullptr),
-      density_A_brick(nullptr),
-      density_B_brick(nullptr),
-      density_A_fft(nullptr),
-      density_B_fft(nullptr),
-      part2grid(nullptr),
-      boxlo(nullptr) {
-  peratom_allocate_flag = 0;
-  group_allocate_flag = 0;
+      gc(nullptr) {
 
-  pppmflag = 1;
-  group_group_enable = 1;
-  triclinic = domain->triclinic;
-
-  nfactors = 3;
-  factors = new int[nfactors];
-  factors[0] = 2;
-  factors[1] = 3;
-  factors[2] = 5;
-
-  MPI_Comm_rank(world, &me);
-  MPI_Comm_size(world, &nprocs);
-
-  nfft_both = 0;
-  nxhi_in = nxlo_in = nxhi_out = nxlo_out = 0;
-  nyhi_in = nylo_in = nyhi_out = nylo_out = 0;
-  nzhi_in = nzlo_in = nzhi_out = nzlo_out = 0;
-
-  electrolyte_density_brick = density_brick = vdx_brick = vdy_brick =
-      vdz_brick = nullptr;
-  electrolyte_density_fft = density_fft = nullptr;
-  u_brick = nullptr;
-  v0_brick = v1_brick = v2_brick = v3_brick = v4_brick = v5_brick = nullptr;
-  greensfn = nullptr;
-  work1 = work2 = nullptr;
-  vg = nullptr;
-  fkx = fky = fkz = nullptr;
-
-  sf_precoeff1 = sf_precoeff2 = sf_precoeff3 = sf_precoeff4 = sf_precoeff5 =
-      sf_precoeff6 = nullptr;
-
-  density_A_brick = density_B_brick = nullptr;
-  density_A_fft = density_B_fft = nullptr;
-
-  gf_b = nullptr;
-  rho1d = rho_coeff = drho1d = drho_coeff = nullptr;
+  electrolyte_density_brick = nullptr;
+  electrolyte_density_fft = nullptr;
 
   fft1 = fft2 = nullptr;
   remap = nullptr;
   gc = nullptr;
-  gc_buf1 = gc_buf2 = nullptr;
 
-  nmax = 0;
-  part2grid = nullptr;
-
-  // define acons coefficients for estimation of kspace errors
-  // see JCP 109, pg 7698 for derivation of coefficients
-  // higher order coefficients may be computed if needed
-
-  memory->create(acons, 8, 7, "pppm/conp:acons");
-  acons[1][0] = 2.0 / 3.0;
-  acons[2][0] = 1.0 / 50.0;
-  acons[2][1] = 5.0 / 294.0;
-  acons[3][0] = 1.0 / 588.0;
-  acons[3][1] = 7.0 / 1440.0;
-  acons[3][2] = 21.0 / 3872.0;
-  acons[4][0] = 1.0 / 4320.0;
-  acons[4][1] = 3.0 / 1936.0;
-  acons[4][2] = 7601.0 / 2271360.0;
-  acons[4][3] = 143.0 / 28800.0;
-  acons[5][0] = 1.0 / 23232.0;
-  acons[5][1] = 7601.0 / 13628160.0;
-  acons[5][2] = 143.0 / 69120.0;
-  acons[5][3] = 517231.0 / 106536960.0;
-  acons[5][4] = 106640677.0 / 11737571328.0;
-  acons[6][0] = 691.0 / 68140800.0;
-  acons[6][1] = 13.0 / 57600.0;
-  acons[6][2] = 47021.0 / 35512320.0;
-  acons[6][3] = 9694607.0 / 2095994880.0;
-  acons[6][4] = 733191589.0 / 59609088000.0;
-  acons[6][5] = 326190917.0 / 11700633600.0;
-  acons[7][0] = 1.0 / 345600.0;
-  acons[7][1] = 3617.0 / 35512320.0;
-  acons[7][2] = 745739.0 / 838397952.0;
-  acons[7][3] = 56399353.0 / 12773376000.0;
-  acons[7][4] = 25091609.0 / 1560084480.0;
-  acons[7][5] = 1755948832039.0 / 36229939200000.0;
-  acons[7][6] = 4887769399.0 / 37838389248.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -211,7 +98,6 @@ void PPPMConp::settings(int narg, char **arg) {
 PPPMConp::~PPPMConp() {
   if (copymode) return;
 
-  delete[] factors;
   deallocate();
   if (peratom_allocate_flag) deallocate_peratom();
   if (group_allocate_flag) deallocate_groups();
@@ -789,63 +675,6 @@ void PPPMConp::compute(int eflag, int vflag) {
 }
 
 /* ----------------------------------------------------------------------
- * brute force fft of greens funciton k -> r
- * for grid coords ix, iy, iz
- * not parallelized
-------------------------------------------------------------------------- */
-
-double PPPMConp::debug_fft(int ix, int iy, int iz) {
-  for (int i = 0, n = 0; i < nfft; i++) {
-    work1[n++] = electrolyte_density_fft[i];
-    work1[n++] = ZEROF;
-  }
-  fft1->compute(work1, work1, -1);
-  // rho*
-  // for (int kz = nzlo_fft, n = 0; kz <= nzhi_fft; kz++) {
-  // for (int ky = nylo_fft; ky <= nyhi_fft; ky++) {
-  // for (int kx = nxlo_fft; kx <= nxhi_fft; kx++) {
-  // double out1 = 0;
-  // double out2 = 0;
-  // for (int iz = nzlo_in; iz <= nzhi_in; iz++) {
-  // for (int iy = nylo_in; iy <= nyhi_in; iy++) {
-  // for (int ix = nxlo_in; ix <= nxhi_in; ix++) {
-  // double z = MY_2PI * kz * iz * 1. / nz_pppm;
-  // double y = MY_2PI * ky * iy * 1. / ny_pppm;
-  // double x = MY_2PI * kx * ix * 1. / nx_pppm;
-  // out1 += (cos(x) * cos(y) * cos(z) - cos(x) * sin(y) * sin(z) -
-  // sin(x) * cos(y) * sin(z) - sin(x) * sin(y) * cos(z)) *
-  // electrolyte_density_brick[iz][iy][ix];
-  // out2 -= (-sin(x) * sin(y) * sin(z) + cos(x) * cos(y) * sin(z) +
-  // cos(x) * sin(y) * cos(z) + sin(x) * cos(y) * cos(z)) *
-  // electrolyte_density_brick[iz][iy][ix];
-  //}
-  //}
-  //}
-  // cout << work1[n] << ", " << out1 << endl;
-  // cout << work1[n + 1] << ", " << out2 << endl;
-  // n += 2;
-  //}
-  //}
-  //}
-  double out = 0.;
-  for (int kz = nzlo_fft, n = 0; kz <= nzhi_fft; kz++)
-    for (int ky = nylo_fft; ky <= nyhi_fft; ky++)
-      for (int kx = nxlo_fft; kx <= nxhi_fft; kx++) {
-        double z = MY_2PI * kz * iz * 1. / nz_pppm;
-        double y = MY_2PI * ky * iy * 1. / ny_pppm;
-        double x = MY_2PI * kx * ix * 1. / nx_pppm;
-        out += (cos(x) * cos(y) * cos(z) - cos(x) * sin(y) * sin(z) -
-                sin(x) * cos(y) * sin(z) - sin(x) * sin(y) * cos(z)) *
-               greensfn[n] * work1[2 * n];
-        out += (-sin(x) * sin(y) * sin(z) + cos(x) * cos(y) * sin(z) +
-                cos(x) * sin(y) * cos(z) + sin(x) * cos(y) * cos(z)) *
-               greensfn[n] * work1[2 * n + 1];
-        n++;
-      }
-  return out;
-}
-
-/* ----------------------------------------------------------------------
 ------------------------------------------------------------------------- */
 void PPPMConp::start_compute() {
   if (compute_step < update->ntimestep) {
@@ -861,7 +690,7 @@ void PPPMConp::start_compute() {
     if (atom->nmax > nmax) {
       memory->destroy(part2grid);
       nmax = atom->nmax;
-      memory->create(part2grid, nmax, 3, "pppm/conp:part2grid");
+      memory->create(part2grid, nmax, 3, "pppm:part2grid");
     }
     // find grid points for all my particles
     // map my particle charge onto my local 3d density grid
@@ -1199,9 +1028,6 @@ void PPPMConp::compute_matrix(bigint *imat, double **matrix) {
 */
 
 void PPPMConp::allocate() {
-  memory->create3d_offset(electrode_density_brick, nzlo_out, nzhi_out, nylo_out,
-                          nyhi_out, nxlo_out, nxhi_out,
-                          "pppm/conp:electrode_density_brick");
   memory->create3d_offset(electrolyte_density_brick, nzlo_out, nzhi_out,
                           nylo_out, nyhi_out, nxlo_out, nxhi_out,
                           "pppm/conp:electrolyte_density_brick");
@@ -1209,8 +1035,6 @@ void PPPMConp::allocate() {
                           nxlo_out, nxhi_out, "pppm/conp:density_brick");
 
   memory->create(density_fft, nfft_both, "pppm/conp:density_fft");
-  memory->create(electrode_density_fft, nfft_both,
-                 "pppm/conp:electrode_density_fft");
   memory->create(electrolyte_density_fft, nfft_both,
                  "pppm/conp:electrolyte_density_fft");
   memory->create(greensfn, nfft_both, "pppm/conp:greensfn");
@@ -2442,57 +2266,6 @@ void PPPMConp::particle_map() {
   }
 
   if (flag) error->one(FLERR, "Out of range atoms - cannot compute PPPM/conp");
-}
-/* ----------------------------------------------------------------------
-   create discretized "density" of electrode particles (c.f. make_rho())
-   density(x,y,z) = charge "density" at grid points of my 3d brick
-   TODO remove. This is only needed for debugging
--------------------------------------------------------------------------
-*/
-
-void PPPMConp::debug_make_electrode_rho(bigint *imat) {
-  int l, m, n, nx, ny, nz, mx, my, mz;
-  FFT_SCALAR dx, dy, dz, x0, y0, z0;
-
-  // clear 3d density array
-
-  memset(&(electrode_density_brick[nzlo_out][nylo_out][nxlo_out]), 0,
-         ngrid * sizeof(FFT_SCALAR));
-
-  // loop over my charges, add their contribution to nearby grid points
-  // (nx,ny,nz) = global coords of grid pt to "lower left" of charge
-  // (dx,dy,dz) = distance to "lower left" grid pt
-  // (mx,my,mz) = global coords of moving stencil pt
-
-  double *q = atom->q;
-  double **x = atom->x;
-  int nlocal = atom->nlocal;
-
-  for (int i = 0; i < nlocal; i++) {
-    if (imat[i] < 0) continue;
-    nx = part2grid[i][0];
-    ny = part2grid[i][1];
-    nz = part2grid[i][2];
-    dx = nx + shiftone - (x[i][0] - boxlo[0]) * delxinv;
-    dy = ny + shiftone - (x[i][1] - boxlo[1]) * delyinv;
-    dz = nz + shiftone - (x[i][2] - boxlo[2]) * delzinv;
-
-    compute_rho1d(dx, dy, dz);
-
-    z0 = delvolinv * q[i];
-    for (n = nlower; n <= nupper; n++) {
-      mz = n + nz;
-      y0 = z0 * rho1d[2][n];
-      for (m = nlower; m <= nupper; m++) {
-        my = m + ny;
-        x0 = y0 * rho1d[1][m];
-        for (l = nlower; l <= nupper; l++) {
-          mx = l + nx;
-          electrode_density_brick[mz][my][mx] += x0 * rho1d[0][l];
-        }
-      }
-    }
-  }
 }
 /* ----------------------------------------------------------------------
    create discretized "density" of electrolyte particles (c.f. make_rho())
