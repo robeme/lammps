@@ -42,6 +42,7 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   read_inv = read_mat = false;
   symm = false;
   scalar_flag = 1;
+  thermo_energy = 1;
 
   // read fix command
   groups = std::vector<int>(1, igroup);
@@ -584,7 +585,6 @@ int FixChargeUpdate::setmask() {
   mask |= POST_NEIGHBOR;
   mask |= PRE_FORCE;
   mask |= PRE_REVERSE;
-  mask |= THERMO_ENERGY;
   return mask;
 }
 
