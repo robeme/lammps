@@ -43,6 +43,8 @@ FixChargeUpdate::FixChargeUpdate(LAMMPS *lmp, int narg, char **arg)
   symm = false;
   scalar_flag = 1;
 
+  update_time = 0;
+
   // read fix command
   groups = std::vector<int>(1, igroup);
   group_bits = std::vector<int>(1, groupbit);
@@ -417,6 +419,8 @@ void FixChargeUpdate::update_charges() {
   std::vector<int> mpos = local_to_matrix();
   int const nall = atom->nlocal + atom->nghost;
   vector_compute->compute_vector();
+  MPI_Barrier(world);
+  double start = MPI_Wtime();
   double *b = vector_compute->vector;
   for (int i = 0; i < nall; i++) {
     if (!(groupbit & mask[i])) continue;
@@ -426,6 +430,8 @@ void FixChargeUpdate::update_charges() {
     }
     atom->q[i] = q_tmp;
   }
+  MPI_Barrier(world);
+  update_time += MPI_Wtime() - start;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -573,6 +579,8 @@ double FixChargeUpdate::gausscorr(int eflag, bool fflag) {
 /* ---------------------------------------------------------------------- */
 
 FixChargeUpdate::~FixChargeUpdate() {
+  if (comm->me == 0)
+    utils::logmesg(lmp, fmt::format("Multiplication time: {}\n", update_time));
   if (!(read_mat || read_inv)) delete array_compute;
   delete vector_compute;
 }

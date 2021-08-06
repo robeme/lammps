@@ -41,7 +41,7 @@ class ComputeConpVector : public Compute {
   int pairflag, kspaceflag, boundaryflag;
   int overwrite, gaussians;
   std::vector<int> taglist;
-  bigint *mpos;
+  std::vector<bigint> mpos;
   bool assigned;
   class Pair *pair;
   class NeighList *list;
@@ -57,8 +57,15 @@ class ComputeConpVector : public Compute {
   void pair_contribution();
   double calc_erfc(double);
 
+  double setup_time_total;
+  double reduce_time_total;
   double kspace_time_total;
+  double pair_time_total;
+  double boundary_time_total;
   double b_time_total;
+
+  double alloc_time_total;
+  double mpos_time_total;
 };
 
 }  // namespace LAMMPS_NS

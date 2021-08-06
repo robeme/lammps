@@ -47,6 +47,7 @@ class FixChargeUpdate : public Fix {
   bool read_inv, read_mat;
   bool symm;  // symmetrize elastance for charge neutrality
   double eta;
+  double update_time;
   void create_taglist();
   void invert(std::vector<std::vector<double> >);
   void symmetrize();
