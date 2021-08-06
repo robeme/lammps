@@ -20,7 +20,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <iostream>
 
 #include "atom.h"
 #include "comm.h"
@@ -230,7 +229,6 @@ void ComputeConpMatrix::init() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::setup() {
-  std::cout << "matrix setup" << std::endl;
   ngroup = group->count(igroup);
 
   // TODO could be useful to assign homogenously all atoms in both groups to
@@ -239,7 +237,6 @@ void ComputeConpMatrix::setup() {
 
   // assign atom tags to matrix locations and vice versa
   matrix_assignment();
-  std::cout << "matrix setup done" << std::endl;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -473,12 +470,9 @@ void ComputeConpMatrix::matrix_assignment() {
 /* ---------------------------------------------------------------------- */
 
 void ComputeConpMatrix::allocate() {
-  std::cout << "matrix allocate mat2tag" << std:: endl;
   memory->create(mat2tag, ngroup, "coul/matrix:mat2tag");
-  std::cout << "matrix allocate array" << std:: endl;
   array = new double *[ngroup];
   for (bigint i = 0; i < ngroup; i++) array[i] = new double[ngroup];
-  std::cout << "matrix allocate done" << std:: endl;
 }
 
 /* ---------------------------------------------------------------------- */

@@ -40,7 +40,7 @@ class ComputeConpVector : public Compute {
   double g_ewald, eta;
   int pairflag, kspaceflag, boundaryflag;
   int overwrite, gaussians;
-  std::vector<int> taglist;
+  std::vector<int> tag_to_iele;
   std::vector<bigint> mpos;
   bool assigned;
   class Pair *pair;

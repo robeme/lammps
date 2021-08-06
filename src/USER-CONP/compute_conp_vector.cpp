@@ -14,8 +14,6 @@
 
 #include "compute_conp_vector.h"
 
-#include <iostream>
-
 #include "assert.h"
 #include "atom.h"
 #include "comm.h"
@@ -39,7 +37,7 @@ using namespace LAMMPS_NS;
 #define A5 1.061405429
 
 ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
-    : Compute(lmp, narg, arg) /*, mpos(nullptr)*/, fp(nullptr) {
+    : Compute(lmp, narg, arg), fp(nullptr) {
   if (narg < 4) error->all(FLERR, "Illegal compute coul/vector command");
 
   vector_flag = 1;
@@ -50,7 +48,6 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
 
   fp = nullptr;
   vector = nullptr;
-  // mpos = nullptr;
 
   pairflag = 1;
   kspaceflag = 1;
@@ -60,8 +57,6 @@ ComputeConpVector::ComputeConpVector(LAMMPS *lmp, int narg, char **arg)
   overwrite = 1;
 
   g_ewald = 0.0;
-
-  // assigned = false;
 
   eta =
       utils::numeric(FLERR, arg[3], false, lmp);  // TODO infer from pair_style!
@@ -335,12 +330,18 @@ void ComputeConpVector::create_taglist() {
     idispls[i] = idispls[i - 1] + igroupnum_list[i - 1];
   }
 
-  taglist = std::vector<int>(ngroup);
+  std::vector<int> taglist = std::vector<int>(ngroup);
   MPI_Allgatherv(&taglist_local.front(), igroupnum_local, MPI_LMP_TAGINT,
                  &taglist.front(), &igroupnum_list.front(), &idispls.front(),
                  MPI_LMP_TAGINT, world);
   // must be sorted for compatibility with fix_charge_update
   std::sort(taglist.begin(), taglist.end());
+
+  int const tag_max = taglist[ngroup - 1];
+  tag_to_iele = std::vector<int>(tag_max + 1, -1);
+  for (size_t i = 0; i < taglist.size(); i++) {
+    tag_to_iele[taglist[i]] = i;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -350,17 +351,17 @@ void ComputeConpVector::update_mpos() {
   double alloc_start = MPI_Wtime();
   int const nall = atom->nlocal + atom->nghost;
   int *tag = atom->tag;
+  int *mask = atom->mask;
   mpos = std::vector<bigint>(nall, -1);
-  // assigned = true;
+
   MPI_Barrier(world);
   alloc_time_total += MPI_Wtime() - alloc_start;
   double mpos_start = MPI_Wtime();
-  for (bigint ii = 0; ii < ngroup; ii++) {
-    for (int i = 0; i < nall; i++) {
-      if (taglist[ii] == tag[i]) {
-        mpos[i] = ii;
-      }
-    }
+  for (int i = 0; i < nall; i++) {
+    if (mask[i] & groupbit)
+      mpos[i] = tag_to_iele[tag[i]];
+    else
+      mpos[i] = -1;
   }
   MPI_Barrier(world);
   mpos_time_total += MPI_Wtime() - mpos_start;
