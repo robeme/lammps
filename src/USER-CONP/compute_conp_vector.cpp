@@ -154,7 +154,6 @@ ComputeConpVector::~ComputeConpVector() {
     utils::logmesg(lmp, fmt::format("B mpos time: {}\n", mpos_time_total));
   }
   delete[] vector;
-  // if (assigned) delete[] mpos;
   if (fp && comm->me == 0) fclose(fp);
 }
 

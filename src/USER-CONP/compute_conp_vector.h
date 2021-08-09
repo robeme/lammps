@@ -42,7 +42,6 @@ class ComputeConpVector : public Compute {
   int overwrite, gaussians;
   std::vector<int> tag_to_iele;
   std::vector<bigint> mpos;
-  bool assigned;
   class Pair *pair;
   class NeighList *list;
   class KSpace *kspace;
