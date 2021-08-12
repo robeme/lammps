@@ -13,8 +13,6 @@
 
 #include "verlet.h"
 
-#include <cstring>
-
 #include "angle.h"
 #include "atom.h"
 #include "atom_vec.h"
@@ -33,33 +31,35 @@
 #include "timer.h"
 #include "update.h"
 
+#include <cstring>
+
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-Verlet::Verlet(LAMMPS *lmp, int narg, char **arg) : Integrate(lmp, narg, arg) {}
+Verlet::Verlet(LAMMPS *lmp, int narg, char **arg) :
+  Integrate(lmp, narg, arg) {}
 
 /* ----------------------------------------------------------------------
    initialization before run
 ------------------------------------------------------------------------- */
 
-void Verlet::init() {
+void Verlet::init()
+{
   Integrate::init();
 
   // warn if no fixes
 
   if (modify->nfix == 0 && comm->me == 0)
-    error->warning(FLERR, "No fixes defined, atoms won't move");
+    error->warning(FLERR,"No fixes defined, atoms won't move");
 
   // virial_style:
   // VIRIAL_PAIR if computed explicitly in pair via sum over pair interactions
   // VIRIAL_FDOTR if computed implicitly in pair by
   //   virial_fdotr_compute() via sum over ghosts
 
-  if (force->newton_pair)
-    virial_style = VIRIAL_FDOTR;
-  else
-    virial_style = VIRIAL_PAIR;
+  if (force->newton_pair) virial_style = VIRIAL_FDOTR;
+  else virial_style = VIRIAL_PAIR;
 
   // setup lists of computes for global and per-atom PE and pressure
 
@@ -79,28 +79,27 @@ void Verlet::init() {
   // orthogonal vs triclinic simulation box
 
   triclinic = domain->triclinic;
-
 }
 
 /* ----------------------------------------------------------------------
    setup before run
 ------------------------------------------------------------------------- */
 
-void Verlet::setup(int flag) {
+void Verlet::setup(int flag)
+{
   if (comm->me == 0 && screen) {
-    fputs("Setting up Verlet run ...\n", screen);
+    fputs("Setting up Verlet run ...\n",screen);
     if (flag) {
-      fmt::print(screen,
-                 "  Unit style    : {}\n"
-                 "  Current step  : {}\n"
-                 "  Time step     : {}\n",
-                 update->unit_style, update->ntimestep, update->dt);
+      fmt::print(screen,"  Unit style    : {}\n"
+                        "  Current step  : {}\n"
+                        "  Time step     : {}\n",
+                 update->unit_style,update->ntimestep,update->dt);
       timer->print_timeout(screen);
     }
   }
 
   if (lmp->kokkos)
-    error->all(FLERR, "KOKKOS package requires run_style verlet/kk");
+    error->all(FLERR,"KOKKOS package requires run_style verlet/kk");
 
   update->setupflag = 1;
 
@@ -118,7 +117,7 @@ void Verlet::setup(int flag) {
   comm->exchange();
   if (atom->sortfreq > 0) atom->sort();
   comm->borders();
-  if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
+  if (triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
   domain->image_check();
   domain->box_too_small_check();
   modify->setup_pre_neighbor();
@@ -133,27 +132,23 @@ void Verlet::setup(int flag) {
   force_clear();
   modify->setup_pre_force(vflag);
 
-  if (pair_compute_flag)
-    force->pair->compute(eflag, vflag);
-  else if (force->pair)
-    force->pair->compute_dummy(eflag, vflag);
+  if (pair_compute_flag) force->pair->compute(eflag,vflag);
+  else if (force->pair) force->pair->compute_dummy(eflag,vflag);
 
   if (atom->molecular) {
-    if (force->bond) force->bond->compute(eflag, vflag);
-    if (force->angle) force->angle->compute(eflag, vflag);
-    if (force->dihedral) force->dihedral->compute(eflag, vflag);
-    if (force->improper) force->improper->compute(eflag, vflag);
+    if (force->bond) force->bond->compute(eflag,vflag);
+    if (force->angle) force->angle->compute(eflag,vflag);
+    if (force->dihedral) force->dihedral->compute(eflag,vflag);
+    if (force->improper) force->improper->compute(eflag,vflag);
   }
 
   if (force->kspace) {
     force->kspace->setup();
-    if (kspace_compute_flag)
-      force->kspace->compute(eflag, vflag);
-    else
-      force->kspace->compute_dummy(eflag, vflag);
+    if (kspace_compute_flag) force->kspace->compute(eflag,vflag);
+    else force->kspace->compute_dummy(eflag,vflag);
   }
 
-  modify->setup_pre_reverse(eflag, vflag);
+  modify->setup_pre_reverse(eflag,vflag);
   if (force->newton) comm->reverse_comm();
 
   modify->setup(vflag);
@@ -167,7 +162,8 @@ void Verlet::setup(int flag) {
    flag = 1 = reneighbor and force calculation
 ------------------------------------------------------------------------- */
 
-void Verlet::setup_minimal(int flag) {
+void Verlet::setup_minimal(int flag)
+{
   update->setupflag = 1;
 
   // setup domain, communication and neighboring
@@ -183,7 +179,7 @@ void Verlet::setup_minimal(int flag) {
     if (neighbor->style) neighbor->setup_bins();
     comm->exchange();
     comm->borders();
-    if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
+    if (triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
     domain->image_check();
     domain->box_too_small_check();
     modify->setup_pre_neighbor();
@@ -198,27 +194,23 @@ void Verlet::setup_minimal(int flag) {
   force_clear();
   modify->setup_pre_force(vflag);
 
-  if (pair_compute_flag)
-    force->pair->compute(eflag, vflag);
-  else if (force->pair)
-    force->pair->compute_dummy(eflag, vflag);
+  if (pair_compute_flag) force->pair->compute(eflag,vflag);
+  else if (force->pair) force->pair->compute_dummy(eflag,vflag);
 
   if (atom->molecular) {
-    if (force->bond) force->bond->compute(eflag, vflag);
-    if (force->angle) force->angle->compute(eflag, vflag);
-    if (force->dihedral) force->dihedral->compute(eflag, vflag);
-    if (force->improper) force->improper->compute(eflag, vflag);
+    if (force->bond) force->bond->compute(eflag,vflag);
+    if (force->angle) force->angle->compute(eflag,vflag);
+    if (force->dihedral) force->dihedral->compute(eflag,vflag);
+    if (force->improper) force->improper->compute(eflag,vflag);
   }
 
   if (force->kspace) {
     force->kspace->setup();
-    if (kspace_compute_flag)
-      force->kspace->compute(eflag, vflag);
-    else
-      force->kspace->compute_dummy(eflag, vflag);
+    if (kspace_compute_flag) force->kspace->compute(eflag,vflag);
+    else force->kspace->compute_dummy(eflag,vflag);
   }
 
-  modify->setup_pre_reverse(eflag, vflag);
+  modify->setup_pre_reverse(eflag,vflag);
   if (force->newton) comm->reverse_comm();
 
   modify->setup(vflag);
@@ -229,9 +221,10 @@ void Verlet::setup_minimal(int flag) {
    run for N steps
 ------------------------------------------------------------------------- */
 
-void Verlet::run(int n) {
+void Verlet::run(int n)
+{
   bigint ntimestep;
-  int nflag, sortflag;
+  int nflag,sortflag;
 
   int n_post_integrate = modify->n_post_integrate;
   int n_pre_exchange = modify->n_pre_exchange;
@@ -242,13 +235,9 @@ void Verlet::run(int n) {
   int n_post_force = modify->n_post_force;
   int n_end_of_step = modify->n_end_of_step;
 
-  if (atom->sortfreq > 0)
-    sortflag = 1;
-  else
-    sortflag = 0;
+  if (atom->sortfreq > 0) sortflag = 1;
+  else sortflag = 0;
 
-  MPI_Barrier(world);
-  double force_time = 0;
   for (int i = 0; i < n; i++) {
     if (timer->check_timeout(i)) {
       update->nsteps = i;
@@ -290,7 +279,7 @@ void Verlet::run(int n) {
       comm->exchange();
       if (sortflag && ntimestep >= atom->nextsort) atom->sort();
       comm->borders();
-      if (triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
+      if (triclinic) domain->lamda2x(atom->nlocal+atom->nghost);
       timer->stamp(Timer::COMM);
       if (n_pre_neighbor) {
         modify->pre_neighbor();
@@ -318,29 +307,26 @@ void Verlet::run(int n) {
       timer->stamp(Timer::MODIFY);
     }
 
-    MPI_Barrier(world);
-    double force_start = MPI_Wtime();
-
     if (pair_compute_flag) {
-      force->pair->compute(eflag, vflag);
+      force->pair->compute(eflag,vflag);
       timer->stamp(Timer::PAIR);
     }
 
     if (atom->molecular) {
-      if (force->bond) force->bond->compute(eflag, vflag);
-      if (force->angle) force->angle->compute(eflag, vflag);
-      if (force->dihedral) force->dihedral->compute(eflag, vflag);
-      if (force->improper) force->improper->compute(eflag, vflag);
+      if (force->bond) force->bond->compute(eflag,vflag);
+      if (force->angle) force->angle->compute(eflag,vflag);
+      if (force->dihedral) force->dihedral->compute(eflag,vflag);
+      if (force->improper) force->improper->compute(eflag,vflag);
       timer->stamp(Timer::BOND);
     }
 
     if (kspace_compute_flag) {
-      force->kspace->compute(eflag, vflag);
+      force->kspace->compute(eflag,vflag);
       timer->stamp(Timer::KSPACE);
     }
 
     if (n_pre_reverse) {
-      modify->pre_reverse(eflag, vflag);
+      modify->pre_reverse(eflag,vflag);
       timer->stamp(Timer::MODIFY);
     }
 
@@ -350,9 +336,6 @@ void Verlet::run(int n) {
       comm->reverse_comm();
       timer->stamp(Timer::COMM);
     }
-
-    MPI_Barrier(world);
-    force_time += MPI_Wtime() - force_start;
 
     // force modifications, final time integration, diagnostics
 
@@ -369,15 +352,12 @@ void Verlet::run(int n) {
       timer->stamp(Timer::OUTPUT);
     }
   }
-  MPI_Barrier(world);
-  if (comm->me == 0) {
-    utils::logmesg(lmp, fmt::format("Force time: {}\n", force_time));
-  }
 }
 
 /* ---------------------------------------------------------------------- */
 
-void Verlet::cleanup() {
+void Verlet::cleanup()
+{
   modify->post_run();
   domain->box_too_small_check();
   update->update_time();
@@ -388,7 +368,8 @@ void Verlet::cleanup() {
    clear other arrays as needed
 ------------------------------------------------------------------------- */
 
-void Verlet::force_clear() {
+void Verlet::force_clear()
+{
   size_t nbytes;
 
   if (external_force_clear) return;
@@ -404,31 +385,31 @@ void Verlet::force_clear() {
     if (force->newton) nbytes += sizeof(double) * atom->nghost;
 
     if (nbytes) {
-      memset(&atom->f[0][0], 0, 3 * nbytes);
-      if (torqueflag) memset(&atom->torque[0][0], 0, 3 * nbytes);
-      if (extraflag) atom->avec->force_clear(0, nbytes);
+      memset(&atom->f[0][0],0,3*nbytes);
+      if (torqueflag) memset(&atom->torque[0][0],0,3*nbytes);
+      if (extraflag) atom->avec->force_clear(0,nbytes);
     }
 
-    // neighbor includegroup flag is set
-    // clear force only on initial nfirst particles
-    // if either newton flag is set, also include ghosts
+  // neighbor includegroup flag is set
+  // clear force only on initial nfirst particles
+  // if either newton flag is set, also include ghosts
 
   } else {
     nbytes = sizeof(double) * atom->nfirst;
 
     if (nbytes) {
-      memset(&atom->f[0][0], 0, 3 * nbytes);
-      if (torqueflag) memset(&atom->torque[0][0], 0, 3 * nbytes);
-      if (extraflag) atom->avec->force_clear(0, nbytes);
+      memset(&atom->f[0][0],0,3*nbytes);
+      if (torqueflag) memset(&atom->torque[0][0],0,3*nbytes);
+      if (extraflag) atom->avec->force_clear(0,nbytes);
     }
 
     if (force->newton) {
       nbytes = sizeof(double) * atom->nghost;
 
       if (nbytes) {
-        memset(&atom->f[nlocal][0], 0, 3 * nbytes);
-        if (torqueflag) memset(&atom->torque[nlocal][0], 0, 3 * nbytes);
-        if (extraflag) atom->avec->force_clear(nlocal, nbytes);
+        memset(&atom->f[nlocal][0],0,3*nbytes);
+        if (torqueflag) memset(&atom->torque[nlocal][0],0,3*nbytes);
+        if (extraflag) atom->avec->force_clear(nlocal,nbytes);
       }
     }
   }

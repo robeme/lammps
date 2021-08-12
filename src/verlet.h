@@ -39,7 +39,6 @@ class Verlet : public Integrate {
   int torqueflag,extraflag;
 
   virtual void force_clear();
-
 };
 
 }
