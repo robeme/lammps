@@ -1,0 +1,30 @@
+These examples demonstrate the use of the ELECTRODE package for constant potential molecular dynamics.
+
+analytical/
+  au-vac.data   -- gold electrodes with vacuum
+  in.plane -- comparison of gold electrodes with vacuum to theoretical capacitance of planar capacitor
+    -- 6x, further labeled by long-range solver (ewald / pppm) and boundary correction (ew2d / ew3dc / ffield)
+  # in.cylinder -- comparison of carbon nanotube to theoretical induced charge for charge near circular conductor
+
+au-aq/
+  au-aq.data -- gold electrodes with electrolyte SPC water + NaCl
+  in.ref     -- reference run at constant potential
+  in.etypes  -- run using type-based smart neighborlists
+  in.ffield  -- run using finite field method
+  in.ramp    -- run using ramping potential difference
+  in.conq    -- run using constrained charge
+  in.conq2   -- run using constrained charge via internal variables
+  in.thermo  -- run using thermopotentiostat
+  in.thermo2 -- run using thermopotentiostat via internal variables
+  in.tf      -- run using Thomas-Fermi model
+
+graph-il/
+  graph-il.data -- graphene electrodes with electrolyte coarse-grained BMIm-PF6
+  in.ref     -- reference run at constant potential
+  in.etypes  -- run using type-based smart neighborlists
+  in.ffield  -- run using finite field method
+  in.ramp    -- run using ramping potential difference
+  in.conq    -- run using constrained charge
+  in.conq2   -- run using constrained charge via internal variables
+  in.thermo  -- run using thermopotentiostat
+  in.thermo2 -- run using thermopotentiostat via internal variables
