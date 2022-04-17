@@ -1,0 +1,39 @@
+units real
+boundary p p f
+
+if "$(extract_setting(world_size)) > 1" then "processors * * 2"
+
+atom_style full
+pair_style lj/cut/coul/long 14
+kspace_style pppm/electrode 1e-7
+kspace_modify slab ew2d
+
+read_data "data.au-vac"
+
+group bot molecule 1
+group top molecule 2
+
+# equipotential electrodes with ramping potential difference
+variable v equal ramp(0,2)
+fix conp bot electrode/conp 0 1.979 couple top v_v symm on
+
+# get electrode charge
+variable q atom q
+compute qbot bot reduce sum v_q
+compute qtop top reduce sum v_q
+
+# get theoretical charges
+compute zbot bot reduce max z
+compute ztop top reduce min z
+variable dz equal c_ztop-c_zbot
+
+variable eps0 equal 55.26349406/10000 # epsilon zero
+variable capac equal "v_eps0 * lx * ly / v_dz"
+variable qtheory equal "v_capac * v_v"
+variable percdev equal "100 * (c_qtop - v_qtheory) / (v_qtheory + 1e-9)" # avoid divide-by-zero
+
+timestep 1
+thermo 1
+thermo_style custom step v_v c_qbot c_qtop v_qtheory v_percdev
+
+run 10
