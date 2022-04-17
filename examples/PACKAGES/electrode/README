@@ -1,8 +1,8 @@
 These examples demonstrate the use of the ELECTRODE package for constant potential molecular dynamics.
 
-analytical/
+planar/
   au-vac.data   -- gold electrodes with vacuum
-  in.plane -- comparison of gold electrodes with vacuum to theoretical capacitance of planar capacitor
+  in.planar -- comparison of gold electrodes with vacuum to theoretical capacitance of planar capacitor
     -- 6x, further labeled by long-range solver (ewald / pppm) and boundary correction (ew2d / ew3dc / ffield)
   # in.cylinder -- comparison of carbon nanotube to theoretical induced charge for charge near circular conductor
 
