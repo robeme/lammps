@@ -4,7 +4,7 @@ planar/
   au-vac.data   -- gold electrodes with vacuum
   in.planar -- comparison of gold electrodes with vacuum to theoretical capacitance of planar capacitor
     -- 6x, further labeled by long-range solver (ewald / pppm) and boundary correction (ew2d / ew3dc / ffield)
-  # in.cylinder -- comparison of carbon nanotube to theoretical induced charge for charge near circular conductor
+  test.sh -- run all in.planar files and check charge at 1.2V and %difference from theoretical (last column)
 
 au-aq/
   au-aq.data -- gold electrodes with electrolyte SPC water + NaCl
@@ -15,7 +15,6 @@ au-aq/
   in.conq    -- run using constrained charge
   in.conq2   -- run using constrained charge via internal variables
   in.thermo  -- run using thermopotentiostat
-  in.thermo2 -- run using thermopotentiostat via internal variables
   in.tf      -- run using Thomas-Fermi model
 
 graph-il/
@@ -27,4 +26,7 @@ graph-il/
   in.conq    -- run using constrained charge
   in.conq2   -- run using constrained charge via internal variables
   in.thermo  -- run using thermopotentiostat
-  in.thermo2 -- run using thermopotentiostat via internal variables
+
+# future work:
+  # in.cylinder -- comparison of carbon nanotube to theoretical induced charge for charge near circular conductor
+

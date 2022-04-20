@@ -18,7 +18,7 @@ group top molecule 642
 group bmi type 1 2 3
 group electrolyte type 1 2 3 4
 
-fix conp bot electrode/conp -1.0 1.805132 couple top 1.0 symm on etypes 5
+fix conp bot electrode/conp -1.0 1.979 couple top 1.0 symm on etypes 5
 fix nvt electrolyte nvt temp 500.0 500.0 100
 fix shake bmi shake 1e-4 20 0 b 1 2 a 1
 
@@ -28,5 +28,5 @@ compute qbot bot reduce sum v_q
 compute ctemp electrolyte temp
 
 thermo 50
-thermo_style custom step temp c_ctemp epair etotal c_qtop c_qbot
+thermo_style custom step temp c_ctemp epair etotal c_qbot c_qtop
 run 500

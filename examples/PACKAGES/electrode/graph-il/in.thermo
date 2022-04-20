@@ -18,8 +18,9 @@ group top molecule 642
 group bmi type 1 2 3
 group electrolyte type 1 2 3 4
 
-fix conp bot electrode/conp -1.0 1.979 couple top 1.0 symm on
-fix nvt electrolyte nvt temp 500.0 500.0 100
+fix conpthermo bot electrode/thermo -1.0 1.979 couple top 1.0 etypes 5 temp 500 100
+#fix conp bot electrode/conp -1.0 1.979 couple top 1.0 etypes 5 symm on
+fix nve electrolyte nve
 fix shake bmi shake 1e-4 20 0 b 1 2 a 1
 
 variable q atom q

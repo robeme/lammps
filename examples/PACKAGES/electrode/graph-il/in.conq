@@ -18,7 +18,7 @@ group top molecule 642
 group bmi type 1 2 3
 group electrolyte type 1 2 3 4
 
-fix conp bot electrode/conp -1.0 1.979 couple top 1.0 symm on
+fix conq bot electrode/conq -1.0 1.979 couple top 1.0 etypes 5
 fix nvt electrolyte nvt temp 500.0 500.0 100
 fix shake bmi shake 1e-4 20 0 b 1 2 a 1
 
@@ -27,6 +27,12 @@ compute qtop top reduce sum v_q
 compute qbot bot reduce sum v_q
 compute ctemp electrolyte temp
 
+# link potential variable to fix conq
+variable vbot internal 0.0
+variable vtop internal 0.0
+fix_modify conq set v bot vbot
+fix_modify conq set v top vtop
+
 thermo 50
-thermo_style custom step temp c_ctemp epair etotal c_qbot c_qtop
+thermo_style custom step temp c_ctemp epair etotal c_qbot c_qtop v_vbot v_vtop
 run 500

@@ -30,13 +30,13 @@ unit-tests:
     - adduser tester
     - chown -R tester $base_dir
     - runuser -u tester ctest
-    - echo "running tests in examples/PACKAGES/electrode subdirectory of $base_dir"
-    - lmpbin=$base_dir/build/lmp
-    - cd $base_dir/examples/PACKAGES/electrode/check_amat/
-    - bash check.sh $lmpbin
-    - cd $base_dir/examples/PACKAGES/electrode/check_etypes/
-    - bash check.sh $lmpbin
-    - cd $base_dir/examples/PACKAGES/electrode/check_ffield/
-    - bash check.sh $lmpbin
-    - cd $base_dir/examples/PACKAGES/electrode/check_intel/
-    - bash check.sh $lmpbin
+      #- echo "running tests in examples/PACKAGES/electrode subdirectory of $base_dir"
+      #- lmpbin=$base_dir/build/lmp
+      #- cd $base_dir/examples/PACKAGES/electrode/check_amat/
+      #- bash check.sh $lmpbin
+      #- cd $base_dir/examples/PACKAGES/electrode/check_etypes/
+      #- bash check.sh $lmpbin
+      #- cd $base_dir/examples/PACKAGES/electrode/check_ffield/
+      #- bash check.sh $lmpbin
+      #- cd $base_dir/examples/PACKAGES/electrode/check_intel/
+      #- bash check.sh $lmpbin
