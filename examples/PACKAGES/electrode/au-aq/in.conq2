@@ -1,22 +1,4 @@
-units real
-boundary p p f
-
-if "$(extract_setting(world_size)) > 1" then "processors * * 2"
-
-atom_style full
-pair_style lj/cut/coul/long 15
-bond_style harmonic
-angle_style harmonic
-kspace_style pppm/electrode 1e-7
-kspace_modify slab 3.0
-
-read_data "data.au-aq"
-
-group bot type 6
-group top type 7
-
-group SPC type 1 2 3
-group electrolyte type 1 2 3 4 5
+include "in.settings"
 
 # represent macro-elastance matrix
 variable me00 internal 0.0
@@ -35,13 +17,6 @@ variable vbot equal v_me00*v_qex_bot+v_me01*v_qex_top
 variable vtop equal v_me10*v_qex_bot+v_me11*v_qex_top
 
 fix conp bot electrode/conp v_vbot 1.979 couple top v_vtop etypes 6*7
-fix nvt electrolyte nvt temp 298.0 298.0 241
-fix shake SPC shake 1e-4 20 0 b 1 2 a 1
-
-variable q atom q
-compute qtop top reduce sum v_q
-compute qbot bot reduce sum v_q
-compute ctemp electrolyte temp
 
 # link internal variables to capacitance and charge calculations
 fix_modify conp set me bot bot me00
@@ -51,6 +26,5 @@ fix_modify conp set me top top me11
 fix_modify conp set qsb bot qsb_bot
 fix_modify conp set qsb top qsb_top
 
-thermo 50
 thermo_style custom step temp c_ctemp epair etotal c_qbot c_qtop v_vbot v_vtop
 run 500

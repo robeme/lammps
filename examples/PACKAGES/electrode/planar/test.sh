@@ -10,8 +10,8 @@ for file in in.*; do
     echo "$file"
     echo "1 proc"
     $lmpbin -i $file > /dev/null
-    grep '  1.2  ' log.lammps
-    echo "2 procs"
-    mpirun -np 2 $lmpbin -i $file > /dev/null
-    grep '  1.2  ' log.lammps
+    grep '  1\.2  ' log.lammps
+    echo "4 procs"
+    mpirun -np 4 $lmpbin -i $file > /dev/null
+    grep '  1\.2  ' log.lammps
 done

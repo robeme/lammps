@@ -110,6 +110,7 @@ void PPPMElectrode::init()
 
   if (slabflag == 0 && wireflag == 0 && domain->nonperiodic > 0)
     error->all(FLERR, "Cannot use non-periodic boundaries with PPPM/electrode");
+  if (slabflag == 3) error->all(FLERR, "Cannot use 'kspace_modify slab ew2d' with PPPM/electrode");
   if (slabflag) {
     if (domain->xperiodic != 1 || domain->yperiodic != 1 || domain->boundary[2][0] != 1 ||
         domain->boundary[2][1] != 1)
