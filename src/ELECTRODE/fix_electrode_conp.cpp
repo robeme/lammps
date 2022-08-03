@@ -1548,10 +1548,16 @@ void FixElectrodeConp::gather_list_iele()
 void FixElectrodeConp::gather_elevec(double *elevec)
 {
   assert(matrix_algo);
-  MPI_Allgatherv(&buf_iele[0], nlocalele, MPI_DOUBLE, buf_gathered, recvcounts, displs, MPI_DOUBLE,
-                 world);
+  for (int i = 0; i < ngroup; i++) elevec[i] = 0.;
+  for (int i = 0; i < nlocalele; i++) elevec[list_iele[i]] = buf_iele[i];
 
+  MPI_Allreduce(MPI_IN_PLACE, &elevec[0], ngroup, MPI_DOUBLE, MPI_SUM, world);
+
+  /*
+  MPI_Allgatherv(&buf_iele[0], nlocalele, MPI_DOUBLE, buf_gathered, recvcounts, displs, MPI_DOUBLE,
+                world);
   for (int i = 0; i < ngroup; i++) { elevec[iele_gathered[i]] = buf_gathered[i]; }
+  */
 }
 
 void FixElectrodeConp::buffer_and_gather(double *ivec, double *elevec)
