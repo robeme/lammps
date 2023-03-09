@@ -352,16 +352,14 @@ double ComputeFEP::compute_epair()
 
 void ComputeFEP::perturb_params()
 {
-  int i, j;
-
   for (int m = 0; m < npert; m++) {
     Perturb *pert = &perturb[m];
 
     double delta = input->variable->compute_equal(pert->ivar);
 
     if (pert->which == PAIR) {    // modify pair parameters
-      for (i = pert->ilo; i <= pert->ihi; i++)
-        for (j = MAX(pert->jlo, i); j <= pert->jhi; j++)
+      for (int i = pert->ilo; i <= pert->ihi; i++)
+        for (int j = MAX(pert->jlo, i); j <= pert->jhi; j++)
           pert->array[i][j] = pert->array_orig[i][j] + delta;
 
     } else if (pert->which == ATOM) {
@@ -372,7 +370,7 @@ void ComputeFEP::perturb_params()
         int *mask = atom->mask;
         int natom = atom->nlocal + atom->nghost;
 
-        for (i = 0; i < natom; i++)
+        for (int i = 0; i < natom; i++)
           if (atype[i] >= pert->ilo && atype[i] <= pert->ihi)
             if (mask[i] & groupbit) q[i] += delta;
       }
@@ -384,6 +382,12 @@ void ComputeFEP::perturb_params()
   // and also offset and tail corrections
 
   if (pairflag) force->pair->reinit();
+
+  // update electrode charges
+  if (chgflag) {
+    auto fix_electrode_vector = modify->get_fix_by_style("electrode/*");
+    if (fix_electrode_vector.size() == 1) fix_electrode_vector[0]->pre_force(0);
+  }
 
   // reset KSpace charges if charges have changed
 
@@ -426,7 +430,6 @@ void ComputeFEP::restore_params()
   if (pairflag) force->pair->reinit();
 
   // reset KSpace charges if charges have changed
-
   if (chgflag && force->kspace) force->kspace->qsum_qsq();
 }
 

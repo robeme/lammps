@@ -1542,10 +1542,11 @@ double Variable::evaluate(char *str, Tree **tree, int ivar)
             if (!compute->is_initialized())
               print_var_error(FLERR,"Variable formula compute cannot be invoked before "
                               "initialization by a run",ivar);
-            if (!(compute->invoked_flag & Compute::INVOKED_SCALAR)) {
-              compute->compute_scalar();
-              compute->invoked_flag |= Compute::INVOKED_SCALAR;
-            }
+            //if (!(compute->invoked_flag & Compute::INVOKED_SCALAR)) { // electrode charges are
+            //recomputed after perturbation in a timestep
+            compute->compute_scalar();
+            compute->invoked_flag |= Compute::INVOKED_SCALAR;
+            //}
 
             value1 = compute->scalar;
             argstack[nargstack++] = value1;

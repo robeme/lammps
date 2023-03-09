@@ -502,6 +502,12 @@ void FixAdaptFEP::change_settings()
 
   if (anypair) force->pair->reinit();
 
+  // update electrode charges
+  if (chgflag) {
+    auto fix_electrode_vector = modify->get_fix_by_style("electrode/*");
+    if (fix_electrode_vector.size() == 1) fix_electrode_vector[0]->pre_force(0);
+  }
+
   // reset KSpace charges if charges have changed
 
   if (chgflag && force->kspace) force->kspace->qsum_qsq();
