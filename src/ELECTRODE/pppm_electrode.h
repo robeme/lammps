@@ -43,8 +43,6 @@ class PPPMElectrode : public PPPM, public ElectrodeKSpace {
   void compute_matrix(bigint *, double **, bool) override;
   void compute_matrix_corr(bigint *, double **) override;
 
-  void compute_group_group(int, int, int) override;
-
  protected:
   FFT_SCALAR ***electrolyte_density_brick;
   FFT_SCALAR *electrolyte_density_fft;

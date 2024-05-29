@@ -53,7 +53,6 @@ ComputeFEP::ComputeFEP(LAMMPS *lmp, int narg, char **arg) : Compute(lmp, narg, a
   extvector = 0;
 
   const int ntypes = atom->ntypes;
-  vector = new double[size_vector];
   fepinitflag = 0;    // avoid init to run entirely when called by write_data
 
   temp_fep = utils::numeric(FLERR, arg[3], false, lmp);
@@ -129,9 +128,17 @@ ComputeFEP::ComputeFEP(LAMMPS *lmp, int narg, char **arg) : Compute(lmp, narg, a
       if (iarg + 2 > narg) error->all(FLERR, "Illegal optional keyword in compute fep");
       volumeflag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "compute") == 0) {
+      iarg++;
+      std::string cname = arg[iarg++];
+      Compute *c = modify->get_compute_by_id(cname.substr(2));
+      if (c == nullptr) error->all(FLERR, "Compute {} not found", cname);
+      computes.push_back(c);
+      size_vector++;
     } else
       error->all(FLERR, "Illegal optional keyword in compute fep");
   }
+  vector = new double[size_vector];
 
   // allocate pair style arrays
 
@@ -212,7 +219,8 @@ void ComputeFEP::init()
 
       void *ptr = pair->extract(pert->pparam, pert->pdim);
       if (ptr == nullptr)
-        error->all(FLERR, "Compute fep pair style {} param {} not supported", pert->pstyle, pert->pparam);
+        error->all(FLERR, "Compute fep pair style {} param {} not supported", pert->pstyle,
+                   pert->pparam);
 
       pert->array = (double **) ptr;
 
@@ -267,6 +275,7 @@ void ComputeFEP::init()
 void ComputeFEP::compute_vector()
 {
   double pe0, pe1;
+  std::vector<double> cpe0, cpe1;
 
   eflag = 1;
   vflag = 0;
@@ -295,6 +304,7 @@ void ComputeFEP::compute_vector()
   if (fixgpu) fixgpu->post_force(vflag);
 
   pe0 = compute_epair();
+  for (auto c : computes) cpe0.push_back(c->compute_scalar());
 
   perturb_params();
 
@@ -314,6 +324,7 @@ void ComputeFEP::compute_vector()
   if (fixgpu) fixgpu->post_force(vflag);
 
   pe1 = compute_epair();
+  for (auto c : computes) cpe1.push_back(c->compute_scalar());
 
   restore_qfev();      // restore charge, force, energy, virial array values
   restore_params();    // restore pair parameters
@@ -321,6 +332,8 @@ void ComputeFEP::compute_vector()
   vector[0] = pe1 - pe0;
   vector[1] = exp(-(pe1 - pe0) / (force->boltz * temp_fep));
   vector[2] = domain->xprd * domain->yprd * domain->zprd;
+  for (size_t i = 0; i < computes.size(); i++)
+    vector[3 + i] = exp(-(cpe1[i] - cpe0[i]) / (force->boltz * temp_fep));
   if (volumeflag) vector[1] *= vector[2];
 }
 

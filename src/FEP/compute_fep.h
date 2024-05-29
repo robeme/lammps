@@ -76,6 +76,8 @@ class ComputeFEP : public Compute {
   void deallocate_storage();
   void backup_qfev();
   void restore_qfev();
+
+  std::vector<Compute *> computes;
 };
 
 }    // namespace LAMMPS_NS

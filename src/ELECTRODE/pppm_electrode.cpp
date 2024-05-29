@@ -75,7 +75,7 @@ PPPMElectrode::PPPMElectrode(LAMMPS *lmp) :
 {
   if (lmp->citeme) lmp->citeme->add(cite_pppm_electrode);
 
-  group_group_enable = 0;
+  group_group_enable = 1;
   electrolyte_density_brick = nullptr;
   electrolyte_density_fft = nullptr;
   compute_vector_called = false;
@@ -1845,14 +1845,7 @@ void PPPMElectrode::make_rho_in_brick(int source_grpbit, FFT_SCALAR ***scratch_b
   }
 }
 
-/* ----------------------------------------------------------------------
-   group-group interactions
- -------------------------------------------------------------------------
-*/
-void PPPMElectrode::compute_group_group(int /*groupbit_A*/, int /*groupbit_B*/, int /*AA_flag*/)
-{
-  error->all(FLERR, "group group interaction not implemented in pppm/electrode yet");
-}
+/* ----------------------------------------------------------------------*/
 
 void PPPMElectrode::compute_matrix_corr(bigint *imat, double **matrix)
 {
