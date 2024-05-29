@@ -173,7 +173,10 @@ double ComputeGroupGroup::compute_scalar()
   vector[0] = vector[1] = vector[2] = 0.0;
 
   if (pairflag) pair_contribution();
-  if (kspaceflag) kspace_contribution();
+  if (kspaceflag) {
+    kspace_correction();
+    kspace_contribution();
+  }
 
   return scalar;
 }
@@ -188,7 +191,10 @@ void ComputeGroupGroup::compute_vector()
   vector[0] = vector[1] = vector[2] = 0.0;
 
   if (pairflag) pair_contribution();
-  if (kspaceflag) kspace_contribution();
+  if (kspaceflag) {
+    kspace_correction();
+    kspace_contribution();
+  }
 }
 
 /* ---------------------------------------------------------------------- */
