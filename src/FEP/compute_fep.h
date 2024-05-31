@@ -78,6 +78,7 @@ class ComputeFEP : public Compute {
   void restore_qfev();
 
   std::vector<Compute *> computes;
+  std::vector<int> var_ids;
 };
 
 }    // namespace LAMMPS_NS

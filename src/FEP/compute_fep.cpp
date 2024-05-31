@@ -33,6 +33,7 @@
 #include "update.h"
 #include "variable.h"
 
+#include <cassert>
 #include <cmath>
 #include <cstring>
 
@@ -134,10 +135,20 @@ ComputeFEP::ComputeFEP(LAMMPS *lmp, int narg, char **arg) : Compute(lmp, narg, a
       Compute *c = modify->get_compute_by_id(cname.substr(2));
       if (c == nullptr) error->all(FLERR, "Compute {} not found", cname);
       computes.push_back(c);
-      size_vector++;
+      size_vector += 2;
+    } else if (strcmp(arg[iarg], "variable") == 0) {
+      iarg++;
+      std::string vname = arg[iarg++];
+      int var_id = input->variable->find(vname.substr(2).c_str());
+      if (var_id < 0) error->all(FLERR, "Variable '{}' does not exist", vname);
+      if (!input->variable->equalstyle(var_id))
+        error->all(FLERR, "Variable '{}' is not equal-style", vname);
+      var_ids.push_back(var_id);
+      size_vector += 2;
     } else
       error->all(FLERR, "Illegal optional keyword in compute fep");
   }
+  assert(size_vector == 3 + 2 * computes.size() + 2 * var_ids.size());
   vector = new double[size_vector];
 
   // allocate pair style arrays
@@ -276,6 +287,7 @@ void ComputeFEP::compute_vector()
 {
   double pe0, pe1;
   std::vector<double> cpe0, cpe1;
+  std::vector<double> vpe0, vpe1;
 
   eflag = 1;
   vflag = 0;
@@ -305,6 +317,7 @@ void ComputeFEP::compute_vector()
 
   pe0 = compute_epair();
   for (auto c : computes) cpe0.push_back(c->compute_scalar());
+  for (auto v : var_ids) vpe0.push_back(input->variable->compute_equal(v));
 
   perturb_params();
 
@@ -325,16 +338,26 @@ void ComputeFEP::compute_vector()
 
   pe1 = compute_epair();
   for (auto c : computes) cpe1.push_back(c->compute_scalar());
+  for (auto v : var_ids) vpe1.push_back(input->variable->compute_equal(v));
 
   restore_qfev();      // restore charge, force, energy, virial array values
   restore_params();    // restore pair parameters
 
   vector[0] = pe1 - pe0;
   vector[1] = exp(-(pe1 - pe0) / (force->boltz * temp_fep));
-  vector[2] = domain->xprd * domain->yprd * domain->zprd;
-  for (size_t i = 0; i < computes.size(); i++)
-    vector[3 + i] = exp(-(cpe1[i] - cpe0[i]) / (force->boltz * temp_fep));
-  if (volumeflag) vector[1] *= vector[2];
+  int offset = 2;
+  for (size_t i = 0; i < computes.size(); i++) {
+    vector[offset + 2 * i] = cpe1[i] - cpe0[i];
+    vector[offset + 2 * i + 1] = exp(-(cpe1[i] - cpe0[i]) / (force->boltz * temp_fep));
+  }
+  offset += 2 * computes.size();
+  for (size_t i = 0; i < var_ids.size(); i++) {
+    vector[offset + 2 * i] = vpe1[i] - vpe0[i];
+    vector[offset + 2 * i + 1] = exp(-(vpe1[i] - vpe0[i]) / (force->boltz * temp_fep));
+  }
+  vector[size_vector - 1] = domain->xprd * domain->yprd * domain->zprd;
+  if (volumeflag)
+    for (int i = 1; i < size_vector; i += 2) vector[i] *= vector[size_vector - 1];
 }
 
 /* ----------------------------------------------------------------------
