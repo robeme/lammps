@@ -1560,10 +1560,10 @@ double Variable::evaluate(char *str, Tree **tree, int ivar)
             if (!compute->is_initialized())
               print_var_error(FLERR,"Variable formula compute cannot be invoked before "
                               "initialization by a run",ivar);
-            if (!(compute->invoked_flag & Compute::INVOKED_VECTOR)) {
-              compute->compute_vector();
-              compute->invoked_flag |= Compute::INVOKED_VECTOR;
-            }
+            //if (!(compute->invoked_flag & Compute::INVOKED_VECTOR)) {
+            compute->compute_vector();
+            compute->invoked_flag |= Compute::INVOKED_VECTOR;
+            //}
 
             // wait to check index1 until after compute invocation
             // to allow for computes with size_vector_variable == 1

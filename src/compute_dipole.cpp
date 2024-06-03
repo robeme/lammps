@@ -78,9 +78,7 @@ void ComputeDipole::compute_vector()
   double comproc[3] = {0.0, 0.0, 0.0};
   double com[3] = {0.0, 0.0, 0.0};
   double masstotal = 0.0;
-  double chrgtotal = 0.0;
   double massproc = 0.0;
-  double chrgproc = 0.0;
 
   for (int i = 0; i < nlocal; ++i) {
     if (mask[i] & groupbit) {
@@ -93,7 +91,6 @@ void ComputeDipole::compute_vector()
           massone = mass[type[i]];
       }
       massproc += massone;
-      if (atom->q_flag) chrgproc += q[i];
       domain->unmap(x[i], image[i], unwrap);
       comproc[0] += unwrap[0] * massone;
       comproc[1] += unwrap[1] * massone;
@@ -101,7 +98,6 @@ void ComputeDipole::compute_vector()
     }
   }
   MPI_Allreduce(&massproc, &masstotal, 1, MPI_DOUBLE, MPI_SUM, world);
-  MPI_Allreduce(&chrgproc, &chrgtotal, 1, MPI_DOUBLE, MPI_SUM, world);
   MPI_Allreduce(comproc, com, 3, MPI_DOUBLE, MPI_SUM, world);
 
   if (masstotal > 0.0) {
@@ -130,11 +126,6 @@ void ComputeDipole::compute_vector()
   }
 
   MPI_Allreduce(dipole, vector, 3, MPI_DOUBLE, MPI_SUM, world);
-
-  // correct for position dependence with a net charged group
-  vector[0] -= chrgtotal * com[0];
-  vector[1] -= chrgtotal * com[1];
-  vector[2] -= chrgtotal * com[2];
 }
 
 /* ---------------------------------------------------------------------- */
