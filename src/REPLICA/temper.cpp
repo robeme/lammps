@@ -102,7 +102,8 @@ void Temper::command(int narg, char **arg)
       (!utils::strmatch(whichfix->style,"^langevin")) &&
       (!utils::strmatch(whichfix->style,"^gl[de]$")) &&
       (!utils::strmatch(whichfix->style,"^rigid/nvt")) &&
-      (!utils::strmatch(whichfix->style,"^temp/")))
+      (!utils::strmatch(whichfix->style,"^temp/")) &&
+      (!utils::strmatch(whichfix->style,"^atom/swap")))
     error->universe_all(FLERR,"Tempering temperature fix is not supported");
 
   // setup for long tempering run
