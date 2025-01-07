@@ -37,14 +37,16 @@ class FixCharge : public Fix {
  protected:
   int ntype;
   double q0;
-  double delta;
-  double cut, cutsq;
+  double del, twodel, delpi;
+  double cut;
+  double ulim, llim, ulimsq, llimsq;
   
   bigint ngroup;
   
  private:
   class NeighList *list;
   void update_charges();
+  double fc(double);
 };
 
 }    // namespace LAMMPS_NS

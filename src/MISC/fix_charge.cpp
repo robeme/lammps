@@ -17,6 +17,7 @@
 ------------------------------------------------------------------------- */
 
 // TODO: Check if cut+delta is smaller than pair cutoff.
+// TODO: We do a loop over i and j, so we are doing things twice. could save some computational time if newton off?
 
 #include "fix_charge.h"
 
@@ -26,23 +27,32 @@
 #include "neighbor.h"
 #include "group.h"
 #include "pair.h"
+#include "math_const.h"
 
 #include <cmath>
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
+using MathConst::MY_PI;
+using MathConst::MY_2PI;
 
 /* ---------------------------------------------------------------------- */
 
 FixCharge::FixCharge(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg), list(nullptr)
 {
-  if (narg < 7) error->all(FLERR, "Illegal fix charge command");
+  if (narg < 7) error->all(FLERR, "Illegal fix {} command", style);
   ntype = utils::inumeric(FLERR, arg[3],false,lmp); // desired neighbor type
   q0 = utils::numeric(FLERR, arg[4],false,lmp);
-  delta = utils::numeric(FLERR, arg[5],false,lmp);
+  del = utils::numeric(FLERR, arg[5],false,lmp);
   cut = utils::numeric(FLERR, arg[6],false,lmp);
-  cutsq = cut*cut;
+  
+  ulim = cut+del;
+  llim = cut-del;
+  twodel = 2.0*del;
+  ulimsq = ulim*ulim;
+  llimsq = llim*llim;
+  delpi = MY_PI/del;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -123,11 +133,23 @@ void FixCharge::update_charges()
           delz = x[i][2] - x[j][2];
           rsq = delx * delx + dely * dely + delz * delz;
 
-          if (rsq < cutsq) {
-            q[i] += q0;
+          if (rsq < ulimsq) {
+            if (rsq < llimsq) {
+              q[i] += q0;
+            } else {
+              q[i] += q0 * fc(sqrt(rsq));
+            }
           }
         }
       }
     }
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixCharge::fc(double r)
+{ 
+  double rllim = r-llim; // (r-R+Delta) = (r-(R-Delta)) hence r-llim and not r-ulim
+  return 1.0 - rllim / twodel + sin( delpi * rllim ) / MY_2PI;
 }
