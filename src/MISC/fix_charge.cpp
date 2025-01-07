@@ -17,7 +17,6 @@
 ------------------------------------------------------------------------- */
 
 // TODO: Check if cut+delta is smaller than pair cutoff.
-// TODO: We do a loop over i and j, so we are doing things twice. could save some computational time if newton off?
 
 #include "fix_charge.h"
 
@@ -47,11 +46,11 @@ FixCharge::FixCharge(LAMMPS *lmp, int narg, char **arg) :
   del = utils::numeric(FLERR, arg[5],false,lmp);
   cut = utils::numeric(FLERR, arg[6],false,lmp);
   
-  ulim = cut+del;
-  llim = cut-del;
+  cuthi = cut+del;
+  cutlo = cut-del;
   twodel = 2.0*del;
-  ulimsq = ulim*ulim;
-  llimsq = llim*llim;
+  cuthisq = cuthi*cuthi;
+  cutlosq = cutlo*cutlo;
   delpi = MY_PI/del;
 }
 
@@ -133,8 +132,8 @@ void FixCharge::update_charges()
           delz = x[i][2] - x[j][2];
           rsq = delx * delx + dely * dely + delz * delz;
 
-          if (rsq < ulimsq) {
-            if (rsq < llimsq) {
+          if (rsq < cuthisq) {
+            if (rsq < cutlosq) {
               q[i] += q0;
             } else {
               q[i] += q0 * fc(sqrt(rsq));
@@ -150,6 +149,6 @@ void FixCharge::update_charges()
 
 double FixCharge::fc(double r)
 { 
-  double rllim = r-llim; // (r-R+Delta) = (r-(R-Delta)) hence r-llim and not r-ulim
-  return 1.0 - rllim / twodel + sin( delpi * rllim ) / MY_2PI;
+  double rcutlo = r-cutlo; // (r-R+Delta) = (r-(R-Delta)) hence r-cutlo and not r-cuthi
+  return 1.0 - rcutlo / twodel + sin( delpi * rcutlo ) / MY_2PI;
 }
