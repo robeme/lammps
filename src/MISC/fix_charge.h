@@ -29,16 +29,22 @@ class FixCharge : public Fix {
   FixCharge(class LAMMPS *, int, char **);
   
   int setmask() override;
+  void init() override;
   void init_list(int, class NeighList *) override;
-  void setup(int);
-  void pre_force();
+  void setup_pre_force(int) override;
+  void pre_force(int) override;
   
  protected:
-  class NeighList *list;
   int ntype;
   double q0;
   double delta;
   double cut, cutsq;
+  
+  bigint ngroup;
+  
+ private:
+  class NeighList *list;
+  void update_charges();
 };
 
 }    // namespace LAMMPS_NS

@@ -24,6 +24,8 @@
 #include "error.h"
 #include "neigh_list.h"
 #include "neighbor.h"
+#include "group.h"
+#include "pair.h"
 
 #include <cmath>
 
@@ -40,6 +42,7 @@ FixCharge::FixCharge(LAMMPS *lmp, int narg, char **arg) :
   q0 = utils::numeric(FLERR, arg[4],false,lmp);
   delta = utils::numeric(FLERR, arg[5],false,lmp);
   cut = utils::numeric(FLERR, arg[6],false,lmp);
+  cutsq = cut*cut;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -52,9 +55,15 @@ int FixCharge::setmask() {
 
 /* ---------------------------------------------------------------------- */
 
-void FixCharge::setup(int /*vflag*/)
+void FixCharge::init()
 {
-  cutsq = cut*cut;
+  if (!atom->q_flag)
+    error->all(FLERR,"Fix {} requires atom attribute q", style);
+
+  ngroup = group->count(igroup);
+  if (ngroup == 0) error->all(FLERR,"Fix {} group has no atoms", style);
+  
+  neighbor->add_request(this, NeighConst::REQ_FULL);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -64,10 +73,23 @@ void FixCharge::init_list(int /*id*/, NeighList *ptr)
   list = ptr;
 }
 
+/* --------------------------------------------------------------------- */
+
+void FixCharge::setup_pre_force(int /* vflag */)
+{
+  update_charges();
+}
 
 /* ---------------------------------------------------------------------- */
 
-void FixCharge::pre_force()
+void FixCharge::pre_force(int /*vflag*/)
+{
+  update_charges();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixCharge::update_charges()
 {
   int i, j, jj, jnum, jtype;
   double xtmp, ytmp, ztmp, delx, dely, delz, rsq;
