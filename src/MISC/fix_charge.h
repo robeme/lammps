@@ -39,7 +39,7 @@ class FixCharge : public Fix {
   double q0;
   double del, twodel, delpi;
   double cut;
-  double ulim, llim, ulimsq, llimsq;
+  double cuthi, cutlo, cuthisq, cutlosq;
   
   bigint ngroup;
   
