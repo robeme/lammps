@@ -40,11 +40,12 @@ using MathConst::MY_2PI;
 FixCharge::FixCharge(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg), list(nullptr)
 {
-  if (narg < 7) error->all(FLERR, "Illegal fix {} command", style);
+  if (narg < 8) error->all(FLERR, "Illegal fix {} command", style);
   ntype = utils::inumeric(FLERR, arg[3],false,lmp); // desired neighbor type
   q0 = utils::numeric(FLERR, arg[4],false,lmp);
   del = utils::numeric(FLERR, arg[5],false,lmp);
   cut = utils::numeric(FLERR, arg[6],false,lmp);
+  off = utils::numeric(FLERR, arg[7],false,lmp);
   
   cuthi = cut+del;
   cutlo = cut-del;
@@ -134,9 +135,9 @@ void FixCharge::update_charges()
 
           if (rsq < cuthisq) {
             if (rsq < cutlosq) {
-              q[i] += q0;
+              q[i] += q0 + off;
             } else {
-              q[i] += q0 * fc(sqrt(rsq));
+              q[i] += q0 * fc(sqrt(rsq)) + off;
             }
           }
         }

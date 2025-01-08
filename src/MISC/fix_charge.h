@@ -38,7 +38,7 @@ class FixCharge : public Fix {
   int ntype;
   double q0;
   double del, twodel, delpi;
-  double cut;
+  double cut, off;
   double cuthi, cutlo, cuthisq, cutlosq;
   
   bigint ngroup;
